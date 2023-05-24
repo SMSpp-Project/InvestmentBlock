@@ -172,6 +172,16 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
     throw( std::logic_error( "InvestmentFunction::deserialize: the 'AssetType'"
                              " netCDF variable, if provided, must have size 0,"
                              " 1, or 'NumAssets'." ) );
+
+   assert( v_asset_indices.size() == v_asset_type.size() );
+   for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+    for( Index j = i + 1 ; j < v_asset_indices.size() ; ++j )
+     if( ( v_asset_indices[ i ] == v_asset_indices[ j ] ) &&
+         ( v_asset_type[ i ] == v_asset_type[ j ] ) )
+      throw( std::logic_error
+             ( "InvestmentFunction::deserialize: asset with index " +
+               std::to_string( v_asset_indices[ i ] ) + " and type " +
+               std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
   }
 
   // Deserialize the lower bound on the active variables
