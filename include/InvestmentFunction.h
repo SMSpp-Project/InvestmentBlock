@@ -96,6 +96,8 @@ namespace SMSpp_di_unipi_it
  *   case it is an SDDPBlock, the investment in an asset is made for all
  *   stages of the SDDPBlock. */
 
+class InvestmentFunction : public C05Function , public Block {
+
 /*--------------------------------------------------------------------------*/
 /*----------------------- PUBLIC PART OF THE CLASS -------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -2063,7 +2065,7 @@ namespace SMSpp_di_unipi_it
   *         Block of this InvestmentFunction is not an UCBlock, it return
   *         nullptr. */
 
- UCBlock * get_uc_block() const;
+ UCBlock * get_ucblock() const;
 
 /*--------------------------------------------------------------------------*/
 
@@ -2292,6 +2294,14 @@ namespace SMSpp_di_unipi_it
 
  /// identifies the relevant Solver of the inner Block
  void build_solver_map();
+
+/*--------------------------------------------------------------------------*/
+
+ int compute_UCBlock( bool changedvars , bool owned );
+
+/*--------------------------------------------------------------------------*/
+
+ int compute_SDDPBlock( bool changedvars , bool owned );
 
 /*--------------------------------------------------------------------------*/
 
