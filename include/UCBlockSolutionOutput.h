@@ -146,7 +146,6 @@
 /*--------------------------------------------------------------------------*/
 
 #include "BatteryUnitBlock.h"
-#include "BusNetworkBlock.h"
 #include "DCNetworkBlock.h"
 #include "HydroSystemUnitBlock.h"
 #include "IntermittentUnitBlock.h"
