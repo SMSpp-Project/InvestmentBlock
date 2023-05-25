@@ -902,7 +902,9 @@ void process_prob_file( const netCDF::NcFile & file ) {
    } } );
 
   auto investment_block = dynamic_cast< InvestmentBlock * >
-   ( Block::new_Block( block_group , nullptr , &set_num_sub_blocks ) );
+   ( Block::new_Block( block_group , nullptr ) );
+   // TODO
+   //( Block::new_Block( block_group , nullptr , &set_num_sub_blocks ) );
 
   assert( investment_block );
 

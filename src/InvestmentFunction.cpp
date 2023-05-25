@@ -325,7 +325,9 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                            "deserializing the inner Block." );
   } } );
 
- auto inner_block = Block::new_Block( inner_block_group , this , &func );
+ // TODO
+ //auto inner_block = Block::new_Block( inner_block_group , this , &func );
+ auto inner_block = Block::new_Block( inner_block_group , this );
 
  if( ! inner_block )
   throw std::logic_error( "InvestmentFunction::deserialize: it was not "
@@ -1274,8 +1276,9 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    ( v_greedy_solvers[ sub_block_index ] );
   assert( solver );
   solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
-  solver->set_par
-   ( SDDPGreedySolver::intSubBlockIndex , int( sub_block_index ) );
+  // TODO
+  //solver->set_par
+  //( SDDPGreedySolver::intSubBlockIndex , int( sub_block_index ) );
   const auto status = solver->compute( true );
 
   if( ! solver->has_var_solution() ) {
@@ -1316,11 +1319,14 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   // Possibly output the solution
 
   if( f_output_solution ) {
+   // TODO
+   /*
    auto solver = get_solver( v_greedy_solvers[ sub_block_index ] );
    SDDPBlockSolutionOutput().print( get_sddp_block() ,
                                     solver->get_int_par
                                     ( SDDPGreedySolver::intSubBlockIndex ) ,
                                     scenario , true );
+   */
   }
 
   // Unlock the sub-Block
