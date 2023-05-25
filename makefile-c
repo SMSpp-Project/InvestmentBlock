@@ -51,9 +51,9 @@ include $(InvsBkSDR)/makefile
 
 # append external -I directives to InvsBkINC, InvsBkOBJ and InvsBkH as
 # defined by the makefile, thus the := assignment has to be used (use GNU make)
-InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkINC) $(UCBckINC) $(SMS++OBJ)
+InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkOBJ) $(UCBckOBJ) $(SMS++OBJ)
 InvsBkH := $(InvsBkH) $(SDDPBkH) $(UCBckH) $(SMS++H)
-InvsBkINC := $(SMS++INC) $(StcBlkINC) $(libStOptINC) $(InvsBkINC)
+InvsBkINC := $(SMS++INC) $(UCBckINC) $(SDDPBkINC) $(InvsBkINC)
 
 # external libreries for InvsBlock
 InvsBkLIB = $(SMS++LIB) $(SDDPBkLIB) $(UCBckLIB)
