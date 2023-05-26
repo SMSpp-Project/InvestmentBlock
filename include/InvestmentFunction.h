@@ -172,29 +172,29 @@ class InvestmentFunction : public C05Function , public Block {
   void operator++( void ) override final { ++(itr_); }
 
   reference operator*( void ) const override final {
-   return( *((*itr_)) );
+   return( *( ( *itr_ ) ) );
    }
   pointer operator->( void ) const override final {
-   return( (*itr_) );
+   return( ( *itr_ ) );
    }
 
   bool operator==( const ThinVarDepInterface::v_iterator & rhs )
    const override final {
    #ifdef NDEBUG
-    auto tmp = static_cast<const InvestmentFunction::v_iterator *>( & rhs );
+    auto tmp = static_cast< const InvestmentFunction::v_iterator * >( & rhs );
     return( itr_ == tmp->itr_ );
    #else
-    auto tmp = dynamic_cast<const InvestmentFunction::v_iterator *>( & rhs );
+    auto tmp = dynamic_cast< const InvestmentFunction::v_iterator * >( & rhs );
     return( tmp ? itr_ == tmp->itr_ : false );
    #endif
    }
   bool operator!=( const ThinVarDepInterface::v_iterator & rhs )
    const override final {
    #ifdef NDEBUG
-    auto tmp = static_cast<const InvestmentFunction::v_iterator *>( & rhs );
+    auto tmp = static_cast< const InvestmentFunction::v_iterator * >( & rhs );
     return( itr_ != tmp->itr_ );
    #else
-    auto tmp = dynamic_cast<const InvestmentFunction::v_iterator *>( & rhs );
+    auto tmp = dynamic_cast< const InvestmentFunction::v_iterator * >( & rhs );
     return( tmp ? itr_ != tmp->itr_ : true );
    #endif
    }
@@ -222,19 +222,19 @@ class InvestmentFunction : public C05Function , public Block {
    return( new v_const_iterator( itr_ ) );
    }
 
-  void operator++( void ) override final { ++(itr_); }
+  void operator++( void ) override final { ++( itr_ ); }
 
-  reference operator*( void ) const override final { return( *((*itr_)) ); }
-  pointer operator->( void ) const override final { return( (*itr_) ); }
+  reference operator*( void ) const override final { return( *( ( *itr_ ) ) ); }
+  pointer operator->( void ) const override final { return( ( *itr_ ) ); }
 
   bool operator==( const ThinVarDepInterface::v_const_iterator & rhs )
    const override final {
    #ifdef NDEBUG
-    auto tmp = static_cast<const InvestmentFunction::v_const_iterator *>(
+    auto tmp = static_cast< const InvestmentFunction::v_const_iterator * >(
 								      & rhs );
     return( itr_ == tmp->itr_ );
    #else
-    auto tmp = dynamic_cast<const InvestmentFunction::v_const_iterator *>(
+    auto tmp = dynamic_cast< const InvestmentFunction::v_const_iterator * >(
 								      & rhs );
     return( tmp ? itr_ == tmp->itr_ : false );
    #endif
@@ -242,11 +242,11 @@ class InvestmentFunction : public C05Function , public Block {
   bool operator!=( const ThinVarDepInterface::v_const_iterator & rhs )
    const override final {
    #ifdef NDEBUG
-    auto tmp = static_cast<const InvestmentFunction::v_const_iterator *>(
+    auto tmp = static_cast< const InvestmentFunction::v_const_iterator * >(
 								      & rhs );
     return( itr_ != tmp->itr_ );
    #else
-    auto tmp = dynamic_cast<const InvestmentFunction::v_const_iterator *>(
+    auto tmp = dynamic_cast< const InvestmentFunction::v_const_iterator * >(
 								      & rhs );
     return( tmp ? itr_ != tmp->itr_ : true );
    #endif
@@ -463,7 +463,7 @@ class InvestmentFunction : public C05Function , public Block {
  /// clear method: clears the #v_x vector
  /** Method to "clear" the InvestmentFunction: it clear() the vector
   * #v_x. This destroys the list of "active" Variable without unregistering
-  * from them.  Not that the InvestmentFunction would have to, but an Observer
+  * from them. Not that the InvestmentFunction would have to, but an Observer
   * using it to "implement itself" should. By not having any Variable, the
   * Observer can no longer do that. */
 
@@ -766,9 +766,9 @@ class InvestmentFunction : public C05Function , public Block {
 
  const std::string & get_str_par( const idx_type par ) const override {
   switch( par ) {
-   case( strOutputFilename ): return f_output_filename;
+   case( strOutputFilename ): return( f_output_filename );
   }
-  return C05Function::get_str_par( par );
+  return( C05Function::get_str_par( par ) );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -799,7 +799,7 @@ class InvestmentFunction : public C05Function , public Block {
 
   if( par >= str_par_type_C05F::strLastParC05F &&
       par < str_par_type_InvestmentF::strLastParInvestmentF )
-   return default_values[ par - str_par_type_C05F::strLastParC05F ];
+   return( default_values[ par - str_par_type_C05F::strLastParC05F ] );
 
   return C05Function::get_dflt_str_par( par );
  }
@@ -828,8 +828,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  [[nodiscard]] idx_type str_par_str2idx( const std::string & name )
   const override {
-  if( name == "strOutputFilename" ) return strOutputFilename;
-  return C05Function::str_par_str2idx( name );
+  if( name == "strOutputFilename" ) return( strOutputFilename );
+  return( C05Function::str_par_str2idx( name ) );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -856,14 +856,14 @@ class InvestmentFunction : public C05Function , public Block {
 
  const std::string & str_par_idx2str( const idx_type idx ) const override {
 
-  static const std::vector<std::string> parameter_names =
+  static const std::vector< std::string > parameter_names =
    { "strOutputFilename" };
 
   if( idx >= str_par_type_C05F::strLastParC05F &&
       idx < str_par_type_InvestmentF::strLastParInvestmentF )
-   return parameter_names[ idx - str_par_type_C05F::strLastParC05F ];
+   return( parameter_names[ idx - str_par_type_C05F::strLastParC05F ] );
 
-  return C05Function::str_par_idx2str( idx );
+  return( C05Function::str_par_idx2str( idx ) );
  }
 
 /** @} ---------------------------------------------------------------------*/
@@ -996,7 +996,7 @@ class InvestmentFunction : public C05Function , public Block {
  {
   auto idx = std::find( v_x.begin() , v_x.end() , var );
   if( idx == v_x.end() )
-   return( Inf<Index>() );
+   return( Inf< Index >() );
   else
    return( std::distance( v_x.begin() , idx ) );
  }
@@ -1263,7 +1263,7 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns a lower estimate of the InvestmentFunction
- /** This method simply returns get_value().  */
+ /** This method simply returns get_value(). */
 
  FunctionValue get_lower_estimate() const override {
   return( get_value() );
@@ -1271,7 +1271,7 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns an upper estimate of the InvestmentFunction
- /** This method simply returns get_value().  */
+ /** This method simply returns get_value(). */
 
  FunctionValue get_upper_estimate() const override {
   return( get_value() );
@@ -1328,13 +1328,13 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 
  bool is_linearization_there( Index name ) const override final {
-  return global_pool.is_linearization_there( name );
+  return( global_pool.is_linearization_there( name ) );
  }
 
 /*--------------------------------------------------------------------------*/
 
  bool is_linearization_vertical( Index name ) const override final {
-  return global_pool.is_linearization_vertical( name );
+  return( global_pool.is_linearization_vertical( name ) );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -1398,31 +1398,31 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 
  void get_linearization_coefficients
- ( FunctionValue * g , Range range = std::make_pair( 0 , Inf<Index>() ) ,
-   Index name = Inf<Index>() ) override;
+ ( FunctionValue * g , Range range = std::make_pair( 0 , Inf< Index >() ) ,
+   Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
 
  void get_linearization_coefficients
- ( SparseVector & g , Range range = std::make_pair( 0 , Inf<Index>() ) ,
-   Index name = Inf<Index>() ) override;
+ ( SparseVector & g , Range range = std::make_pair( 0 , Inf< Index >() ) ,
+   Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
 
  void get_linearization_coefficients
  ( FunctionValue * g , c_Subset & subset  , bool ordered = false ,
-   Index name = Inf<Index>() ) override;
+   Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
 
  void get_linearization_coefficients
  ( SparseVector & g , c_Subset & subset , bool ordered = false ,
-   Index name = Inf<Index>() ) override;
+   Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
  /// return the constant term of a linearization
 
- FunctionValue get_linearization_constant( Index name = Inf<Index>() )
+ FunctionValue get_linearization_constant( Index name = Inf< Index >() )
   override final;
 
 /*--------------------------------------------------------------------------*/
@@ -1446,9 +1446,10 @@ class InvestmentFunction : public C05Function , public Block {
  template< class T = Solver >
  inline T * get_solver( Index i ) const {
   if( i >= v_Block.front()->get_registered_solvers().size() )
-   return nullptr;
-  return dynamic_cast< T * >
-   ( * std::next( v_Block.front()->get_registered_solvers().begin() , i ) );
+   return( nullptr );
+  return( dynamic_cast< T * >
+          ( * std::next( v_Block.front()->get_registered_solvers().begin() ,
+                         i ) ) );
  }
 
 /**@} ----------------------------------------------------------------------*/
@@ -1459,14 +1460,14 @@ class InvestmentFunction : public C05Function , public Block {
 
  /// returns the indices of the assets that are subject to investment
  const std::vector< Index > & get_asset_indices() const {
-  return v_asset_indices;
+  return( v_asset_indices );
  }
 
 /*--------------------------------------------------------------------------*/
 
  /// returns the types of the assets that are subject to investment
  const std::vector< AssetType > & get_asset_type() const {
-  return v_asset_type;
+  return( v_asset_type );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -1483,9 +1484,9 @@ class InvestmentFunction : public C05Function , public Block {
 
  double get_installed_quantity( Index asset ) const {
   if( v_installed_quantity.empty() )
-   return 1;
+   return( 1 );
   assert( asset < v_installed_quantity.size() );
-  return v_installed_quantity[ asset ];
+  return( v_installed_quantity[ asset ] );
  }
 
 /** @} ---------------------------------------------------------------------*/
@@ -1657,7 +1658,7 @@ class InvestmentFunction : public C05Function , public Block {
 
  public:
 
-  static constexpr auto NaN = std::numeric_limits<FunctionValue>::quiet_NaN();
+  static constexpr auto NaN = std::numeric_limits< FunctionValue >::quiet_NaN();
 
 /*--------------------------------------------------------------------------*/
 
@@ -1774,9 +1775,9 @@ class InvestmentFunction : public C05Function , public Block {
   /// returns true if and only if this GlobalPool contains no linearization
 
   bool empty() const {
-   return std::all_of( linearization_constants.cbegin() ,
-                       linearization_constants.cend() ,
-                       []( const auto v ) { return std::isnan( v ); } );
+   return( std::all_of( linearization_constants.cbegin() ,
+                        linearization_constants.cend() ,
+                        []( const auto v ) { return( std::isnan( v ) ); } ) );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -1825,7 +1826,7 @@ class InvestmentFunction : public C05Function , public Block {
 
   FunctionValue get_linearization_constant( Index name ) const {
    if( name < size() )
-    return linearization_constants[ name ];
+    return( linearization_constants[ name ] );
    throw( std::invalid_argument
           ( "InvestmentFunction::GlobalPool::get_linearization_constant: "
             "linearization with name " + std::to_string( name ) +
@@ -1874,7 +1875,7 @@ class InvestmentFunction : public C05Function , public Block {
   /// return the combination used to form "the important linearization"
 
   c_LinearCombination & get_important_linearization_coefficients() const {
-   return important_linearization_lin_comb;
+   return( important_linearization_lin_comb );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -2231,8 +2232,8 @@ class InvestmentFunction : public C05Function , public Block {
  double get_var_value( Index i , bool actual = true ) const {
   if( f_reformulated_bounds && ( ! actual ) && ( i < v_lower_bound.size() ) &&
       ( v_lower_bound[ i ] > -Inf< double >() ) )
-   return v_x[ i ]->get_value() + v_lower_bound[ i ];
-  return v_x[ i ]->get_value();
+   return( v_x[ i ]->get_value() + v_lower_bound[ i ] );
+  return( v_x[ i ]->get_value() );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -2248,8 +2249,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  double get_var_lower_bound( Index i ) const {
   if( i < v_lower_bound.size() )
-   return v_lower_bound[ i ];
-  return -Inf< double >();
+   return( v_lower_bound[ i ] );
+  return( -Inf< double >() );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -2257,8 +2258,8 @@ class InvestmentFunction : public C05Function , public Block {
  /// returns the investment cost of the i-th asset
  double get_cost( Index i ) const {
   if( i < v_cost.size() )
-   return v_cost[ i ];
-  return 0;
+   return( v_cost[ i ] );
+  return( 0 );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -2266,8 +2267,8 @@ class InvestmentFunction : public C05Function , public Block {
  /// returns the disinvestment cost of the i-th asset
  double get_disinvestment_cost( Index i ) const {
   if( i < v_disinvestment_cost.size() )
-   return v_disinvestment_cost[ i ];
-  return 0;
+   return( v_disinvestment_cost[ i ] );
+  return( 0 );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -2369,8 +2370,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  FunctionValue worst_value() const {
   if( get_inner_block_objective_sense() == Objective::eMin )
-   return Inf< FunctionValue >();
-  return -Inf< FunctionValue >();
+   return( Inf< FunctionValue >() );
+  return( -Inf< FunctionValue >() );
  }
 
 /*--------------------------------------------------------------------------*/
