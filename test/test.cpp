@@ -807,8 +807,10 @@ void configure_Blocks( UCBlock * ucblock , bool relax_binary_variables ,
 
   else if( auto unit = dynamic_cast< SlackUnitBlock * >( block ) ) {
    auto config = new BlockConfig;
+   /*
    config->f_static_variables_Configuration =
     new SimpleConfiguration<int>( var_type );
+   */
    config->f_static_constraints_Configuration =
     new SimpleConfiguration<int>( cons_type );
    unit->set_BlockConfig( config );
@@ -825,13 +827,17 @@ void configure_Blocks( UCBlock * ucblock , bool relax_binary_variables ,
 
   else if( auto unit = dynamic_cast< ThermalUnitBlock * >( block ) ) {
    auto config = new BlockConfig;
+   /*
    config->f_static_variables_Configuration =
     new SimpleConfiguration<int>( var_type );
+   */
    config->f_static_constraints_Configuration =
     new SimpleConfiguration<int>( cons_type );
 
+   /*
    if( add_reserve_variables_to_objective )
     config->f_objective_Configuration = new SimpleConfiguration<int>( 3 );
+   */
 
    unit->set_BlockConfig( config );
   }
