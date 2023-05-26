@@ -1,6 +1,8 @@
 ### Makefile-generated binaries
+test/IB_test
 
 ### data directories
+test/investment_candidates.txt
 
 ### C/C++ template
 # Prerequisites
