@@ -4,10 +4,6 @@
 # A txt description of a BlockSolverConfig for an InvestmentBlock to be
 # solved by a BundleSolver
 #
-#   version 1.0 , 30/12/2020
-#
-#   Enrico Gorgone, Antonio Frangioni
-#
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -117,7 +113,7 @@ dblCtOff   0.01   # cut-off factor for pricing in MinQuad
 # pointer to the "extra" Configuration
 * # [none]
 
-# end of 2nd ComputeConfig- - - - - - - - - - - - - - - - - - - - - - - - - -
+# end of 1st ComputeConfig- - - - - - - - - - - - - - - - - - - - - - - - - -
 
 # end of BlockSolverConfig- - - - - - - - - - - - - - - - - - - - - - - - - -
 
