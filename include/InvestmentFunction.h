@@ -1193,7 +1193,7 @@ class InvestmentFunction : public C05Function , public Block {
   * InvestmentFunction. If x[i] is greater than InstalledQuantity[i], then the
   * i-th asset is being subject to investment. If x[i] is less than
   * InstalledQuantity[i], then the i-th asset is being subject to
-  * disinvestment. Because the cost of investment is tipically different from
+  * disinvestment. Because the cost of investment is typically different from
   * the cost of disinvestment, the fixed (des)investment cost is composed by
   * two parts: the one associated with an investment and the one associated
   * with a disinvestment. The fixed cost associated with the i-th asset is
