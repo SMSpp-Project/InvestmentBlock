@@ -1431,7 +1431,7 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
  compute_config->str_pars.erase
   ( std::remove_if( compute_config->str_pars.begin() ,
                     compute_config->str_pars.end() ,
-                    []( const auto & pair ){
+                    []( const auto & pair ) {
                      return pair.first == "strInnerBSC"; } ) ,
     compute_config->str_pars.end() );
 
