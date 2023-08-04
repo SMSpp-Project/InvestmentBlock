@@ -31,33 +31,33 @@
 
 # macros to be exported - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-InvsBkOBJ = $(InvsBkSDR)obj/InvestmentBlock.o \
-	$(InvsBkSDR)obj/InvestmentFunction.o \
+InvsBkOBJ = $(InvsBkSDR)/obj/InvestmentBlock.o \
+	$(InvsBkSDR)/obj/InvestmentFunction.o \
 
-InvsBkINC = -I$(InvsBkSDR)include/
+InvsBkINC = -I$(InvsBkSDR)/include/
 
-InvsBkH   = $(InvsBkSDR)include/InvestmentBlock.h \
-	$(InvsBkSDR)include/InvestmentFunction.h \
-	$(InvsBkSDR)include/SDDPBlockSolutionOutput.h \
-	$(InvsBkSDR)include/UCBlockSolutionOutput.h
+InvsBkH   = $(InvsBkSDR)/include/InvestmentBlock.h \
+	$(InvsBkSDR)/include/InvestmentFunction.h \
+	$(InvsBkSDR)/include/SDDPBlockSolutionOutput.h \
+	$(InvsBkSDR)/include/UCBlockSolutionOutput.h
 
 # clean - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 clean::
-	rm -f $(InvsBkOBJ) $(InvsBkSDR)*~
+	rm -f $(InvsBkOBJ) $(InvsBkSDR)/*~
 
 # dependencies: every .o from its .C + every recursively included .h- - - - -
 
-$(InvsBkSDR)obj/InvestmentBlock.o: $(InvsBkSDR)src/InvestmentBlock.cpp \
-	$(InvsBkSDR)include/InvestmentFunction.h $(SDDPBkH) $(UCBckH) \
+$(InvsBkSDR)/obj/InvestmentBlock.o: $(InvsBkSDR)/src/InvestmentBlock.cpp \
+	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(UCBckH) \
 	$(SMS++OBJ)
-	$(CC) -c $(InvsBkSDR)src/InvestmentBlock.cpp -o $@ $(InvsBkINC) \
+	$(CC) -c $(InvsBkSDR)/src/InvestmentBlock.cpp -o $@ $(InvsBkINC) \
 	$(SDDPBkINC) $(UCBckINC) $(SMS++INC) $(SW)
 
-$(InvsBkSDR)obj/InvestmentFunction.o: $(InvsBkSDR)src/InvestmentFunction.cpp \
-	$(InvsBkSDR)include/InvestmentFunction.h \
-	$(InvsBkSDR)include/InvestmentBlock.h $(SDDPBkH) $(UCBckH) $(SMS++OBJ)
-	$(CC) -c $(InvsBkSDR)src/InvestmentFunction.cpp -o $@ $(InvsBkINC) \
+$(InvsBkSDR)/obj/InvestmentFunction.o: $(InvsBkSDR)/src/InvestmentFunction.cpp \
+	$(InvsBkSDR)/include/InvestmentFunction.h \
+	$(InvsBkSDR)/include/InvestmentBlock.h $(SDDPBkH) $(UCBckH) $(SMS++OBJ)
+	$(CC) -c $(InvsBkSDR)/src/InvestmentFunction.cpp -o $@ $(InvsBkINC) \
 	$(SDDPBkINC) $(UCBckINC) $(SMS++INC) $(SW)
 
 ########################## End of makefile ###################################

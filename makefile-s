@@ -5,7 +5,7 @@
 #   makefile of InvestmentBlock and its dependencies, excluding SMS++        #
 #                                                                            #
 #   The makefile defines internally all external libraries required by       #
-#   InvestmentBlock, exluding the SMS++ core ones whose symbols are assumed  #
+#   InvestmentBlock, excluding the SMS++ core ones whose symbols are assumed #
 #   to  have been defined already (e.g. by including SMS++/lib/makefile).    #
 #   Accordingly, all necessary OBJ, H, -I directives, external libraries     #
 #   + -L<libdirs> are added to the corresponding InvsBk* macros.             #
@@ -17,7 +17,7 @@
 #           $(InvsBkSDR) = the directory where InvsBlock source is           #
 #                                                                            #
 #   Output: $(InvsBkOBJ) = the final object(s) / library                     #
-#           $(InvsBkLIB) = external libraries + -L<libdirs>                  #
+#           $(InvsBkLIB) = external libraries + -L< libdirs >                #
 #           $(InvsBkH)   = the .h files to include for InvsBlock             #
 #           $(InvsBkINC) = the -I$( InvsBlock directory )                    #
 #                                                                            #
@@ -33,15 +33,15 @@
 # each module outputs some macros to be used here:
 # *OBJ is the final object/library
 # *H   is the list of all include files
-# *INC is the -I<include directories>
+# *INC is the -I< include directories >
 
 # define input macros for UCBlock makefile, then include it
-UCBckDIR = $(InvsBkSDR)../UCBlock/
-include $(UCBckDIR)lib/makefile
+UCBckDIR = $(InvsBkSDR)/../UCBlock
+include $(UCBckDIR)/lib/makefile
 
 # define input macros for SDDPBlock makefile, then include it
-SDDPBkSDR = $(InvsBkSDR)../SDDPBlock/
-include $(SDDPBkSDR)makefile-s
+SDDPBkSDR = $(InvsBkSDR)/../SDDPBlock
+include $(SDDPBkSDR)/makefile-s
 
 # include the makefile requiring all external modules in input
 include $(InvsBkSDR)/makefile
@@ -54,7 +54,7 @@ InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkINC) $(UCBckINC)
 InvsBkH := $(InvsBkH) $(SDDPBkH) $(UCBckH)
 InvsBkINC := $(StcBlkINC) $(libStOptINC) $(InvsBkINC)
 
-# external libreries for InvsBlock
+# external libraries for InvsBlock
 InvsBkLIB = $(SDDPBkLIB) $(UCBckLIB)
 
 ########################### End of makefile-c ################################
