@@ -71,7 +71,7 @@ include $(LgDSLVSDR)/makefile
 # object files
 MOBJ =  $(BNDSLVOBJ) $(LgDSLVOBJ) $(InvsBkOBJ)
 
-# libreries
+# libraries
 MLIB =  $(BNDSLVLIB) $(LgDSLVLIB) $(InvsBkLIB)
 
 $(DIR)/$(NAME): $(MOBJ) $(DIR)/test.o

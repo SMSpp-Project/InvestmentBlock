@@ -6,7 +6,7 @@
 #                                                                            #
 #   The makefile defines internally all external libraries (comprised the    #
 #   SMS++ one) required by InvsBlock. Accordingly, all necessary OBJ, H,     #
-#   -I directives, external libraries + -L<libdirs> are added to the         #
+#   -I directives, external libraries + -L< libdirs > are added to the       #
 #   corresponding InvsBk* macros.                                            #
 #                                                                            #
 #   Input:  $(CC)        = compiler command                                  #
@@ -14,7 +14,7 @@
 #           $(InvsBkSDR) = the directory where InvsBlock source is           #
 #                                                                            #
 #   Output: $(InvsBkOBJ) = the final object(s) / library                     #
-#           $(InvsBkLIB) = external libraries + -L<libdirs>                  #
+#           $(InvsBkLIB) = external libraries + -L< libdirs >                #
 #           $(InvsBkH)   = the .h files to include for InvsBlock             #
 #           $(InvsBkINC) = the -I$( InvsBlock directory )                    #
 #                                                                            #
@@ -55,7 +55,7 @@ InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkOBJ) $(UCBckOBJ) $(SMS++OBJ)
 InvsBkH := $(InvsBkH) $(SDDPBkH) $(UCBckH) $(SMS++H)
 InvsBkINC := $(SMS++INC) $(UCBckINC) $(SDDPBkINC) $(InvsBkINC)
 
-# external libreries for InvsBlock
+# external libraries for InvsBlock
 InvsBkLIB = $(SMS++LIB) $(SDDPBkLIB) $(UCBckLIB)
 
 ########################### End of makefile-c ################################

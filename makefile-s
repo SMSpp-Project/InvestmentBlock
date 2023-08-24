@@ -8,7 +8,7 @@
 #   InvestmentBlock, excluding the SMS++ core ones whose symbols are assumed #
 #   to  have been defined already (e.g. by including SMS++/lib/makefile).    #
 #   Accordingly, all necessary OBJ, H, -I directives, external libraries     #
-#   + -L<libdirs> are added to the corresponding InvsBk* macros.             #
+#   + -L< libdirs > are added to the corresponding InvsBk* macros.           #
 #                                                                            #
 #   Input:  $(CC)        = compiler command                                  #
 #           $(SW)        = compiler options                                  #
