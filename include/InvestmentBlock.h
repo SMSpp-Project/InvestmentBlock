@@ -258,9 +258,9 @@ public:
   *
   *     0 <= x[ i ] <= upper_bound[ i ] - lower_bound[ i ].
   *
-  * If \p stcc is not nullptr and it is a SimpleConfiguration<int>, or if
+  * If \p stcc is not nullptr and it is a SimpleConfiguration< int >, or if
   * f_BlockConfig->f_static_constraints_Configuration is not nullptr and it is
-  * a SimpleConfiguration<int>, then the f_value (an int) indicates whether
+  * a SimpleConfiguration< int >, then the f_value (an int) indicates whether
   * the bounds must be reformulated. If the f_value is nonzero, then the
   * bounds are reformulated as above.
   *
@@ -479,7 +479,7 @@ public:
   *        constraints (if it has been generated) must be used to determine if
   *        the current solution is feasible.
   *
-  * @param fsbc If it is a pointer to a SimpleConfiguration<double>, then the
+  * @param fsbc If it is a pointer to a SimpleConfiguration< double >, then the
   *        value stored in that SimpleConfiguration will be the tolerance that
   *        determines if a solution is feasible. */
 
