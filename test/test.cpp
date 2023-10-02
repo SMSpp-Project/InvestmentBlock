@@ -801,7 +801,7 @@ void configure_Blocks( UCBlock * ucblock , bool relax_binary_variables ,
   // Configure PolyhedralFunctionBlock
   if( auto polyhedral = dynamic_cast< PolyhedralFunctionBlock * >( block ) ) {
    auto config = new BlockConfig;
-   config->f_static_variables_Configuration = new SimpleConfiguration<int>(1);
+   config->f_static_variables_Configuration = new SimpleConfiguration< int >( 1 );
    polyhedral->set_BlockConfig( config );
   }
 
@@ -809,10 +809,10 @@ void configure_Blocks( UCBlock * ucblock , bool relax_binary_variables ,
    auto config = new BlockConfig;
    /*
    config->f_static_variables_Configuration =
-    new SimpleConfiguration<int>( var_type );
+    new SimpleConfiguration< int >( var_type );
    */
    config->f_static_constraints_Configuration =
-    new SimpleConfiguration<int>( cons_type );
+    new SimpleConfiguration< int >( cons_type );
    unit->set_BlockConfig( config );
   }
 
@@ -821,7 +821,7 @@ void configure_Blocks( UCBlock * ucblock , bool relax_binary_variables ,
    config->f_static_variables_Configuration = new SimpleConfiguration<
     std::pair< int , int > >( { negative_prices , var_type } );
    config->f_static_constraints_Configuration =
-    new SimpleConfiguration<int>( cons_type );
+    new SimpleConfiguration< int >( cons_type );
    unit->set_BlockConfig( config );
   }
 
@@ -829,14 +829,14 @@ void configure_Blocks( UCBlock * ucblock , bool relax_binary_variables ,
    auto config = new BlockConfig;
    /*
    config->f_static_variables_Configuration =
-    new SimpleConfiguration<int>( var_type );
+    new SimpleConfiguration< int >( var_type );
    */
    config->f_static_constraints_Configuration =
-    new SimpleConfiguration<int>( cons_type );
+    new SimpleConfiguration< int >( cons_type );
 
    /*
    if( add_reserve_variables_to_objective )
-    config->f_objective_Configuration = new SimpleConfiguration<int>( 3 );
+    config->f_objective_Configuration = new SimpleConfiguration< int >( 3 );
    */
 
    unit->set_BlockConfig( config );
@@ -1652,7 +1652,7 @@ void process_block_file( const netCDF::NcFile & file ) {
     // l <= x <= u by 0 <= x <= u - l.
     auto config = new BlockConfig;
     config->f_static_constraints_Configuration =
-     new SimpleConfiguration<int>( 1 );
+     new SimpleConfiguration< int >( 1 );
 
     investment_block->set_BlockConfig( config );
    }
