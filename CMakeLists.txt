@@ -47,23 +47,6 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 # See: https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html
 include(BuildType)
 
-# Since we are using the block factory, objects from linked libraries
-# may wrongly appear unused, and by default the linker does not include them,
-# so we have to force the linking.
-if (BUILD_SHARED_LIBS)
-    if (UNIX AND (NOT APPLE))
-        add_link_options("-Wl,--no-as-needed")
-    endif ()
-else ()
-    if (UNIX)
-        if (APPLE)
-            add_link_options("-Wl,-all_load")
-        else ()
-            add_link_options("-Wl,--whole-archive,--allow-multiple-definition")
-        endif ()
-    endif ()
-endif ()
-
 # ----- Requirements -------------------------------------------------------- #
 # If it's not being called by the umbrella, we need to
 # look for the system-installed libraries.
