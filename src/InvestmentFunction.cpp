@@ -1255,7 +1255,9 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  int error_status = kError;
 
- #pragma omp parallel for reduction( + : f_value )
+ auto simulation_value = decltype( f_value )( 0 );
+
+ #pragma omp parallel for reduction( + : simulation_value )
  for( int scenario = 0 ; scenario < num_scenarios ; ++scenario ) {
 
   if( interrupt_loop )
@@ -1304,7 +1306,7 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
   // Update the function value
 
-  f_value += solver->get_var_value();
+  simulation_value += solver->get_var_value();
 
   // Possibly output the solution
 
@@ -1336,6 +1338,8 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   output_function_value();
   return( f_solver_status );
  }
+
+ f_value = simulation_value;
 
  f_ignore_modifications = saved_f_ignore_modifications;
 
