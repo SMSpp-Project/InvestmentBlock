@@ -59,7 +59,6 @@
  * \copyright &copy; by Rafael Durbano Lobato
  */
 
-#include <filesystem>
 #include <getopt.h>
 #include <iomanip>
 #include <iostream>
@@ -69,7 +68,6 @@
 #include <BendersBlock.h>
 #include <BlockSolverConfig.h>
 #include <BundleSolver.h>
-#include <CPXMILPSolver.h>
 #include <HydroSystemUnitBlock.h>
 #include <IntermittentUnitBlock.h>
 #include <NetworkBlock.h>
@@ -111,7 +109,7 @@ std::string solver_state_output_filename{};
 long num_sub_blocks_per_stage = 1;
 
 bool relax_integrality = false;
-bool eliminate_reduntant_cuts = false;
+bool eliminate_redundant_cuts = false;
 bool simulate_investment = false;
 bool single_scenario = false;
 bool output_solution = false;
@@ -226,7 +224,7 @@ void process_args( int argc , char ** argv ) {
     Configuration::set_filename_prefix( std::string( optarg ) );
     break;
    case 'e':
-    eliminate_reduntant_cuts = true;
+    eliminate_redundant_cuts = true;
     break;
    case 'l':
     cuts_filename = std::string( optarg );
