@@ -32,14 +32,12 @@
 # macros to be exported - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 InvsBkOBJ = $(InvsBkSDR)/obj/InvestmentBlock.o \
-	$(InvsBkSDR)/obj/InvestmentFunction.o \
+	$(InvsBkSDR)/obj/InvestmentFunction.o
 
 InvsBkINC = -I$(InvsBkSDR)/include
 
 InvsBkH   = $(InvsBkSDR)/include/InvestmentBlock.h \
-	$(InvsBkSDR)/include/InvestmentFunction.h \
-	$(InvsBkSDR)/include/SDDPBlockSolutionOutput.h \
-	$(InvsBkSDR)/include/UCBlockSolutionOutput.h
+	$(InvsBkSDR)/include/InvestmentFunction.h
 
 # clean - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 

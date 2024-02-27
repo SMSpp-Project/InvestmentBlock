@@ -85,16 +85,19 @@ namespace SMSpp_di_unipi_it
  *     maximum power flow are scaled by x.
  *
  * - The value of the InvestmentFunction is given by a fixed investment cost
- *   (CAPEX) and an expected operational cost (OPEX). The fixed investment
- *   cost is a linear function of the variables of the InvestmentFunction. The
- *   expected operational cost is given by the solution value of the inner
- *   Block (which depends on the investment being made, i.e., the values of
- *   the variables of the InvestmentFunction).
+ *   (CAPEX) and an [expected] operational cost (OPEX). The fixed investment
+ *   cost is a linear function of the variables of the InvestmentFunction.
+ *   The [expected] operational cost is given by the solution value of the
+ *   inner Block (which depends on the investment being made, i.e., the values
+ *   of the variables of the InvestmentFunction).
  *
  * - The InvestmentFunction has an inner Block which contains the assets to
  *   invest in. This inner Block can be either a UCBlock or an SDDPBlock. In
- *   case it is an SDDPBlock, the investment in an asset is made for all
- *   stages of the SDDPBlock. */
+ *   the former case the OPEX is deterministic. In the latter case it is the
+ *   expected cost of the sub-Block of the SDDPBlock, some of which (the ones
+ *   where the investments take place) must themselves  be UCBlock. Note that
+ *   the same amount of investment in the assets is made for all the stages
+ *   of the SDDPBlock. */
 
 class InvestmentFunction : public C05Function , public Block {
 
