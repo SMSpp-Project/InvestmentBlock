@@ -609,7 +609,7 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// set a given integer (int) numerical parameter
- /** Set a given integer (int) numerical parameter. InvestmentFunctiontakes
+ /** Set a given integer (int) numerical parameter. InvestmentFunction takes
   * care of the following parameters:
   *
   * - #intGPMaxSz: This parameter specifies the maximum number of
@@ -2211,8 +2211,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  /// returns the value of the i-th active variable
  /** This function returns the value of the i-th active variable, possibly
-  * taking into account its lower bound. If \p atual is \c true, then this
-  * function returs the variable of the i-th active variable. Otherwise, if
+  * taking into account its lower bound. If \p actual is \c true, then this
+  * function returns the variable of the i-th active variable. Otherwise, if
   * the lower bound for this variable is finite, then this function returns
   * the value of this active variable plus its lower bound.
   *
