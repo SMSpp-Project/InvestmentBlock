@@ -8,7 +8,7 @@
  *         Dipartimento di Informatica \n
  *         Universita' di Pisa \n
  *
- * \copyright &copy; by Rafael Durbano Lobato.
+ * \copyright &copy; by Rafael Durbano Lobato
  */
 /*--------------------------------------------------------------------------*/
 /*---------------------------- IMPLEMENTATION ------------------------------*/
@@ -28,7 +28,7 @@
 #include "IntermittentUnitBlock.h"
 #include "InvestmentFunction.h"
 #include "SDDPBlock.h"
-#include "SDDPBlockSolutionOutput.h"
+//!!#include "SDDPBlockSolutionOutput.h"
 #include "SDDPGreedySolver.h"
 #include "SDDPSolver.h"
 #include "SMSTypedefs.h"
@@ -1308,18 +1308,18 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
   simulation_value += solver->get_var_value();
 
+  // TODO
   // Possibly output the solution
 
+  /*
   if( f_output_solution ) {
-   // TODO
-   /*
    auto solver = get_solver( v_greedy_solvers[ sub_block_index ] );
    SDDPBlockSolutionOutput().print( get_sddp_block() ,
                                     solver->get_int_par
                                     ( SDDPGreedySolver::intSubBlockIndex ) ,
                                     scenario , true );
-   */
   }
+  */
 
   // Unlock the sub-Block
 
