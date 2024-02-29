@@ -1,0 +1,61 @@
+##############################################################################
+################################ makefile-c ##################################
+##############################################################################
+#                                                                            #
+#   complete makefile of InvestmentBlock                                     #
+#                                                                            #
+#   The makefile defines internally all external libraries (comprised the    #
+#   SMS++ one) required by InvsBlock. Accordingly, all necessary OBJ, H,     #
+#   -I directives, external libraries + -L< libdirs > are added to the       #
+#   corresponding InvsBk* macros.                                            #
+#                                                                            #
+#   Input:  $(CC)        = compiler command                                  #
+#           $(SW)        = compiler options                                  #
+#           $(InvsBkSDR) = the directory where InvsBlock source is           #
+#                                                                            #
+#   Output: $(InvsBkOBJ) = the final object(s) / library                     #
+#           $(InvsBkLIB) = external libraries + -L< libdirs >                #
+#           $(InvsBkH)   = the .h files to include for InvsBlock             #
+#           $(InvsBkINC) = the -I$( InvsBlock directory )                    #
+#                                                                            #
+#                              Antonio Frangioni                             #
+#                         Dipartimento di Informatica                        #
+#                             Universita' di Pisa                            #
+#                                                                            #
+##############################################################################
+
+# define & include the necessary modules- - - - - - - - - - - - - - - - - - -
+# if a module is not used in the current configuration, just comment out the
+# corresponding include line
+# each module outputs some macros to be used here:
+# *OBJ is the final object/library
+# *H   is the list of all include files
+# *INC is the -I< include directories >
+
+# define input macros for SMS++ complete makefile, then include it
+SMS++SDR = $(InvsBkSDR)/../SMS++
+include $(SMS++SDR)/lib/makefile-c
+
+# define input macros for UCBlock makefile, then include it
+UCBckDIR = $(InvsBkSDR)/../UCBlock
+include $(UCBckDIR)/lib/makefile
+
+# define input macros for SDDPBlock makefile, then include it
+SDDPBkSDR = $(InvsBkSDR)/../SDDPBlock
+include $(SDDPBkSDR)/makefile-s
+
+# include the makefile requiring all external modules in input
+include $(InvsBkSDR)/makefile
+
+# macros to be exported - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# append external -I directives to InvsBkINC, InvsBkOBJ and InvsBkH as
+# defined by the makefile, thus the := assignment has to be used (use GNU make)
+InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkOBJ) $(UCBckOBJ) $(SMS++OBJ)
+InvsBkH := $(InvsBkH) $(SDDPBkH) $(UCBckH) $(SMS++H)
+InvsBkINC := $(SMS++INC) $(UCBckINC) $(SDDPBkINC) $(InvsBkINC)
+
+# external libraries for InvsBlock
+InvsBkLIB = $(SMS++LIB) $(SDDPBkLIB) $(UCBckLIB)
+
+########################### End of makefile-c ################################

@@ -1,0 +1,39 @@
+# --------------------------------------------------------------------------- #
+#    Package configuration file                                               #
+#                                                                             #
+#    This file contains instructions on how to generate ***Config.cmake,      #
+#    that is, the file that tells CMake how the package should be             #
+#    configured when found by other projects using find_package().            #
+#                                                                             #
+#    ***Targets.cmake (to be found alongside this file) is the target import  #
+#    file that tells where the headers and library are. It will be different  #
+#    depending on a local build or an installed package.                      #
+#                                                                             #
+#                              Niccolo' Iardella                              #
+#                                Donato Meoli                                 #
+#                         Dipartimento di Informatica                         #
+#                             Universita' di Pisa                             #
+# --------------------------------------------------------------------------- #
+get_filename_component(@modName@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+include(CMakeFindDependencyMacro)
+
+# ----- Settings ------------------------------------------------------------ #
+set(StOpt_ROOT @Eigen3_ROOT@)
+set(InvestmentBlock_USE_MPI @InvestmentBlock_USE_MPI@)
+
+# ----- Requirements -------------------------------------------------------- #
+find_dependency(StochasticBlock)
+
+# This is needed to find the custom modules we provide
+list(APPEND CMAKE_MODULE_PATH ${InvestmentBlock_CMAKE_DIR})
+find_dependency(StOpt)
+list(REMOVE_AT CMAKE_MODULE_PATH -1)
+
+# ----- Import target ------------------------------------------------------- #
+if (NOT TARGET @modNamespace@::@modName@)
+    include("${@modName@_CMAKE_DIR}/@modName@Targets.cmake")
+endif ()
+
+set(@modName@_LIBRARIES @modNamespace@::@modName@)
+
+# --------------------------------------------------------------------------- #
