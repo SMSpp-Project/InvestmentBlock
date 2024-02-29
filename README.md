@@ -55,7 +55,7 @@ the following:
 
 ## Getting started
 
-These instructions will let you build InvestmentBlock on your system.
+These instructions will let you build `InvestmentBlock` on your system.
 
 ### Requirements
 
