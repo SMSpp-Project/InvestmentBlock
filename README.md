@@ -104,9 +104,9 @@ directory tree constructed in the build/ folder) and therefore it is more
 convenient when having to recompile often, such as when developing/debugging
 a new module, as opposed to the compile-and-forget usage envisioned by CMake.
 
-Each executable using `InvestmentBlock`, such as the has to include a "main
-makefile" of the module, which typically is either [makefile-c](makefile-c)
-including all necessary libraries comprised the "core SMS++" one, or
+Each executable using `InvestmentBlock` has to include a "main makefile" of
+the module, which typically is either [makefile-c](makefile-c) including all
+necessary libraries comprised the "core SMS++" one, or
 [makefile-s](makefile-s) including all necessary libraries but not the "core
 SMS++" one (for the common case in which this is used together with other
 modules that already include them). One relevant case is the
