@@ -287,7 +287,6 @@ class InvestmentFunction : public C05Function , public Block {
  };  // end( int_par_type_InvestmentF )
 
 /*--------------------------------------------------------------------------*/
-
  /// public enum for the possible types of events
  /** This enum defines additional types of events that InvestmentFunction can
   * manage. */
@@ -306,7 +305,6 @@ class InvestmentFunction : public C05Function , public Block {
  };  // end( event_type_invest_func )
 
 /*--------------------------------------------------------------------------*/
-
  /// public enum for the string algorithmic parameters
  /** Public enum describing the different algorithmic parameters of "string"
   * type that InvestmentFunction has in addition to those of C05Function. The
@@ -449,7 +447,7 @@ class InvestmentFunction : public C05Function , public Block {
 
  void deserialize( const netCDF::NcGroup & group ) override {
   deserialize( group , eNoMod );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// destructor of InvestmentFunction
@@ -470,7 +468,7 @@ class InvestmentFunction : public C05Function , public Block {
   * using it to "implement itself" should. By not having any Variable, the
   * Observer can no longer do that. */
 
- void clear() override { v_x.clear(); }
+ void clear( void ) override { v_x.clear(); }
 
 /**@} ----------------------------------------------------------------------*/
 /*-------------------------- OTHER INITIALIZATIONS -------------------------*/
@@ -521,7 +519,6 @@ class InvestmentFunction : public C05Function , public Block {
  void set_ComputeConfig( ComputeConfig *scfg = nullptr ) override;
 
 /*--------------------------------------------------------------------------*/
-
  /// sets the set of active Variable of the InvestmentFunction
  /** Sets the set of active Variable of the InvestmentFunction. This method is
   * basically provided to work in tandem with the methods which only load the
@@ -589,7 +586,8 @@ class InvestmentFunction : public C05Function , public Block {
   *        which means that the previous inner Block (if any) is destroyed and
   *        its allocated memory is released. */
 
- void set_inner_block( Block * block , bool destroy_previous_block = true ) {
+ void set_inner_block( Block * block , bool destroy_previous_block = true )
+ {
   if( ( v_Block.size() == 1 ) && ( block == v_Block.front() ) &&
       ( ! destroy_previous_block ) )
    return; // the given Block is already here; silently return
@@ -605,7 +603,7 @@ class InvestmentFunction : public C05Function , public Block {
    block->set_f_Block( this );
 
   send_nuclear_modification();
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// set a given integer (int) numerical parameter
@@ -651,15 +649,15 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @return The value of the parameter. */
 
- void set_par( idx_type par , double value ) override {
+ void set_par( idx_type par , double value ) override
+ {
+  if( par == dblAAccMlt ) {
+   AAccMlt = value;
+   return;
+   }
 
-  switch( par ) {
-   case( dblAAccMlt ):
-    AAccMlt = value;
-    break;
-   default: C05Function::set_par( par , value );
+  C05Function::set_par( par , value );
   }
- }
 
 /*--------------------------------------------------------------------------*/
  /// set a given string parameter
@@ -672,14 +670,15 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @return The value of the parameter. */
 
- void set_par( idx_type par , std::string && value ) override {
-  switch( par ) {
-   case( strOutputFilename ):
-    f_output_filename = std::move( value );
-    break;
-   default: C05Function::set_par( par , value );
+ void set_par( idx_type par , std::string && value ) override
+ {
+  if( par == strOutputFilename ) {
+   f_output_filename = std::move( value );
+   return;
+   }
+
+  C05Function::set_par( par , value );
   }
- }
 
 /** @} ---------------------------------------------------------------------*/
 /*------------------- METHODS FOR HANDLING THE PARAMETERS ------------------*/
@@ -693,9 +692,9 @@ class InvestmentFunction : public C05Function , public Block {
   * @return The number of int parameters.
   */
 
- [[nodiscard]] idx_type get_num_int_par() const override {
+ [[nodiscard]] idx_type get_num_int_par( void ) const override {
   return( intLastParInvestmentF );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// get the number of string parameters
@@ -706,10 +705,9 @@ class InvestmentFunction : public C05Function , public Block {
 
  idx_type get_num_str_par( void ) const override {
   return( idx_type( strLastParInvestmentF ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// get a specific integer (int) numerical parameter
  /** Get a specific integer (int) numerical parameter. InvestmentFunction
   * takes care of the following parameters:
@@ -728,12 +726,13 @@ class InvestmentFunction : public C05Function , public Block {
 
  [[nodiscard]] int get_int_par( idx_type par ) const override {
   switch( par ) {
-   case( intGPMaxSz ): return( global_pool.size() );
+   case( intGPMaxSz ):              return( global_pool.size() );
    case( intComputeLinearization ): return( f_compute_linearization );
-   case( intOutputSolution ): return( f_output_solution );
-  }
+   case( intOutputSolution ):       return( f_output_solution );
+   }
+
   return( C05Function::get_int_par( par ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// get a specific float (double) numerical parameter
@@ -748,16 +747,15 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @return The value of the required parameter. */
 
- [[nodiscard]] double get_dbl_par( idx_type par ) const override {
-  switch( par ) {
-   case( dblAAccMlt ): return( AAccMlt );
-  }
+ [[nodiscard]] double get_dbl_par( idx_type par ) const override
+ {
+  if( par == dblAAccMlt )
+   return( AAccMlt );
 
   return( C05Function::get_dbl_par( par ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// get a specific string numerical parameter
  /** Get a specific string numerical parameter. Please see the
   * #str_par_type_InvestmentF and #str_par_type_C05F enumerations for a
@@ -767,25 +765,28 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @return The value of the given parameter. */
 
- const std::string & get_str_par( const idx_type par ) const override {
-  switch( par ) {
-   case( strOutputFilename ): return( f_output_filename );
-  }
+ const std::string & get_str_par( const idx_type par ) const override
+ {
+  if( par == strOutputFilename )
+   return( f_output_filename );
+
   return( C05Function::get_str_par( par ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
- [[nodiscard]] int get_dflt_int_par( idx_type par ) const override {
+ [[nodiscard]] int get_dflt_int_par( idx_type par ) const override
+ {
   if( par == intComputeLinearization )
    return( 1 );
+
   if( par == intOutputSolution )
    return( 0 );
+
   return( C05Function::get_dflt_int_par( par ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// get the default value of a string parameter
  /** Get the default value of the string parameter with given index. Please
   * see #str_par_type_InvestmentF and #str_par_type_C05F enumerations for a
@@ -796,30 +797,32 @@ class InvestmentFunction : public C05Function , public Block {
   * @return The default value of the given parameter. */
 
  [[nodiscard]] const std::string & get_dflt_str_par( const idx_type par )
-  const override {
-
+  const override
+ {
   static const std::vector< std::string > default_values = { "" };
 
   if( par >= str_par_type_C05F::strLastParC05F &&
       par < str_par_type_InvestmentF::strLastParInvestmentF )
    return( default_values[ par - str_par_type_C05F::strLastParC05F ] );
 
-  return C05Function::get_dflt_str_par( par );
- }
+  return( C05Function::get_dflt_str_par( par ) );
+  }
 
 /*--------------------------------------------------------------------------*/
 
  [[nodiscard]] idx_type int_par_str2idx( const std::string & name )
-  const override {
+  const override
+ {
   if( name == "intComputeLinearization" )
    return( intComputeLinearization );
+
   if( name == "intOutputSolution" )
    return( intOutputSolution );
+
   return( C05Function::int_par_str2idx( name ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the index of the string parameter with given string name
  /** This method takes a string, which is assumed to be the name of a string
   * parameter, and returns its index, i.e., the integer value that can be
@@ -830,21 +833,27 @@ class InvestmentFunction : public C05Function , public Block {
   * @return The index of the parameter with the given \p name. */
 
  [[nodiscard]] idx_type str_par_str2idx( const std::string & name )
-  const override {
-  if( name == "strOutputFilename" ) return( strOutputFilename );
+  const override
+ {
+  if( name == "strOutputFilename" )
+   return( strOutputFilename );
+
   return( C05Function::str_par_str2idx( name ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
  [[nodiscard]] const std::string & int_par_idx2str( idx_type idx )
-  const override {
+  const override
+ {
   static const std::vector< std::string > pars = { "intComputeLinearization" ,
                                                    "intOutputSolution" };
+
   if( ( idx >= intComputeLinearization ) && ( idx < intLastParInvestmentF ) )
    return( pars[ idx - intComputeLinearization ] );
+
   return( C05Function::int_par_idx2str( idx ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
@@ -857,17 +866,16 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @return The name of the parameter with the given index \p idx. */
 
- const std::string & str_par_idx2str( const idx_type idx ) const override {
-
-  static const std::vector< std::string > parameter_names =
-   { "strOutputFilename" };
-
-  if( idx >= str_par_type_C05F::strLastParC05F &&
-      idx < str_par_type_InvestmentF::strLastParInvestmentF )
+ const std::string & str_par_idx2str( const idx_type idx ) const override
+ {
+  static const std::vector< std::string > parameter_names = {
+                                                       "strOutputFilename" };
+  if( ( idx >= str_par_type_C05F::strLastParC05F ) &&
+      ( idx < str_par_type_InvestmentF::strLastParInvestmentF ) )
    return( parameter_names[ idx - str_par_type_C05F::strLastParC05F ] );
 
   return( C05Function::str_par_idx2str( idx ) );
- }
+  }
 
 /** @} ---------------------------------------------------------------------*/
 /*-------- METHODS FOR HANDLING THE State OF THE InvestmentFunction --------*/
@@ -911,7 +919,8 @@ class InvestmentFunction : public C05Function , public Block {
   * their identity is also set (or reset) in anticipation that they also may
   * have to lock() the inner Block during their line of work. */
 
- void set_id( void * id = nullptr ) override {
+ void set_id( void * id = nullptr ) override
+ {
   if( f_id == id )  // nothing to do
    return;          // silently (and cowardly) return
 
@@ -921,7 +930,7 @@ class InvestmentFunction : public C05Function , public Block {
   for( auto block : v_Block )
    for( auto s : block->get_registered_solvers() )
     s->set_id( id );
- }
+  }
 
 /**@} ----------------------------------------------------------------------*/
 /*---------------------- METHODS FOR EVENTS HANDLING -----------------------*/
@@ -950,36 +959,36 @@ class InvestmentFunction : public C05Function , public Block {
   * that it has exhausted the available maximum number of event handlers slots
   * for the given type. */
 
- EventID set_event_handler( int type , EventHandler && event ) override {
+ EventID set_event_handler( int type , EventHandler && event ) override
+ {
   if( ( type != eBeforeTermination ) && ( type != eAtTheBeginning ) )
    throw( std::invalid_argument( "InvestmentFunction: unsupported event "
                                  "type " + std::to_string( type ) ) );
 
   if( v_events[ type ].size() > std::numeric_limits< EventID >::max() )
-   throw( std::invalid_argument( "InvestmentFunction: too many event handlers "
-                                 "for type" + std::to_string( type ) ) );
+   throw( std::invalid_argument( "InvestmentFunction: too many event handlers"
+				 " for type" + std::to_string( type ) ) );
 
   EventID id = v_events[ type ].size();
   v_events[ type ].push_back( std::move( event ) );
 
   return( id );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// unregister an existing event handler
  /** Removes the event handler with the given id from the list of those
   * registered for the given type. If there is no event handler with the given
   * id for the given type, exception will be thrown. */
+
  void reset_event_handler( int type , EventID id ) override;
 
 /*--------------------------------------------------------------------------*/
+ /// returns the maximum number of event types of the InvestmentFunction
 
- /// returns the maximum number of event types supported by the
- /// InvestmentFunction
  [[nodiscard]] virtual EventID max_event_number() const {
   return( e_last_event_type );
- }
+  }
 
 /**@} ----------------------------------------------------------------------*/
 /*---- METHODS FOR HANDLING "ACTIVE" Variable IN THE InvestmentFunction ----*/
@@ -991,7 +1000,7 @@ class InvestmentFunction : public C05Function , public Block {
 
  Index get_num_active_var() const override final {
   return( v_x.size() );
- }
+  }
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
@@ -1002,7 +1011,7 @@ class InvestmentFunction : public C05Function , public Block {
    return( Inf< Index >() );
   else
    return( std::distance( v_x.begin() , idx ) );
- }
+  }
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
@@ -1013,31 +1022,31 @@ class InvestmentFunction : public C05Function , public Block {
 
  Variable * get_active_var( Index i ) const override final {
   return( v_x[ i ] );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
- v_iterator * v_begin() override final {
+ v_iterator * v_begin( void ) override final {
   return( new InvestmentFunction::v_iterator( v_x.begin() ) );
- }
+  }
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
- v_const_iterator * v_begin() const override final {
+ v_const_iterator * v_begin( void ) const override final {
   return( new InvestmentFunction::v_const_iterator( v_x.begin() ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
- v_iterator * v_end() override final {
+ v_iterator * v_end( void ) override final {
   return( new InvestmentFunction::v_iterator( v_x.end() ) );
- }
+  }
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
- v_const_iterator * v_end() const override final {
+ v_const_iterator * v_end( void ) const override final {
   return( new InvestmentFunction::v_const_iterator( v_x.end() ) );
- }
+  }
 
 /**@} ----------------------------------------------------------------------*/
 /*------------- METHODS FOR MODIFYING THE InvestmentFunction ---------------*/
@@ -1053,8 +1062,9 @@ class InvestmentFunction : public C05Function , public Block {
   *        between 0 and get_num_active_var() - 1.
   *
   * @param issueMod decides if and how the C05FunctionModVarsRngd (since a
-  *        InvestmentFunction is strongly quasi-additive, and with shift() == 0
-  *        as expected) is issued, as described in Observer::make_par(). */
+  *        InvestmentFunction is strongly quasi-additive, and with
+  *        shift() == 0 as expected) is issued, as described in
+  *        Observer::make_par(). */
 
  void remove_variable( Index i , ModParam issueMod = eModBlck )
   override final;
@@ -1067,8 +1077,9 @@ class InvestmentFunction : public C05Function , public Block {
   *        (hence, range.second <= get_num_active_var());
   *
   * @param issueMod decides if and how the C05FunctionModVarsRngd (since a
-  *        InvestmentFunction is strongly quasi-additive, and with shift() == 0
-  *        as expected) is issued, as described in Observer::make_par(). */
+  *        InvestmentFunction is strongly quasi-additive, and with
+  *        shift() == 0 as expected) is issued, as described in
+  *        Observer::make_par(). */
 
  void remove_variables( Range range , ModParam issueMod = eModBlck )
   override final;
@@ -1094,8 +1105,7 @@ class InvestmentFunction : public C05Function , public Block {
                         ModParam issueMod = eModBlck ) override final;
 
 /*--------------------------------------------------------------------------*/
-
- /// it informs the InvestmentFunction whether the bounds were reformulated
+ /// informs the InvestmentFunction whether the bounds were reformulated
  /** This functions informs the InvestmentFunction whether the bounds on the
   * active variables have been reformulated.
   *
@@ -1120,13 +1130,13 @@ class InvestmentFunction : public C05Function , public Block {
 
  void reformulated_bounds( bool reformulated ) {
   f_reformulated_bounds = reformulated;
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
  void set_num_sub_blocks_per_stage( Index n ) {
   f_num_sub_blocks_per_stage = n;
- }
+  }
 
 /** @} ---------------------------------------------------------------------*/
 /*----------- METHODS FOR Saving THE DATA OF THE InvestmentFunction --------*/
@@ -1231,7 +1241,8 @@ class InvestmentFunction : public C05Function , public Block {
   *   InvestmentFunction. This variable is optional. If it is not provided
   *   then all disinvestment costs are considered to be zero.
   *
-  * - The group "InnerBlock", containing the description of the inner Block. */
+  * - The group "InnerBlock", containing the description of the inner Block.
+ */
 
  void serialize( netCDF::NcGroup & group ) const override;
 
@@ -1262,13 +1273,13 @@ class InvestmentFunction : public C05Function , public Block {
   * not have a sub-Block or its sub-Block does not have a Solver attached to
   * it, then an exception is thrown. */
 
- FunctionValue get_value() const override;
+ FunctionValue get_value( void ) override;
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns a lower estimate of the InvestmentFunction
  /** This method simply returns get_value(). */
 
- FunctionValue get_lower_estimate() const override {
+ FunctionValue get_lower_estimate( void ) override {
   return( get_value() );
  }
 
@@ -1276,14 +1287,14 @@ class InvestmentFunction : public C05Function , public Block {
  /// returns an upper estimate of the InvestmentFunction
  /** This method simply returns get_value(). */
 
- FunctionValue get_upper_estimate() const override {
+ FunctionValue get_upper_estimate( void ) override {
   return( get_value() );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// returns the "constant term" of the InvestmentFunction
 
- FunctionValue get_constant_term() const override;
+ FunctionValue get_constant_term( void ) const override;
 
 /*--------------------------------------------------------------------------*/
  /// returns true only if this InvestmentFunction is convex
@@ -1292,7 +1303,7 @@ class InvestmentFunction : public C05Function , public Block {
   * its sub-Block is maximization, then this method returns false. Otherwise,
   * it returns true. */
 
- bool is_convex() const override;
+ bool is_convex( void ) override;
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns true only if this InvestmentFunction is concave
@@ -1301,7 +1312,7 @@ class InvestmentFunction : public C05Function , public Block {
   * its sub-Block is minimization, then this method returns false. Otherwise,
   * it returns true. */
 
- bool is_concave() const override;
+ bool is_concave( void ) override;
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns true only if this InvestmentFunction is linear
@@ -1310,7 +1321,7 @@ class InvestmentFunction : public C05Function , public Block {
   * linear. We do not attempt to find this out and this method simply returns
   * \c false. */
 
- bool is_linear() const override { return( false ); }
+ bool is_linear( void ) override { return( false ); }
 
 /*--------------------------------------------------------------------------*/
  /// tells whether a linearization is available
@@ -1332,13 +1343,13 @@ class InvestmentFunction : public C05Function , public Block {
 
  bool is_linearization_there( Index name ) const override final {
   return( global_pool.is_linearization_there( name ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
  bool is_linearization_vertical( Index name ) const override final {
   return( global_pool.is_linearization_vertical( name ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// stores a combination of the given linearizations
@@ -1359,7 +1370,8 @@ class InvestmentFunction : public C05Function , public Block {
   *    equal to - #dblAAccMlt), and the sum of the coefficients of the
   *    diagonal linearizations must be approximately equal to 1:
   *
-  *    abs( 1 - sum coefficients of diagonal linearizations ) <= K * #dblAAccMlt
+  *    abs( 1 - sum coefficients of diagonal linearizations ) <=
+  *                                                         K * #dblAAccMlt
   *
   *    where K is the number of linearizations being combined.
   *
@@ -1367,9 +1379,9 @@ class InvestmentFunction : public C05Function , public Block {
   * the second case it is a diagonal linearization. If none of the above two
   * conditions are met, an exception is thrown. */
 
- void store_combination_of_linearizations
- ( c_LinearCombination & coefficients , Index name ,
-   ModParam issueMod = eModBlck ) override final;
+ void store_combination_of_linearizations(
+			   c_LinearCombination & coefficients , Index name ,
+			   ModParam issueMod = eModBlck ) override final;
 
 /*--------------------------------------------------------------------------*/
  /// specify which linearization is "the important one"
@@ -1377,15 +1389,15 @@ class InvestmentFunction : public C05Function , public Block {
  void set_important_linearization( LinearCombination && coefficients )
   override final {
   global_pool.set_important_linearization( std::move( coefficients ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// return the combination used to form "the important linearization"
 
- c_LinearCombination & get_important_linearization_coefficients()
+ c_LinearCombination & get_important_linearization_coefficients( void )
   const override final {
   return( global_pool.get_important_linearization_coefficients() );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// delete the given linearization from the global pool of linearizations
@@ -1400,27 +1412,27 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 
- void get_linearization_coefficients
- ( FunctionValue * g , Range range = std::make_pair( 0 , Inf< Index >() ) ,
-   Index name = Inf< Index >() ) override;
+ void get_linearization_coefficients( FunctionValue * g ,
+			 Range range = std::make_pair( 0 , Inf< Index >() ) ,
+				      Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
 
- void get_linearization_coefficients
- ( SparseVector & g , Range range = std::make_pair( 0 , Inf< Index >() ) ,
-   Index name = Inf< Index >() ) override;
+ void get_linearization_coefficients( SparseVector & g ,
+		         Range range = std::make_pair( 0 , Inf< Index >() ) ,
+				      Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
 
- void get_linearization_coefficients
- ( FunctionValue * g , c_Subset & subset  , bool ordered = false ,
-   Index name = Inf< Index >() ) override;
+ void get_linearization_coefficients( FunctionValue * g , c_Subset & subset ,
+				      bool ordered = false ,
+				      Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
 
- void get_linearization_coefficients
- ( SparseVector & g , c_Subset & subset , bool ordered = false ,
-   Index name = Inf< Index >() ) override;
+ void get_linearization_coefficients( SparseVector & g , c_Subset & subset ,
+				      bool ordered = false ,
+				      Index name = Inf< Index >() ) override;
 
 /*--------------------------------------------------------------------------*/
  /// return the constant term of a linearization
@@ -1450,10 +1462,10 @@ class InvestmentFunction : public C05Function , public Block {
  inline T * get_solver( Index i ) const {
   if( i >= v_Block.front()->get_registered_solvers().size() )
    return( nullptr );
-  return( dynamic_cast< T * >
-          ( * std::next( v_Block.front()->get_registered_solvers().begin() ,
-                         i ) ) );
- }
+  return( dynamic_cast< T * >(
+	     * std::next( v_Block.front()->get_registered_solvers().begin() ,
+			  i ) ) );
+  }
 
 /**@} ----------------------------------------------------------------------*/
 /*-------- METHODS FOR READING THE DATA OF THE InvestmentFunction ----------*/
@@ -1462,19 +1474,18 @@ class InvestmentFunction : public C05Function , public Block {
  * @{ */
 
  /// returns the indices of the assets that are subject to investment
- const std::vector< Index > & get_asset_indices() const {
+ const std::vector< Index > & get_asset_indices( void ) const {
   return( v_asset_indices );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the types of the assets that are subject to investment
- const std::vector< AssetType > & get_asset_type() const {
+
+ const std::vector< AssetType > & get_asset_type( void ) const {
   return( v_asset_type );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the amount of the given asset currently installed in the system
  /** This function returns the amount of the given \p asset that is currently
   * installed in the system and, therefore, that is not subject to investment
@@ -1485,12 +1496,14 @@ class InvestmentFunction : public C05Function , public Block {
   * @return The amount of the given \p asset currently installed in the
   *         system. */
 
- double get_installed_quantity( Index asset ) const {
+ double get_installed_quantity( Index asset ) const
+ {
   if( v_installed_quantity.empty() )
    return( 1 );
+
   assert( asset < v_installed_quantity.size() );
   return( v_installed_quantity[ asset ] );
- }
+  }
 
 /** @} ---------------------------------------------------------------------*/
 /*-------------------- Methods for handling Modification -------------------*/
@@ -1517,11 +1530,12 @@ class InvestmentFunction : public C05Function , public Block {
   * InvestmentFunction; it is virtual so that derived classes can print their
   * specific information in the format they choose. */
 
- void print( std::ostream &output ) const override {
+ void print( std::ostream &output ) override {
   output << "InvestmentFunction [" << this << "]"
          << " with " << get_num_active_var() << " active variables";
- }
+  }
 
+/*--------------------------------------------------------------------------*/
  /// load the InvestmentFunction out of an input stream
  /** This method loads the InvestmentFunction out of an input stream. */
 
@@ -1531,7 +1545,7 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------- PROTECTED FIELDS  ----------------------------*/
 /*--------------------------------------------------------------------------*/
 
- VarVector v_x; ///< the pointers to the active variables x
+ VarVector v_x;  ///< the pointers to the active variables x
 
  bool f_blocks_are_updated = false;
  ///< indicates whether the sub-Blocks are updated
@@ -1569,9 +1583,9 @@ class InvestmentFunction : public C05Function , public Block {
   * if the lower bound l is finite. This bool variable thus indicates whether
   * the natural bounds on the active variables have been reformulated. */
 
- bool f_replicate_battery = false; ///< replicate battery units
+ bool f_replicate_battery = false;       ///< replicate battery units
 
- bool f_replicate_intermittent = false; ///< replicate intermittent units
+ bool f_replicate_intermittent = false;  ///< replicate intermittent units
 
  bool f_has_value = false;
  ///< the value of the Function was successfully computed
@@ -1582,7 +1596,7 @@ class InvestmentFunction : public C05Function , public Block {
  Index f_num_sub_blocks_per_stage = 1;
  ///< number of sub-Blocks per stage in SDDPBlock
 
- void * f_id; ///< the "identity" of the InvestmentFunction
+ void * f_id;  ///< the "identity" of the InvestmentFunction
 
  FunctionValue f_value;
  ///< the value of this InvestmentFunction after compute() is called
@@ -1594,10 +1608,10 @@ class InvestmentFunction : public C05Function , public Block {
  ///< indices of the assets that are subject to investment
 
  std::vector< Index > v_greedy_solvers;
- ///< Indices of the SDDPGreedySolver
+ ///< indices of the SDDPGreedySolver
 
  SDDPSolver * f_sddp_solver = nullptr;
- ///< Pointer to the SDDPSolver
+ ///< pointer to the SDDPSolver
 
  std::vector< AssetType > v_asset_type;
  ///< the type of each asset that is subject to investment
@@ -1661,7 +1675,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  public:
 
-  static constexpr auto NaN = std::numeric_limits< FunctionValue >::quiet_NaN();
+  static constexpr auto NaN =
+                           std::numeric_limits< FunctionValue >::quiet_NaN();
 
 /*--------------------------------------------------------------------------*/
 
@@ -1690,8 +1705,8 @@ class InvestmentFunction : public C05Function , public Block {
    * - The dimension "InvestmentFunction_MaxGlob" containing 1 + the maximum
    *   active name in the global pool; this means that there can be only
    *   InvestmentFunction_MaxGlob nonempty entries in the global pool, and the
-   *   largest possible name of an active entry is InvestmentFunction_MaxGlob -
-   *   1. This variable is optional. If it is not present then 0 (empty
+   *   largest possible name of an active entry is InvestmentFunction_MaxGlob
+   *   - 1. This variable is optional. If it is not present then 0 (empty
    *   global pool) is assumed.
    *
    * - The variable "InvestmentFunction_Type", of type netCDF::NcByte and
@@ -1772,12 +1787,12 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
   /// returns the size of the global pool
 
-  Index size() const { return( linearization_constants.size() ); }
+  Index size( void ) const { return( linearization_constants.size() ); }
 
 /*--------------------------------------------------------------------------*/
   /// returns true if and only if this GlobalPool contains no linearization
 
-  bool empty() const {
+  bool empty( void ) const {
    return( std::all_of( linearization_constants.cbegin() ,
                         linearization_constants.cend() ,
                         []( const auto v ) { return( std::isnan( v ) ); } ) );
@@ -1827,14 +1842,16 @@ class InvestmentFunction : public C05Function , public Block {
    * @return the value of the linearization constant that is stored under the
    *         given \p name. */
 
-  FunctionValue get_linearization_constant( Index name ) const {
+  FunctionValue get_linearization_constant( Index name ) const
+  {
    if( name < size() )
     return( linearization_constants[ name ] );
+
    throw( std::invalid_argument
           ( "InvestmentFunction::GlobalPool::get_linearization_constant: "
             "linearization with name " + std::to_string( name ) +
             " does not exist." ) );
-  }
+   }
 
 /*--------------------------------------------------------------------------*/
   /// sets the linearization constant under the given name
@@ -1845,7 +1862,8 @@ class InvestmentFunction : public C05Function , public Block {
    *
    * @param name the name under which the constant will be stored. */
 
-  void set_linearization_constant( FunctionValue constant , Index name ) {
+  void set_linearization_constant( FunctionValue constant , Index name )
+  {
    if( name >= size() )
     throw( std::invalid_argument
            ( "InvestmentFunction::GlobalPool::set_linearization_constant: "
@@ -1853,7 +1871,7 @@ class InvestmentFunction : public C05Function , public Block {
              " does not exist." ) );
 
    linearization_constants[ name ] = constant;
-  }
+   }
 
 /*--------------------------------------------------------------------------*/
   /// invalidates all linearizations
@@ -1864,22 +1882,22 @@ class InvestmentFunction : public C05Function , public Block {
    * should be destroyed, explicit calls to delete_linearization() must be
    * made. */
 
-  void invalidate() {
+  void invalidate( void ) {
    linearization_constants.assign( linearization_constants.size() , NaN );
-  }
+   }
 
 /*--------------------------------------------------------------------------*/
 
   void set_important_linearization( LinearCombination && coefficients ) {
    important_linearization_lin_comb = std::move( coefficients );
-  }
+   }
 
 /*--------------------------------------------------------------------------*/
   /// return the combination used to form "the important linearization"
 
   c_LinearCombination & get_important_linearization_coefficients() const {
    return( important_linearization_lin_comb );
-  }
+   }
 
 /*--------------------------------------------------------------------------*/
   /// stores a combination of the linearizations that are already stored
@@ -1900,9 +1918,9 @@ class InvestmentFunction : public C05Function , public Block {
    *
    * @param AAccMlt the maximum absolute error in the multipliers. */
 
-  void store_combination_of_linearizations
-  ( c_LinearCombination & linear_combination , Index name ,
-    FunctionValue AAccMlt );
+  void store_combination_of_linearizations(
+				  c_LinearCombination & linear_combination ,
+				  Index name , FunctionValue AAccMlt );
 
 /*--------------------------------------------------------------------------*/
   /// deletes the linearization with the given name
@@ -1935,12 +1953,14 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 
   void get_linearization_coefficients( FunctionValue * g , c_Subset & subset ,
-                                       const bool ordered , Index name ) const;
+                                       const bool ordered , Index name )
+   const;
 
 /*--------------------------------------------------------------------------*/
 
   void get_linearization_coefficients( SparseVector & g , c_Subset & subset ,
-                                       const bool ordered , Index name ) const;
+                                       const bool ordered , Index name )
+   const;
 
 /*--------------------------------------------------------------------------*/
 
@@ -1963,7 +1983,6 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE METHODS -------------------------------*/
 /*--------------------------------------------------------------------------*/
-
  /// Update the given UnitBlock according to the given \p investment
  /** This function updates the given UnitBlock according to the given \p
   * investment.
@@ -1975,7 +1994,6 @@ class InvestmentFunction : public C05Function , public Block {
  void update_unit_block( UnitBlock * block , double investment );
 
 /*--------------------------------------------------------------------------*/
-
  /// Update a set of UnitBlock according to the given \p investment
  /** This function updates a set of UnitBlock, given by their indices \p
   * block_indices, according to the given \p investment.
@@ -1992,7 +2010,6 @@ class InvestmentFunction : public C05Function , public Block {
                           const std::vector< double > & investment );
 
 /*--------------------------------------------------------------------------*/
-
  /// Update a set of line according to the given \p investment
  /** This function updates a set of transmission lines, given by their indices
   * \p line_indices, according to the given \p investment.
@@ -2010,19 +2027,17 @@ class InvestmentFunction : public C05Function , public Block {
                              const std::vector< double > & investment );
 
 /*--------------------------------------------------------------------------*/
-
  /// update the sub-Block of the UCBlock
  /** This function updates the sub-Block of the UCBlock to reflect the current
   * values of the x variables. */
 
- void update_blocks();
+ void update_blocks( void );
 
 /*--------------------------------------------------------------------------*/
-
  /// sends a nuclear modification, invalidates the global pool
- /** Besides sending a "nuclear modification" for Function, it also invalidates
-  * the global pool and declares that the Constraint of the sub-Block are not
-  * updated.
+ /** Besides sending a "nuclear modification" for Function, it also
+  * invalidates the global pool and declares that the Constraint of the
+  * sub-Block are not updated.
   *
   * @param chnl the name of the channel to which the Modification should be
   *        sent. */
@@ -2030,7 +2045,6 @@ class InvestmentFunction : public C05Function , public Block {
  void send_nuclear_modification( const Observer::ChnlName chnl = 0 );
 
 /*--------------------------------------------------------------------------*/
-
  /// return a pointer to the Solver of the UCBlock associated with \p stage
  /** This function returns a pointer to the Solver of the UCBlock associated
   * with the given \p stage in the \p i-th sub-Block..
@@ -2045,7 +2059,6 @@ class InvestmentFunction : public C05Function , public Block {
  CDASolver * get_ucblock_solver( Index stage , Index i ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// returns a pointer to the UCBlock associated with the given \p stage
  /** This function returns a pointer to the UCBlock associated with
   * the given \p stage in the \p i-th sub-Block.
@@ -2060,7 +2073,6 @@ class InvestmentFunction : public C05Function , public Block {
  UCBlock * get_ucblock( Index stage , Index i ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// returns a pointer to the UCBlock (if any)
  /** If the inner Block of this function is an UCBlock, it returns a pointer
   * to it. Otherwise, it returns nullptr.
@@ -2069,10 +2081,9 @@ class InvestmentFunction : public C05Function , public Block {
   *         Block of this InvestmentFunction is not an UCBlock, it return
   *         nullptr. */
 
- UCBlock * get_ucblock() const;
+ UCBlock * get_ucblock( void ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// returns a pointer to the SDDPBlock (if any)
  /** If the inner Block of this function is an SDDPBlock, it returns a pointer
   * to it. Otherwise, it returns nullptr.
@@ -2081,36 +2092,35 @@ class InvestmentFunction : public C05Function , public Block {
   *         inner Block of this InvestmentFunction is not an SDDPBlock, it
   *         return nullptr. */
 
- SDDPBlock * get_sddp_block() const;
+ SDDPBlock * get_sddp_block( void ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// reset the BlockConfig of the inner Block to the default one
+
  void set_default_inner_Block_BlockConfig();
 
 /*--------------------------------------------------------------------------*/
-
  /// reset the BlockSolverConfig of the inner Block to the default one
+
  void set_default_inner_Block_BlockSolverConfig();
 
 /*--------------------------------------------------------------------------*/
-
  /// reset the configuration of the inner Block to the default one
  /** Reset both the BlockConfig and the BlockSolverConfig of the inner Block
   * to the default ones. */
 
- void set_default_inner_Block_configuration() {
+ void set_default_inner_Block_configuration( void ) {
   set_default_inner_Block_BlockSolverConfig();
   set_default_inner_Block_BlockConfig();
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
  int get_inner_block_objective_sense() const;
 
 /*--------------------------------------------------------------------------*/
-
  /// prepares the linearization for a new simulation
+
  void reset_linearization();
 
 /*--------------------------------------------------------------------------*/
@@ -2119,7 +2129,6 @@ class InvestmentFunction : public C05Function , public Block {
                                      Index sub_block_index );
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the contribution to the linearization by the given Block
  /** This function computes and returns the contribution to the linearization
   * by the given IntermittentUnitBlock, considering the constraints that are
@@ -2138,7 +2147,6 @@ class InvestmentFunction : public C05Function , public Block {
                                      Index var_index );
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the contribution to the linearization by the given Block
  /** This function computes and returns the contribution to the linearization
   * by the given BatteryUnitBlock, considering the constraints that are
@@ -2157,7 +2165,6 @@ class InvestmentFunction : public C05Function , public Block {
                                      Index var_index );
 
 /*--------------------------------------------------------------------------*/
-
  /// updates the linearization to reflect the most recent scenario considered
  /** This function updates the linearization to reflect the most recent
   * scenario considered, whose subproblem was solved by the Solver attached to
@@ -2169,31 +2176,30 @@ class InvestmentFunction : public C05Function , public Block {
  void update_linearization( Index sub_block_index );
 
 /*--------------------------------------------------------------------------*/
-
  /// updates the linearization with respect to the set of UnitBlock
- void update_linearization_unit_blocks
- ( Index stage , Index sub_block_index ,
-   const std::vector< std::pair< Index , Index > > & block_indices );
+
+ void update_linearization_unit_blocks( Index stage , Index sub_block_index ,
+	   const std::vector< std::pair< Index , Index > > & block_indices );
 
 /*--------------------------------------------------------------------------*/
-
  /// updates the linearization with respect to the set of NetworkBlock
- void update_linearization_network_blocks
- ( Index stage , Index sub_block_index ,
-   const std::vector< std::pair< Index , Index > > & line_indices );
+
+ void update_linearization_network_blocks( Index stage ,
+					   Index sub_block_index ,
+            const std::vector< std::pair< Index , Index > > & line_indices );
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the node to which the given generator belongs
- Index get_node( Index stage , Index unit_block_index , Index generator ) const;
+
+ Index get_node( Index stage , Index unit_block_index , Index generator )
+  const;
 
 /*--------------------------------------------------------------------------*/
-
  /// builds the mapping between generator and the node it belongs to
+
  void build_generator_node_map();
 
 /*--------------------------------------------------------------------------*/
-
  /// returns a pointer to the BendersBFunction associated with the given stage
  /** This function returns a pointer to the BendersBFunction associated with
   * the given \p stage in the \p i-th sub-Block.
@@ -2208,7 +2214,6 @@ class InvestmentFunction : public C05Function , public Block {
  BendersBFunction * get_benders_function( Index stage , Index i ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the value of the i-th active variable
  /** This function returns the value of the i-th active variable, possibly
   * taking into account its lower bound. If \p actual is \c true, then this
@@ -2232,15 +2237,16 @@ class InvestmentFunction : public C05Function , public Block {
   * (actually, not minus infinity), and \p actual is false, then this function
   * returns x + l. Otherwise, it returns the value of x. */
 
- double get_var_value( Index i , bool actual = true ) const {
-  if( f_reformulated_bounds && ( ! actual ) && ( i < v_lower_bound.size() ) &&
-      ( v_lower_bound[ i ] > -Inf< double >() ) )
+ double get_var_value( Index i , bool actual = true ) const
+ {
+  if( f_reformulated_bounds && ( ! actual ) && ( i < v_lower_bound.size() )
+      && ( v_lower_bound[ i ] > -Inf< double >() ) )
    return( v_x[ i ]->get_value() + v_lower_bound[ i ] );
+
   return( v_x[ i ]->get_value() );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the lower bound for the given active variable
  /** This function returns the lower bound for the value of the i-th active
   * variable of this InvestmentFunction.
@@ -2250,54 +2256,60 @@ class InvestmentFunction : public C05Function , public Block {
   * @return the lower bound for the value of the i-th active variable of this
   *         InvestmentFunction. */
 
- double get_var_lower_bound( Index i ) const {
+ double get_var_lower_bound( Index i ) const
+ {
   if( i < v_lower_bound.size() )
    return( v_lower_bound[ i ] );
+
   return( -Inf< double >() );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the investment cost of the i-th asset
- double get_cost( Index i ) const {
+
+ double get_cost( Index i ) const
+ {
   if( i < v_cost.size() )
    return( v_cost[ i ] );
+
   return( 0 );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the disinvestment cost of the i-th asset
- double get_disinvestment_cost( Index i ) const {
+
+ double get_disinvestment_cost( Index i ) const
+ {
   if( i < v_disinvestment_cost.size() )
    return( v_disinvestment_cost[ i ] );
+
   return( 0 );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the number of scenarios
- Index get_number_scenarios() const;
+
+ Index get_number_scenarios( void ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the number of stages
- Index get_number_stages() const;
+
+ Index get_number_stages( void ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// locks a(n unlocked) sub-Block and returns its index
- Index lock_sub_block();
+
+ Index lock_sub_block( void );
 
 /*--------------------------------------------------------------------------*/
-
  /// unlocks the i-th sub-Block
+
  void unlock_sub_block( Index i );
 
 /*--------------------------------------------------------------------------*/
-
  /// identifies the relevant Solver of the inner Block
- void build_solver_map();
+
+ void build_solver_map( void );
 
 /*--------------------------------------------------------------------------*/
 
@@ -2309,28 +2321,27 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 
- SMSpp_insert_in_factory_h; // insert InvestmentFunction in the Block factory
+ SMSpp_insert_in_factory_h;  // insert InvestmentFunction in the Block factory
 
 /*--------------------------------------------------------------------------*/
 /*---------------------------- PRIVATE FIELDS  -----------------------------*/
 /*--------------------------------------------------------------------------*/
 
- /// It indicates whether each sub-Block is locked
+ /// indicates whether each sub-Block is locked
  std::vector< bool > is_locked;
 
- /// This is the waiting time before trying to acquire the lock again
+ /// this is the waiting time before trying to acquire the lock again
  double waiting_time = 1e-4;
 
- /// Global pool of linearizations
+ /// global pool of linearizations
  GlobalPool global_pool;
 
- /// Name of the netCDF sub-group containing the description of the inner Block
+ /// mame of the netCDF sub-group containing the inner Block
  inline static const std::string BLOCK_NAME = "InnerBlock";
 
 /*--------------------------------------------------------------------------*/
 /*---------------------------- PRIVATE METHODS  ----------------------------*/
 /*--------------------------------------------------------------------------*/
-
  /// returns the value of the i-th linear constraint
  /** This function returns the value of the i-th linear constraints, i.e.,
   * a_i'x.
@@ -2342,7 +2353,6 @@ class InvestmentFunction : public C05Function , public Block {
  double compute_linear_constraint_value( Index i ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// returns true if and only if the unverified constraints are satisfied
  /** This function returns true if and only if the linear constraints that
   * have not been verified by a previous call to this function are satisfied,
@@ -2359,10 +2369,9 @@ class InvestmentFunction : public C05Function , public Block {
   * @return true if and only if the unverified linear constraints are
   *         satisfied. */
 
- bool constraints_are_satisfied();
+ bool constraints_are_satisfied( void );
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the worst possible value for this InvestmentFunction
  /** Thus function returns the worst possible value for this
   * InvestmentFunction, which is +Inf if the sense of the Objective of the
@@ -2371,31 +2380,31 @@ class InvestmentFunction : public C05Function , public Block {
   * @return +Inf if the sense of the Objective of the inner Block is
   *         Objective::eMin and -Inf otherwise. */
 
- FunctionValue worst_value() const {
+ FunctionValue worst_value( void ) const
+ {
   if( get_inner_block_objective_sense() == Objective::eMin )
    return( Inf< FunctionValue >() );
+
   return( -Inf< FunctionValue >() );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// output the values of the active Variable of this InvestmentFunction
  /** This function appends the current values of the active Variable of this
   * InvestmentFunction into the file whose name is given by the parameter
   * #strOutputFile (if this name is not empty). */
 
- void output_variable_values() const;
+ void output_variable_values( void ) const;
 
 /*--------------------------------------------------------------------------*/
-
  /// output the current value of this InvestmentFunction
  /** This function appends the value of this InvestmentFunction into the file
   * whose name is given by the parameter #strOutputFile (if this name is not
   * empty). */
 
- void output_function_value() const;
+ void output_function_value( void ) const;
 
-};  // end( class( InvestmentFunction ) )
+ };  // end( class( InvestmentFunction ) )
 
 /*--------------------------------------------------------------------------*/
 /*---------------------- CLASS InvestmentFunctionState ---------------------*/
@@ -2407,8 +2416,8 @@ class InvestmentFunction : public C05Function , public Block {
  * Solution, and the coefficients of the important combination of
  * linearizations. */
 
-class InvestmentFunctionState : public State {
-
+class InvestmentFunctionState : public State
+{
 /*----------------------- PUBLIC PART OF THE CLASS -------------------------*/
 
 public:
@@ -2467,11 +2476,11 @@ protected:
  void print( std::ostream &output ) const override {
   output << "InvestmentFunctionState [" << this
          << "] with max global pool element " << global_pool.size();
- }
+  }
 
 /*--------------------------- PROTECTED FIELDS -----------------------------*/
-
  /// global pool of linearizations
+
  InvestmentFunction::GlobalPool global_pool;
 
 /*---------------------- PRIVATE PART OF THE CLASS -------------------------*/
@@ -2484,7 +2493,7 @@ private:
 
 /*--------------------------------------------------------------------------*/
 
-};  // end( class( InvestmentFunctionState ) )
+ };  // end( class( InvestmentFunctionState ) )
 
 /*--------------------------------------------------------------------------*/
 /*--------------------------------------------------------------------------*/

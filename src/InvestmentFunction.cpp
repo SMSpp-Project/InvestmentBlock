@@ -1416,50 +1416,50 @@ static RealObjective::OFValue get_recours_obj( const Block * blck ) {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
-Function::FunctionValue InvestmentFunction::get_constant_term( void ) const {
+Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
+{
  if( auto bk = get_nested_Block( 0 ) )
   return( get_recours_obj( bk ) );
  else
   return( 0 );
-}
+ }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_convex( void ) const {
- return( true );
-}
+bool InvestmentFunction::is_convex( void ) { return( true ); }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_concave( void ) const {
- return( false );
-}
+bool InvestmentFunction::is_concave( void ) { return( false ); }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::has_linearization( const bool diagonal ) {
+bool InvestmentFunction::has_linearization( bool diagonal )
+{
  if( diagonal ) {
   f_diagonal_linearization_required = true;
   return( f_has_diagonal_linearization );
- }
+  }
  else {
   f_diagonal_linearization_required = false;
   return( f_violated_constraint.first < Inf< Index >() );
- }
-}  // end( InvestmentFunction::has_linearization )
+  }
+ }  // end( InvestmentFunction::has_linearization )
 
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::compute_new_linearization( bool diagonal ) {
+bool InvestmentFunction::compute_new_linearization( bool diagonal )
+{
  if( diagonal )
   return( false );
  return( ! constraints_are_satisfied() );
-}
+ }
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::store_linearization( Index name , ModParam issueMod ) {
+void InvestmentFunction::store_linearization( Index name , ModParam issueMod )
+{
  if( name >= global_pool.size() )
   throw( std::invalid_argument( "InvestmentFunction::store_linearization: "
                                 "invalid global pool name: " +
@@ -1477,7 +1477,7 @@ void InvestmentFunction::store_linearization( Index name , ModParam issueMod ) {
                                  Observer::par2concern( issueMod ) ) ,
                                Observer::par2chnl( issueMod ) );
 
-} // end InvestmentFunction::store_linearization( Index )
+ } // end InvestmentFunction::store_linearization( Index )
 
 /*--------------------------------------------------------------------------*/
 
@@ -1691,11 +1691,14 @@ InvestmentFunction::get_linearization_constant( Index name ) {
 
 /*--------------------------------------------------------------------------*/
 
-Function::FunctionValue InvestmentFunction::get_value( void ) const {
+Function::FunctionValue InvestmentFunction::get_value( void )
+{
  if( f_has_value )
   return( f_value );
+
  return( worst_value() );
-} // end ( InvestmentFunction::get_value )
+
+ }  // end ( InvestmentFunction::get_value )
 
 /*--------------------------------------------------------------------------*/
 
