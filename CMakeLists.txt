@@ -57,10 +57,6 @@ if (NOT hasParent)
     find_package(UCBlock REQUIRED)
 endif ()
 
-find_package(OpenMP)
-find_package(Boost COMPONENTS mpi)
-find_package(MPI)
-
 # ----- Configuration header ------------------------------------------------ #
 # This will generate a *Config.h header in the build directory.
 configure_file(cmake/${modName}Config.h.in ${modName}Config.h)
@@ -106,15 +102,6 @@ target_link_libraries(${modName} PUBLIC
                       ${modNamespace}::MILPSolver
                       ${modNamespace}::SDDPBlock
                       ${modNamespace}::UCBlock)
-
-if (OPENMP_FOUND)
-    target_link_libraries(${modName} PUBLIC OpenMP::OpenMP_CXX)
-endif ()
-
-if (MPI_CXX_FOUND AND Boost_MPI_FOUND)
-    target_compile_definitions(${modName} PRIVATE USE_MPI)
-    target_link_libraries(${modName} PUBLIC Boost::mpi MPI::MPI_CXX)
-endif ()
 
 # This alias is defined so that executables in this same project can use
 # the library with this notation.
@@ -201,7 +188,7 @@ endif ()
 # Using this with the umbrella project is too messy.
 if (NOT hasParent)
     set(CPACK_PACKAGE_VENDOR "SMS++ Team")
-    set(CPACK_PACKAGE_CONTACT "Rafael Durbano Lobato")
+    set(CPACK_PACKAGE_CONTACT "Niccolo' Iardella")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY ${PROJECT_DESCRIPTION})
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/LICENSE")
     set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_LIST_DIR}/README.md")
