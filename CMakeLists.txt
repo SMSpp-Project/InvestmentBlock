@@ -51,8 +51,6 @@ include(BuildType)
 # If it's not being called by the umbrella, we need to
 # look for the system-installed libraries.
 if (NOT hasParent)
-    find_package(BundleSolver REQUIRED)
-    find_package(MILPSolver REQUIRED)
     find_package(SDDPBlock REQUIRED)
     find_package(UCBlock REQUIRED)
 endif ()
@@ -98,8 +96,6 @@ target_include_directories(
 # library, INTERFACE means they will be linked only to the targets that depend
 # on this library.
 target_link_libraries(${modName} PUBLIC
-                      ${modNamespace}::BundleSolver
-                      ${modNamespace}::MILPSolver
                       ${modNamespace}::SDDPBlock
                       ${modNamespace}::UCBlock)
 

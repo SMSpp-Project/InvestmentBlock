@@ -67,7 +67,6 @@
 #include <BatteryUnitBlock.h>
 #include <BendersBlock.h>
 #include <BlockSolverConfig.h>
-#include <BundleSolver.h>
 #include <HydroSystemUnitBlock.h>
 #include <IntermittentUnitBlock.h>
 #include <NetworkBlock.h>
