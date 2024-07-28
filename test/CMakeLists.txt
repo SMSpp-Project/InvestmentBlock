@@ -15,6 +15,7 @@
 
 # ----- Standard unit tests ------------------------------------------------- #
 add_executable(InvestmentBlock_test test.cpp)
-target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock)
+target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock
+                                                   SMS++::BundleSolver)
 add_test(NAME InvestmentBlock_test
          COMMAND InvestmentBlock_test)
