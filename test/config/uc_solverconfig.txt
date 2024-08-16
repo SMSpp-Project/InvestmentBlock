@@ -3,12 +3,12 @@ BlockSolverConfig # The name of the configuration
 1  # The BlockSolverConfig is "differential"
 1  # The number of Solvers
 
-# Now all the names of the Solvers
+# now all the names of the Solver - - - - - - - - - - - - - - - - - - - - - -
 CPXMILPSolver
 
 1  # The number of ComputeConfigs
 
-# Now all the ComputeConfigs
+# now all the ComputeConfigs
 # 1st --------------------------------------
 ComputeConfig  # Type of the object
 1  # differential

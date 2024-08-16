@@ -4,6 +4,8 @@
 # A txt description of a BlockSolverConfig for an InvestmentBlock to be
 # solved by a BundleSolver
 #
+#   Antonio Frangioni
+#
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -13,7 +15,7 @@ BlockSolverConfig     # exact type of the Configuration object
 
 1  # number of (the names of) Solver in this BlockSolverConfig
 # now all the names of the Solver - - - - - - - - - - - - - - - - - - - - - -
-BundleSolver    # name of 1st Solver
+BundleSolver    # name of Solver
 
 1  # number of ComputeConfig in this BlockSolverConfig
 
