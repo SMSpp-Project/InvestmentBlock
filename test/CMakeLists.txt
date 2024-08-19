@@ -13,6 +13,8 @@
 #                             Universita' di Pisa                             #
 # --------------------------------------------------------------------------- #
 
+# TODO this test needs to me moved in system /tests submodule
+
 # Since we are using the block factory, objects from linked libraries
 # may wrongly appear unused, and by default the linker does not include them,
 # so we have to force the linking.
@@ -35,7 +37,17 @@ endif ()
 
 # ----- Standard unit tests ------------------------------------------------- #
 add_executable(InvestmentBlock_test test.cpp)
-target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock
-                                                   SMS++::BundleSolver)
+target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock)
+
+if (TARGET SMS++::MILPSolver)
+    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
+endif ()
+
+if (TARGET SMS++::BundleSolver)
+    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::BundleSolver)
+endif ()
+
 add_test(NAME InvestmentBlock_test
          COMMAND InvestmentBlock_test)
+
+# --------------------------------------------------------------------------- #
