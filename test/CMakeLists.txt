@@ -35,19 +35,33 @@ else ()
     endif ()
 endif ()
 
-# ----- Standard unit tests ------------------------------------------------- #
-add_executable(InvestmentBlock_test test.cpp)
-target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock)
-
-if (TARGET SMS++::MILPSolver)
-    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
+# ----- Requirements -------------------------------------------------------- #
+# If it's not being called by the umbrella, we need to
+# look for the system-installed libraries.
+if (NOT hasParent)
+    # Blocks
+    find_package(InvestmentBlock)
+    # Solvers
+    find_package(BundleSolver)
+    find_package(MILPSolver)
 endif ()
 
-if (TARGET SMS++::BundleSolver)
-    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::BundleSolver)
-endif ()
+# ----- Tests --------------------------------------------------------------- #
+if (TARGET SMS++::InvestmentBlock)
 
-add_test(NAME InvestmentBlock_test
-         COMMAND InvestmentBlock_test)
+    add_executable(InvestmentBlock_test test.cpp)
+    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock)
+
+    if (TARGET SMS++::BundleSolver)
+        target_link_libraries(InvestmentBlock_test PRIVATE SMS++::BundleSolver)
+    endif ()
+
+    if (TARGET SMS++::MILPSolver)
+        target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
+    endif ()
+
+    add_test(NAME InvestmentBlock_test
+             COMMAND InvestmentBlock_test)
+endif ()
 
 # --------------------------------------------------------------------------- #
