@@ -52,11 +52,9 @@ if (TARGET SMS++::InvestmentBlock)
     add_executable(InvestmentBlock_test test.cpp)
     target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock)
 
-    if (TARGET SMS++::BundleSolver)
+    if (TARGET SMS++::BundleSolver) # includes SMS+::MILPSolver
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::BundleSolver)
-    endif ()
-
-    if (TARGET SMS++::MILPSolver)
+    elseif (TARGET SMS++::MILPSolver)
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
     endif ()
 
