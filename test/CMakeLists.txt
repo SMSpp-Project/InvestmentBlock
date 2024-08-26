@@ -50,13 +50,14 @@ endif ()
 if (TARGET SMS++::InvestmentBlock)
 
     add_executable(InvestmentBlock_test test.cpp)
-    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock)
+    target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock
+                                                       SMS++::BundleSolver) # TODO this line needs to be removed and the following should be uncomment
 
-    if (TARGET SMS++::BundleSolver) # includes SMS+::MILPSolver
+    #[[if (TARGET SMS++::BundleSolver) # includes SMS+::MILPSolver
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::BundleSolver)
     elseif (TARGET SMS++::MILPSolver)
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
-    endif ()
+    endif ()]]
 
     add_test(NAME InvestmentBlock_test
              COMMAND InvestmentBlock_test)
