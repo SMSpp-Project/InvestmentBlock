@@ -53,9 +53,11 @@ if (TARGET SMS++::InvestmentBlock)
     target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock
                                                        SMS++::BundleSolver) # TODO this line needs to be removed and the following should be uncomment
 
-    #[[if (TARGET SMS++::BundleSolver) # includes SMS+::MILPSolver
+    #[[if (TARGET SMS++::BundleSolver)
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::BundleSolver)
-    elseif (TARGET SMS++::MILPSolver)
+    endif ()
+
+    if (TARGET SMS++::MILPSolver)
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
     endif ()]]
 
