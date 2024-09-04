@@ -17,5 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First test release
 
-[Unreleased]: https://gitlab.com/smspp/lagrangiandualsolver/-/compare/0.1.0...develop
+[Unreleased]: https://gitlab.com/smspp/investmentblock/-/compare/0.1.0...develop
+[0.1.0]: https://gitlab.com/smspp/investmentblock/-/tags/0.1.0
 
