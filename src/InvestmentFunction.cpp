@@ -679,7 +679,7 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
                            "Variable index " + std::to_string( i ) + "." ) );
 
  auto var = v_x[ i ];
- v_x.erase( v_x.begin() + i );    // erase it in v_x
+ v_x.erase( v_x.begin() + i ); // erase it in v_x
 
  // Erase the asset index, asset type, and the linear coefficient associated
  // with the Variable being removed
@@ -1205,7 +1205,6 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   }
  }
 
-
  // Optimization phase
 
  if( f_sddp_solver ) {
@@ -1385,7 +1384,7 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  f_has_value = true;
 
- // Finally, handle the events that happens at the end of compute()
+ // Finally, handle the events that happen at the end of compute()
 
  for( auto & event : v_events[ eBeforeTermination ] ) {
   auto result = event();
@@ -1420,9 +1419,8 @@ Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 {
  if( auto bk = get_nested_Block( 0 ) )
   return( get_recours_obj( bk ) );
- else
-  return( 0 );
- }
+ return( 0 );
+}
 
 /*--------------------------------------------------------------------------*/
 
@@ -1440,11 +1438,9 @@ bool InvestmentFunction::has_linearization( bool diagonal )
   f_diagonal_linearization_required = true;
   return( f_has_diagonal_linearization );
   }
- else {
-  f_diagonal_linearization_required = false;
-  return( f_violated_constraint.first < Inf< Index >() );
-  }
- }  // end( InvestmentFunction::has_linearization )
+ f_diagonal_linearization_required = false;
+ return( f_violated_constraint.first < Inf< Index >() );
+}  // end( InvestmentFunction::has_linearization )
 
 
 /*--------------------------------------------------------------------------*/
