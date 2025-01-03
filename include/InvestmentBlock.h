@@ -47,6 +47,7 @@
 #include "ColVariable.h"
 #include "FRealObjective.h"
 #include "InvestmentFunction.h"
+#include "OneVarConstraint.h"
 
 /*--------------------------------------------------------------------------*/
 /*----------------------------- NAMESPACE ----------------------------------*/
@@ -55,8 +56,6 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
-
- class BoxConstraint;   // forward declaration of BoxConstraint
 
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
