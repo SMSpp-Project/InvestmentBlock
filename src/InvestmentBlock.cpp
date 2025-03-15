@@ -152,7 +152,7 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc ) {
   return; // there is no bound constraint
 
  f_reformulate_bounds = 0;
- auto config = dynamic_cast<SimpleConfiguration< int > *>( stcc );
+ auto config = dynamic_cast< SimpleConfiguration< int > * >( stcc );
  if( ( ! config ) && f_BlockConfig )
   config = dynamic_cast< SimpleConfiguration< int > * >
    ( f_BlockConfig->f_static_constraints_Configuration );
