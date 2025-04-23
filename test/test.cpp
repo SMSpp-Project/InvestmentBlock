@@ -70,7 +70,6 @@
 #include <HydroSystemUnitBlock.h>
 #include <IntermittentUnitBlock.h>
 #include <NetworkBlock.h>
-#include <RBlockConfig.h>
 #include <SDDPBlock.h>
 #include <StochasticBlock.h>
 #include <SDDPGreedySolver.h>

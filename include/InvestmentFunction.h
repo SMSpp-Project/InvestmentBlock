@@ -1499,7 +1499,7 @@ class InvestmentFunction : public C05Function , public Block {
  double get_installed_quantity( Index asset ) const
  {
   if( v_installed_quantity.empty() )
-   return( 1 );
+   return( 0 );
 
   assert( asset < v_installed_quantity.size() );
   return( v_installed_quantity[ asset ] );

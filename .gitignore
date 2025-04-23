@@ -654,3 +654,5 @@ TSWLatexianTemp*
 
 # Makeindex log files
 *.lpz
+
+test/uc_lp.lp
