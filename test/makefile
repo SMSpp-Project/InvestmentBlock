@@ -17,12 +17,13 @@ NAME = IB_test
 DIR = .
 
 # common flags
-COMMON_SW = -std=c++17 -ferror-limit=1 -Wno-enum-compare
+COMMON_SW = -std=c++20 -ferror-limit=1 -Wno-enum-compare
 
 # debug switches
 SW_DEBUG = -g3 $(COMMON_SW)
 # debug switches with address sanitizer and extra pedantic warning
-SW_DEBUG_ASAN = -g3 -glldb -fno-inline -fsanitize=undefined -fsanitize=address -fno-omit-frame-pointer -Wpedantic -Wextra -Wno-unused-parameter $(COMMON_SW)
+#SW_DEBUG_ASAN = -g3 -glldb -fno-inline -fsanitize=undefined -fsanitize=address -fno-omit-frame-pointer -Wpedantic -Wextra -Wno-unused-parameter $(COMMON_SW)
+SW_DEBUG_ASAN = -g3 -glldb -fno-inline -fsanitize=undefined -fsanitize=address -fno-omit-frame-pointer -Wno-deprecated -Wno-unused-parameter $(COMMON_SW)
 # production switches with address sanitizer
 SW_RELEASE_ASAN = -O3 -DNDEBUG -fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined $(COMMON_SW)
 # production switches
