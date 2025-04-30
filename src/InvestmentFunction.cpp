@@ -186,7 +186,7 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
   // Deserialize the lower bound on the active variables
 
-  ::deserialize( group , "LowerBound" , { num_assets } , v_lower_bound ,
+  ::deserialize( group , "LowerBound" , num_assets , v_lower_bound ,
                  true , true );
 
   if( ! v_lower_bound.empty() ) {
@@ -3051,7 +3051,7 @@ void InvestmentFunction::GlobalPool::deserialize
 
  if( global_pool_size ) {
 
-  ::deserialize( group , "InvestmentFunction_Constants" , { global_pool_size } ,
+  ::deserialize( group , "InvestmentFunction_Constants" , global_pool_size ,
                  linearization_constants , false , false );
 
   auto nct = group.getVar( "InvestmentFunction_Type" );

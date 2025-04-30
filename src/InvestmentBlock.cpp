@@ -63,10 +63,10 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group ) {
  for( auto & variable : v_variables )
   variable.set_Block( this );
 
- ::deserialize( group , "LowerBound" , { num_assets } , v_lower_bound ,
+ ::deserialize( group , "LowerBound" , num_assets , v_lower_bound ,
                 true , true );
 
- ::deserialize( group , "UpperBound" , { num_assets } , v_upper_bound ,
+ ::deserialize( group , "UpperBound" , num_assets , v_upper_bound ,
                 true , true );
 
  f_objective_sense = Objective::eMin;
