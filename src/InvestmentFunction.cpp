@@ -363,20 +363,20 @@ void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::set_ComputeConfig( ComputeConfig * scfg ) {
-
+void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
+{
  if( v_Block.empty() ||
      std::any_of( v_Block.cbegin() , v_Block.cend() ,
                   []( Block * b ) { return( b == nullptr ); } ) )
   throw( std::logic_error( "InvestmentFunction::set_ComputeConfig: "
-                           "the inner Block is not present." ) );
+                           "the inner Block is not present" ) );
 
  if( ! scfg ) {
   // scfg is nullptr
   ThinComputeInterface::set_ComputeConfig();
   set_default_inner_Block_configuration();
   return;
- }
+  }
 
  if( ! scfg->f_extra_Configuration ) {
   // scfg->f_extra_Configuration is nullptr
@@ -384,68 +384,69 @@ void InvestmentFunction::set_ComputeConfig( ComputeConfig * scfg ) {
   if( ! scfg->f_diff )
    set_default_inner_Block_configuration();
   return;
- }
+  }
 
  auto config_map = dynamic_cast
   < SimpleConfiguration< std::map< std::string , Configuration * > > * >
   ( scfg->f_extra_Configuration );
 
  if( ! config_map )
-  // An invalid extra Configuration has not been provided.
+  // An invalid extra Configuration has been provided
   throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
-                                "invalid extra_Configuration." ) );
+                                "invalid extra_Configuration" ) );
 
  ThinComputeInterface::set_ComputeConfig( scfg );
 
  for( const auto & [ key , config ] : config_map->f_value ) {
-
   if( key == "BlockConfig" ) {
    if( ! config ) {
     if( ! scfg->f_diff )
      // A BlockConfig for the inner Block was not provided. The inner Block is
      // configured to its default configuration.
      set_default_inner_Block_BlockConfig();
-   }
+    }
    else if( auto block_config = dynamic_cast< BlockConfig * >( config ) ) {
     // A BlockConfig for the inner Block has been provided. Apply it.
     block_config->apply( v_Block.front() );
    }
    else
     // An invalid Configuration has been provided.
-    throw( std::invalid_argument
-           ( "InvestmentFunction::set_ComputeConfig: the Configuration "
-             "associated with key \"BlockConfig\" is not a BlockConfig." ) );
-  }
-  else if( key == "BlockSolverConfig" ) {
-   if( ! config ) {
-    if( ! scfg->f_diff )
-     // A BlockSolverConfig for the inner Block was not provided. The Solver
-     // of the inner Block (and their sub-Block, recursively) are unregistered
-     // and deleted.
-     set_default_inner_Block_BlockSolverConfig();
+    throw( std::invalid_argument(
+	     "InvestmentFunction::set_ComputeConfig: the Configuration "
+             "associated with key \"BlockConfig\" is not a BlockConfig" ) );
    }
-   else if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
-    // A BlockSolverConfig for the inner Block has been provided. Apply it.
-    bsc->apply( v_Block.front() );
-   }
-   else
-    // An invalid Configuration has been provided.
-    throw( std::invalid_argument
-           ( "InvestmentFunction::set_ComputeConfig: the Configuration "
+  else
+   if( key == "BlockSolverConfig" ) {
+    if( ! config ) {
+     if( ! scfg->f_diff )
+      // A BlockSolverConfig for the inner Block was not provided. The Solver
+      // of the inner Block (and their sub-Block, recursively) are
+      // unregistered and deleted
+      set_default_inner_Block_BlockSolverConfig();
+     }
+    else
+     if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
+      // A BlockSolverConfig for the inner Block has been provided. Apply it.
+      bsc->apply( v_Block.front() );
+      }
+     else
+      // An invalid Configuration has been provided.
+      throw( std::invalid_argument(
+	     "InvestmentFunction::set_ComputeConfig: the Configuration "
              "associated with key \"BlockSolverConfig\" is not a "
-             "BlockSolverConfig." ) );
-  }
-  else {
-   // An invalid key has been provided.
-   throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
-                                 "invalid key: " + key ) );
+             "BlockSolverConfig" ) );
+    }
+   else
+    // An invalid key has been provided.
+    throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
+				  "invalid key: " + key ) );
   }
  }
-}
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::set_variables( VarVector && x ) {
+void InvestmentFunction::set_variables( VarVector && x )
+{
  if( ! v_cost.empty() )
   if( v_cost.size() != x.size() )
    throw( std::logic_error("InvestmentFunction::set_variables: given x has "
