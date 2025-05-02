@@ -96,10 +96,14 @@
 #include <boost/mpi/communicator.hpp>
 #endif
 
+/*--------------------------------------------------------------------------*/
+/*-------------------------------- USING -----------------------------------*/
+/*--------------------------------------------------------------------------*/
+
 using namespace SMSpp_di_unipi_it;
 
 /*--------------------------------------------------------------------------*/
-/*-------------------------------- USING -----------------------------------*/
+/*------------------------------- GLOBALS ----------------------------------*/
 /*--------------------------------------------------------------------------*/
 
 std::string cuts_filename {};
@@ -141,14 +145,13 @@ const std::vector< option > my_long_opts = {
   { "num-blocks" ,               required_argument , nullptr , 'n' } ,
   { "relax" ,                    no_argument ,       nullptr , 'r' } ,
   { "simulate" ,                 no_argument ,       nullptr , 's' } ,
-  { "initial-investment" ,       required_argument , nullptr , 'x' } ,
-  { nullptr ,                    no_argument ,       nullptr , 0 }
+  { "initial-investment" ,       required_argument , nullptr , 'x' }
   };
 
 const std::string my_help =
  "  -l, --load-cuts <file>          load cuts from a file\n"
- "  -n, --num-blocks <number>       number of sub-Blocks per stage"
- "  -r, --relax                     Relax integer variables.\n"
+ "  -n, --num-blocks <number>       number of sub-Blocks per stage\n"
+ "  -r, --relax                     eelax integer variables\n"
  "  -s, --simulate                  simulate the given investment\n"
  "  -x, --initial-investment <file> initial investment\n";
 
@@ -295,34 +298,30 @@ bool update_battery_unit( Block * previous_block , Block * block ,
 int compute_init_up_down_time( const SDDPBlock * sddp_block ,
                                ThermalUnitBlock * previous_unit ,
                                ThermalUnitBlock * unit , Index stage ,
-			       Index sub_block_index ) {
-
+			       Index sub_block_index )
+{
  auto time_horizon = previous_unit->get_time_horizon();
  auto commitment = previous_unit->get_commitment( 0 ) + time_horizon - 1;
 
  auto shutdown = previous_unit->get_shut_down( time_horizon - 1 );
- if( shutdown && shutdown->get_value() >= 0.5 ) {
+ if( shutdown && shutdown->get_value() >= 0.5 )
   return 0;
- }
 
  int init_up_down_time = 0;
  const bool on = commitment->get_value() >= 0.5;
- if( on )
-  init_up_down_time = 1;
- else
-  init_up_down_time = -1;
+ if( on ) init_up_down_time = 1;
+ else     init_up_down_time = -1;
 
  AbstractPath path;
 
  for( Index outer_t = 0 ; outer_t < stage ; ++outer_t ) {
-
   for( Index t = 1 ; t < time_horizon ; ++t , --commitment ) {
    if( std::abs( commitment->get_value() -
                  ( commitment - 1 )->get_value() ) > 0.5 )
     return init_up_down_time;
    if( on ) ++init_up_down_time;
-   else --init_up_down_time;
-  }
+   else     --init_up_down_time;
+   }
 
   if( outer_t == stage - 1 )
    break;
@@ -330,18 +329,18 @@ int compute_init_up_down_time( const SDDPBlock * sddp_block ,
   if( path.empty() ) {
    auto uc_block = get_uc_block( sddp_block , stage , sub_block_index );
    path.build( unit , uc_block );
-  }
+   }
 
   auto previous_uc_block = get_uc_block( sddp_block , stage - outer_t - 2 ,
                                          sub_block_index );
-  previous_unit = dynamic_cast< ThermalUnitBlock * >
-   ( path.get_element< Block >( previous_uc_block ) );
+  previous_unit = dynamic_cast< ThermalUnitBlock * >(
+			   path.get_element< Block >( previous_uc_block ) );
 
   time_horizon = previous_unit->get_time_horizon();
 
   if( ! previous_unit )
-   throw( std::logic_error
-          ( "sddp_solver::update_thermal_block: ThermalUnitBlock not found "
+   throw( std::logic_error(
+	    "sddp_solver::update_thermal_block: ThermalUnitBlock not found "
             "at stage " + std::to_string( stage - outer_t - 2 ) ) );
 
   commitment = previous_unit->get_commitment( 0 ) + time_horizon - 1;
@@ -349,12 +348,12 @@ int compute_init_up_down_time( const SDDPBlock * sddp_block ,
   if( on ) {
    if( commitment->get_value() >= 0.5 ) ++init_up_down_time;
    else break;
-  }
+   }
   else {
    if( commitment->get_value() < 0.5 ) --init_up_down_time;
    else break;
+   }
   }
- }
 
  return init_up_down_time;
  }
@@ -372,16 +371,16 @@ bool update_thermal_unit( const SDDPBlock * sddp_block ,
   return false;
 
  if( ! unit || ! previous_unit )
-  throw( std::logic_error
-         ( "test: UCBlocks at stages " + std::to_string( stage - 1 ) +
+  throw( std::logic_error(
+	   "test: UCBlocks at stages " + std::to_string( stage - 1 ) +
            " and " + std::to_string( stage ) +
            " do not have the same structure." ) );
 
  if( single_scenario ) {
   // The only way to update the initial up and down time is when there is a
   // single scenario.
-  auto init_up_down_time = compute_init_up_down_time
-   ( sddp_block , previous_unit , unit , stage , sub_block_index );
+  auto init_up_down_time = compute_init_up_down_time( sddp_block ,
+			    previous_unit , unit , stage , sub_block_index );
 
   std::vector< int > init_up_down_time_data = { init_up_down_time };
   unit->set_init_updown_time( init_up_down_time_data.cbegin() );
@@ -443,9 +442,9 @@ void callback( SDDPBlock * sddp_block , Index stage , Index sub_block_index ) {
    update_thermal_unit( sddp_block , previous_block , block , stage ,
                         sub_block_index )
     || update_battery_unit( previous_block , block , stage );
+   }
   }
  }
-}
 
 /*--------------------------------------------------------------------------*/
 
@@ -454,21 +453,21 @@ std::vector< double > get_default_initial_point( InvestmentBlock * block )
  block->generate_abstract_constraints();
  const auto & box_constraints = block->get_constraints();
  std::vector< double > initial_point( box_constraints.size() );
- for( Index i = 0 ; i < box_constraints.size() ; ++i ) {
+ for( Index i = 0 ; i < box_constraints.size() ; ++i )
   if( box_constraints[ i ].get_lhs() > -Inf< double >() )
    initial_point[ i ] = box_constraints[ i ].get_lhs();
-  else if( box_constraints[ i ].get_rhs() < Inf< double >() )
-   initial_point[ i ] = box_constraints[ i ].get_rhs();
   else
-   initial_point[ i ] = 0;
-  }
+   if( box_constraints[ i ].get_rhs() < Inf< double >() )
+    initial_point[ i ] = box_constraints[ i ].get_rhs();
+   else
+    initial_point[ i ] = 0;
 
  return initial_point;
  }
 
 /*--------------------------------------------------------------------------*/
 
-std::vector< double > load_initial_point()
+std::vector< double > load_initial_point( void )
 {
  if( initial_point_filename.empty() )
   return {};
@@ -652,34 +651,11 @@ void invest( InvestmentBlock * investment_block )
  investment_function->set_par( InvestmentFunction::strOutputFilename ,
                                "investment_candidates.txt" );
 
- if( ! state_in_file.empty() ) {  // load the given State - - - - - - - - - -
-  netCDF::NcFile file;
-  try {
-   file.open( state_in_file , netCDF::NcFile::read );
-   auto state = State::new_State( file );
-   investment_solver->put_State( *state );
-   delete( state );
-   }
-  catch( netCDF::exceptions::NcException & e ) {
-   std::cout << "Warning: State file " << state_in_file
-	     << " could not be loaded" << std::endl;
-   }
-  catch( const std::exception& e ) {
-   std::cout << "Warning: error " << e.what()
-	     << " occurred while loading the Solver State" << std::endl;
-   }
-  }
-
  // set initial Solution, if provided - - - - - - - - - - - - - - - - - - - -
- if( ! sol_input.empty() ) {
-  if( auto initsol = Solution::deserialize( sol_input ) ) {
-   initsol->write( investment_block );
-   delete initsol;
-   }
-  else
-   std::cout << "Warning: input Solution " << sol_input << " invalid"
-	     << std::endl;
-  }
+ get_initial_Solution( investment_block );
+
+ // load the given State, if provided - - - - - - - - - - - - - - - - - - - -
+ get_initial_State( investment_solver );
 
  // solve the investment problem- - - - - - - - - - - - - - - - - - - - - - -
  if( ! dryrun ) {
@@ -688,26 +664,12 @@ void invest( InvestmentBlock * investment_block )
   }
 
  // write final Solution, if required - - - - - - - - - - - - - - - - - - - -
- if( ! sol_output.empty() ) {
-  netCDF::NcFile f;
-  write_open_netCDF( f , sol_output );
-  Configuration * outsolcfg = nullptr;
-  if( ! sol_cfg_file.empty() )
-   if( ! ( outsolcfg = Configuration::deserialize( sol_cfg_file ) ) )
-    std::cout << "Warning: output Solution Configuration "
-	      << sol_cfg_file << " invalid" << std::endl;
+ write_final_Solution( investment_block );
 
-  if( auto sol = investment_block->get_Solution( outsolcfg , false ) ) {
-   sol->serialize( f );
-   delete sol;
-   }
-  else
-   std::cout << "Warning: output Solution empty" << std::endl;
+ // write final State, if required- - - - - - - - - - - - - - - - - - - - - -
+ write_final_State( investment_solver );
 
-  delete outsolcfg;
-  }
-
- if( output_solution ) {  // Display the solution
+ if( output_solution ) {  // display the solution
   if( investment_solver->has_var_solution() ) {
    const auto solution_value = investment_solver->get_var_value();
    std::cout << "Solution value: " << std::setprecision( 20 )
@@ -924,8 +886,8 @@ void process_prob_file( const netCDF::NcFile & file )
 
 /*--------------------------------------------------------------------------*/
 
-std::string get_str_par( ComputeConfig * compute_config ,
-                         std::string par_name )
+std::string get_str_par( const ComputeConfig * compute_config ,
+                         const std::string & par_name )
 {
  for( const auto & pair : compute_config->str_pars )
   if( pair.first == par_name )
@@ -936,7 +898,8 @@ std::string get_str_par( ComputeConfig * compute_config ,
 
 /*--------------------------------------------------------------------------*/
 
-int get_int_par( ComputeConfig * compute_config , std::string par_name )
+int get_int_par( const ComputeConfig * compute_config ,
+		 const std::string & par_name )
 {
  for( const auto & pair : compute_config->int_pars )
   if( pair.first == par_name )
@@ -953,7 +916,6 @@ bool using_lagrangian_dual_solver( BlockSolverConfig * sddp_solver_config )
  ComputeConfig * compute_config = nullptr;
 
  for( Index i = 0 ; i < sddp_solver_config->num_ComputeConfig() ; ++i ) {
-
   if( sddp_solver_config->get_SolverName( i ) != "SDDPSolver" &&
       sddp_solver_config->get_SolverName( i ) != "ParallelSDDPSolver" &&
       sddp_solver_config->get_SolverName( i ) != "SDDPGreedySolver" )
@@ -989,12 +951,12 @@ bool using_lagrangian_dual_solver( BlockSolverConfig * sddp_solver_config )
 
   try {
    inner_solver_config_file >> *inner_solver_config;
-  }
+   }
   catch( ... ) {
    inner_solver_config_file.close();
    delete inner_config;
    continue;
-  }
+   }
 
   inner_solver_config_file.close();
 
@@ -1002,12 +964,12 @@ bool using_lagrangian_dual_solver( BlockSolverConfig * sddp_solver_config )
    if( inner_solver_config->get_SolverName( j ) == "LagrangianDualSolver" ) {
     delete inner_config;
     return true;
+    }
    }
-  }
   delete inner_config;
- }
+  }
  return false;
-}
+ }
 
 /*--------------------------------------------------------------------------*/
 
@@ -1032,7 +994,6 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
  int hydro_system_index = -1;
 
  for( Index i = 0 ; i < sddp_solver_config->num_ComputeConfig() ; ++i ) {
-
   if( sddp_solver_config->get_SolverName( i ) != "SDDPSolver" &&
       sddp_solver_config->get_SolverName( i ) != "ParallelSDDPSolver" &&
       sddp_solver_config->get_SolverName( i ) != "SDDPGreedySolver" )
@@ -1064,16 +1025,16 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
    inner_solver_config_file.close();
    delete inner_config;
    return;
-  }
+   }
 
   try {
    inner_solver_config_file >> *inner_solver_config;
-  }
+   }
   catch( ... ) {
    inner_solver_config_file.close();
    delete inner_config;
    return;
-  }
+   }
 
   inner_solver_config_file.close();
 
@@ -1118,12 +1079,12 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
 
    // We assume that there is at most one [Parallel]BundleSolver
    break;
-  } // for each ComputeConfig for the inner Solver
+   } // for each ComputeConfig for the inner Solver
 
   if( bundle_solver )
    break; // a BundleSolver has been found
 
- } // for each ComputeConfig for the Solver of SDDPBlock
+  } // for each ComputeConfig for the Solver of SDDPBlock
 
  if( ! bundle_solver )
   // Since there is no BundleSolver, there is no need to configure any Block
@@ -1156,12 +1117,12 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
  const auto sub_block = sddp_block->get_nested_Block( 0 );
 
  auto stochastic_block = static_cast< StochasticBlock * >( sub_block );
- auto benders_block = static_cast< BendersBlock * >
-  ( stochastic_block-> get_nested_Blocks().front() );
- auto objective = static_cast< FRealObjective * >
-  ( benders_block->get_objective() );
- auto benders_function = static_cast< BendersBFunction * >
-  ( objective->get_function() );
+ auto benders_block = static_cast< BendersBlock * >(
+			  stochastic_block-> get_nested_Blocks().front() );
+ auto objective = static_cast< FRealObjective * >(
+					  benders_block->get_objective() );
+ auto benders_function = static_cast< BendersBFunction * >(
+					       objective->get_function() );
  auto inner_block = benders_function->get_inner_block();
 
  std::vector< int > vint_LDSl_WBSCfg;
@@ -1196,9 +1157,7 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
 
  int inner_sub_block_index = 0;
  for( auto inner_sub_block : inner_block->get_nested_Blocks() ) {
-
   if( dynamic_cast< BatteryUnitBlock * >( inner_sub_block ) ) {
-
    required_primal_solution.push_back( inner_sub_block_index );
 
    // The primal solution of the BatteryUnitBlock is required as the storage
@@ -1208,86 +1167,90 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
    // BundleSolver, the BatteryUnitBlock can become an easy component.
    vint_LDSl_WBSCfg.push_back( ConfigIndex::other_unit );
    vintNoEasy.push_back( inner_sub_block_index );
-  }
-  if( dynamic_cast< ThermalUnitBlock * >( inner_sub_block ) ) {
+   }
 
+  if( dynamic_cast< ThermalUnitBlock * >( inner_sub_block ) ) {
    required_primal_solution.push_back( inner_sub_block_index );
 
    // ThermalUnitBlock is a non-easy component since there is a specialized
    // solver for it.
    vint_LDSl_WBSCfg.push_back( ConfigIndex::thermal );
    vintNoEasy.push_back( inner_sub_block_index );
-  }
-  else if( dynamic_cast< HydroSystemUnitBlock * >( inner_sub_block ) ) {
-   required_primal_solution.push_back( inner_sub_block_index );
-   hydro_system_index = inner_sub_block_index;
-
-   // The HydroSystemUnitBlock could be treated as an easy component. However,
-   // due to a current limitation of BundleSolver, the HydroSystemUnitBlock is
-   // considered a hard component. This is because its primal solution (the
-   // volume of the reservoirs) is required both in SDDP and in simulation
-   // mode, but BundleSolver cannot currently provide primal solutions for
-   // easy components. Once this feature is implemented by BundleSolver, the
-   // HydroSystemUnitBlock can become an easy component.
-
-   vint_LDSl_WBSCfg.push_back( ConfigIndex::hydro );
-   vintNoEasy.push_back( inner_sub_block_index );
-  }
-  else if( dynamic_cast< IntermittentUnitBlock * >( inner_sub_block ) ) {
-   required_primal_solution.push_back( inner_sub_block_index );
-   vint_LDSl_WBSCfg.push_back( ConfigIndex::other_unit );
-   vintNoEasy.push_back( inner_sub_block_index );
-  }
-  else if( dynamic_cast< NetworkBlock * >( inner_sub_block ) ) {
-   /* TODO Dual solutions of the NetworkBlocks are necessary only if there are
-    * transmission lines that are subject to invesment. Since BundleSolver
-    * currently does not provide solutions for easy components, the
-    * NetworkBlock must be treated as a hard component. Once this feature is
-    * implemented by BundleSolver, the NetworkBlock can become an easy
-    * component. */
-   vint_LDSl_WBSCfg.push_back( ConfigIndex::default_config );
-   vintNoEasy.push_back( inner_sub_block_index );
-  }
-  else if( ! do_easy_components ) {
-   vintNoEasy.push_back( inner_sub_block_index );
-   if( dynamic_cast< UnitBlock * >( inner_sub_block ) )
-    vint_LDSl_WBSCfg.push_back( ConfigIndex::other_unit );
-   else
-    vint_LDSl_WBSCfg.push_back( ConfigIndex::default_config );
-  }
+   }
   else
-   vint_LDSl_WBSCfg.push_back( ConfigIndex::default_config );
+   if( dynamic_cast< HydroSystemUnitBlock * >( inner_sub_block ) ) {
+    required_primal_solution.push_back( inner_sub_block_index );
+    hydro_system_index = inner_sub_block_index;
+
+    // The HydroSystemUnitBlock could be treated as an easy component, but,
+    // due to a current limitation of BundleSolver, the HydroSystemUnitBlock
+    // is considered a hard component. This is because its primal solution
+    // (the volume of the reservoirs) is required both in SDDP and in
+    // simulation mode, but BundleSolver cannot currently provide primal
+    // solutions for easy components. Once this feature is implemented by
+    // BundleSolver, the HydroSystemUnitBlock can become an easy component.
+
+    vint_LDSl_WBSCfg.push_back( ConfigIndex::hydro );
+    vintNoEasy.push_back( inner_sub_block_index );
+    }
+   else
+    if( dynamic_cast< IntermittentUnitBlock * >( inner_sub_block ) ) {
+     required_primal_solution.push_back( inner_sub_block_index );
+     vint_LDSl_WBSCfg.push_back( ConfigIndex::other_unit );
+     vintNoEasy.push_back( inner_sub_block_index );
+     }
+    else
+     if( dynamic_cast< NetworkBlock * >( inner_sub_block ) ) {
+      /* TODO Dual solutions of the NetworkBlocks are necessary only if
+       * there are transmission lines that are subject to invesment. Since
+       * BundleSolver currently does not provide solutions for easy
+       * components, the NetworkBlock must be treated as a hard component.
+       * Once this feature is implemented by BundleSolver, the NetworkBlock
+       * can become an easy component. */
+      vint_LDSl_WBSCfg.push_back( ConfigIndex::default_config );
+      vintNoEasy.push_back( inner_sub_block_index );
+      }
+     else
+      if( ! do_easy_components ) {
+       vintNoEasy.push_back( inner_sub_block_index );
+       if( dynamic_cast< UnitBlock * >( inner_sub_block ) )
+	vint_LDSl_WBSCfg.push_back( ConfigIndex::other_unit );
+       else
+	vint_LDSl_WBSCfg.push_back( ConfigIndex::default_config );
+       }
+      else
+       vint_LDSl_WBSCfg.push_back( ConfigIndex::default_config );
 
   ++inner_sub_block_index;
- }
+  }
 
  if( ! vintNoEasy.empty() ) {
   // Remove any vintNoEasy parameter that is possibly there
-  lagrangian_dual_compute_config->vint_pars.erase
-   ( std::remove_if( lagrangian_dual_compute_config->vint_pars.begin() ,
+  lagrangian_dual_compute_config->vint_pars.erase(
+     std::remove_if( lagrangian_dual_compute_config->vint_pars.begin() ,
                      lagrangian_dual_compute_config->vint_pars.end() ,
                      []( const auto & pair ) {
                       return pair.first == "vintNoEasy"; } ) ,
      lagrangian_dual_compute_config->vint_pars.end() );
 
   // Add the vintNoEasy parameter that was constructed here
-  lagrangian_dual_compute_config->vint_pars.push_back
-   ( std::make_pair( "vintNoEasy" , std::move( vintNoEasy ) ) );
- }
+  lagrangian_dual_compute_config->vint_pars.push_back(
+		std::make_pair( "vintNoEasy" , std::move( vintNoEasy ) ) );
+  }
 
- lagrangian_dual_compute_config->vint_pars.push_back
-  ( std::make_pair( "vint_LDSl_WBSCfg" , std::move( vint_LDSl_WBSCfg ) ) );
+ lagrangian_dual_compute_config->vint_pars.push_back(
+     std::make_pair( "vint_LDSl_WBSCfg" , std::move( vint_LDSl_WBSCfg ) ) );
 
- lagrangian_dual_compute_config->vstr_pars.push_back
-  ( std::make_pair( "vstr_LDSl_Cfg" , std::move( vstr_LDSl_Cfg ) ) );
+ lagrangian_dual_compute_config->vstr_pars.push_back(
+           std::make_pair( "vstr_LDSl_Cfg" , std::move( vstr_LDSl_Cfg ) ) );
 
  // Configuration for the sub-Blocks may need to be cloned since the same
  // Configuration is used to configure multiple Blocks.
- lagrangian_dual_compute_config->int_pars.push_back
-  ( std::make_pair( "int_LDSlv_CloneCfg" , 1 ) );
+ lagrangian_dual_compute_config->int_pars.push_back(
+			      std::make_pair( "int_LDSlv_CloneCfg" , 1 ) );
 
- compute_config->str_pars.erase
-  ( std::remove_if( compute_config->str_pars.begin() ,
+ compute_config->str_pars.erase(
+    std::remove_if( compute_config->str_pars.begin() ,
                     compute_config->str_pars.end() ,
                     []( const auto & pair ) {
                      return pair.first == "strInnerBSC"; } ) ,
@@ -1313,15 +1276,15 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
 
  /* Here we create a Configuration for
   * LagrangianDualSolver::get_var_solution() that requires the primal
-  * solutions only of certain Blocks. In SDDP, only the primal solution of the
-  * HydroSystemUnitBlock is necessary (as only the final volumes of the
+  * solutions only of certain Blocks. In SDDP, only the primal solution of
+  * the HydroSystemUnitBlock is necessary (as only the final volumes of the
   * reservoirs are required during the solution process). In simulation mode,
   * the solutions that are required are those of the Blocks that link two
   * consecutive stages, which are HydroSystemUnitBlock, BatteryUnitBlock, and
   * ThermalUnitBlock. */
 
- get_var_solution_config = new SimpleConfiguration< std::vector< int > >
-  ( required_primal_solution );
+ get_var_solution_config = new SimpleConfiguration< std::vector< int > >(
+					          required_primal_solution );
 
  /* In investment mode, the only part of the dual solution that is required
   * is that associated with the UnitBlocks that are subject to
@@ -1334,11 +1297,12 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
   std::cerr << "In investment mode, the sub-problem must be a UCBlock."
             << std::endl;
   exit( 1 );
- }
+  }
+
  const auto time_horizon = ucblock->get_time_horizon();
 
- auto investment_function = static_cast< InvestmentFunction * >
-  ( investment_block->get_function() );
+ auto investment_function = static_cast< InvestmentFunction * >(
+					 investment_block->get_function() );
 
  // Indices of the assets that are subject to investment.
  const auto & asset_indices = investment_function->get_asset_indices();
@@ -1352,9 +1316,10 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
  for( const auto & type : asset_type ) {
   if( type == InvestmentFunction::eUnitBlock )
    ++num_blocks;
-  else if( type == InvestmentFunction::eLine )
-   ++num_lines;
- }
+  else
+   if( type == InvestmentFunction::eLine )
+    ++num_lines;
+  }
 
  // List containing the indices of the sub-Blocks of the UCBlock that are
  // subject to investment.
@@ -1386,8 +1351,8 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
              << time_horizon << ", but " << num_network_blocks
              << " were found." << std::endl;
    exit( 1 );
-  }
- } // end( if( num_lines > 0 ) )
+   }
+  } // end( if( num_lines > 0 ) )
 
  // To require the dual solution of the linking constraints, we add the pair
  // (-1, -1).
@@ -1419,7 +1384,7 @@ void config_Lagrangian_dual( BlockSolverConfig * sddp_solver_config ,
  for( Index t = 0 ; t < sddp_block->get_time_horizon() ; ++t )
   for( Index i = 0 ; i < sddp_block->get_num_sub_blocks_per_stage() ; ++i )
    sddp_block->set_scenario( 0 , t , i );
-}
+ }
 
 /*--------------------------------------------------------------------------*/
 
@@ -1548,7 +1513,6 @@ void process_block_file( const netCDF::NcFile & file )
    }
 
   // Solve
-
   invest( investment_block );
 
   // Destroy the InvestmentBlock and the Configurations
@@ -1558,7 +1522,7 @@ void process_block_file( const netCDF::NcFile & file )
   if( ! given_block_config ) {
    delete block_config;
    block_config = nullptr;
-  }
+   }
 
   cleared_solver_config->apply( investment_block );
 
@@ -1576,14 +1540,14 @@ void process_block_file( const netCDF::NcFile & file )
 int main( int argc , char ** argv )
 {
  // append new options to default ones- - - - - - - - - - - - - - - - - - - -
- // note that the last nullptr record in long_opts is overwritten since the
- // new one is further down from there
+ // note that the local options are inserted right before the last (nullptr)
+ // record in long_opts
 
  #ifdef USE_MPI
   boost::mpi::environment env(argc, argv);
  #endif
 
- docopt_desc = "SMS++ investment solver.\n";
+ docopt_desc = "SMS++ investment solver\n";
  short_opts.append( my_short_opts );
  long_opts.insert( std::prev( long_opts.end() ) ,
 		   my_long_opts.begin() , my_long_opts.end() );
