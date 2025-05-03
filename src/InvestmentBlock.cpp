@@ -136,7 +136,7 @@ void InvestmentBlock::generate_objective( Configuration * objc ) {
  objective.set_sense( f_objective_sense );
 
  // set Block objective
- set_objective( & objective );
+ set_objective( &objective );
 
  set_objective_generated();
 }
