@@ -29,7 +29,11 @@
  *         Dipartimento di Informatica \n
  *         Universita' di Pisa \n
  *
- * \copyright &copy; by Rafael Durbano Lobato
+ * \author Antonio Frangioni \n
+ *         Dipartimento di Informatica \n
+ *         Universita' di Pisa \n
+ *
+ * \copyright &copy; by Rafael Durbano Lobato, Antonio Frangioni
  */
 /*--------------------------------------------------------------------------*/
 /*----------------------------- DEFINITIONS --------------------------------*/
@@ -48,6 +52,7 @@
 #include "FRealObjective.h"
 #include "InvestmentFunction.h"
 #include "OneVarConstraint.h"
+#include "Solution.h"
 
 /*--------------------------------------------------------------------------*/
 /*----------------------------- NAMESPACE ----------------------------------*/
@@ -56,7 +61,6 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
-
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -91,8 +95,8 @@ namespace SMSpp_di_unipi_it
  * of the InvestmentBlock is minimization) or -infinity (if the sense of the
  * Objective of the InvestmentBlock is maximization). */
 
-class InvestmentBlock : public Block {
-
+class InvestmentBlock : public Block
+{
 /*--------------------------------------------------------------------------*/
 /*----------------------- PUBLIC PART OF THE CLASS -------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -116,14 +120,14 @@ public:
  InvestmentBlock( Block * father = nullptr , Index num_variables = 0 ) :
   Block( father ) {
   v_variables.resize( num_variables );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
  /// destructor
+
  virtual ~InvestmentBlock();
 
 /*--------------------------------------------------------------------------*/
-
  /// deserialize a InvestmentBlock out of netCDF::NcGroup
  /** The method takes a netCDF::NcGroup supposedly containing all the
   * information required to deserialize the InvestmentBlock. Besides the
@@ -223,18 +227,17 @@ public:
   *        the FRealObjective of this InvestmentBlock must be deleted. */
 
  void set_function( InvestmentFunction * function ,
-                    c_ModParam issueMod = eModBlck ,
+		    c_ModParam issueMod = eModBlck ,
                     bool deleteold = true ) {
   function->reformulated_bounds( f_reformulate_bounds );
   objective.set_function( function , issueMod , deleteold );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
 
  void generate_abstract_variables( Configuration *stvv = nullptr ) override;
 
 /*--------------------------------------------------------------------------*/
-
  /// generate the static constraint of the InvestmentBlock
  /** This function generates the abstract constraints of the InvestmentBlock,
   * which consists in lower and upper bounds on the values of the variables.
@@ -276,9 +279,55 @@ public:
 
  void set_num_sub_blocks_per_stage( Index n ) {
   f_num_sub_blocks_per_stage = n;
- }
+  }
 
-/**@} ----------------------------------------------------------------------*/
+/*--------------------------------------------------------------------------*/
+/*----------------------- Methods for handling Solution --------------------*/
+/*--------------------------------------------------------------------------*/
+ /// returns a InvestmentBlockSolution with the current solution
+ /** Returns a InvestmentBlockSolution representing the current solution
+  * status of this InvestmentBlock. What kind of solution is saved depends
+  * on the \p solc Configuration and/or on its default value to be found in
+  * the f_BlockConfig (if any). That is, we denote by curr_cfg the
+  * Configuration * obtained as follows:
+  *
+  * - if solc != nullptr, then curr_cfg == solc
+  *
+  * - if solc == nullptr, f_BlockConfig != nullptr,
+  *   f_BlockConfig->f_solution_Configuration != nullptr, then
+  *   curr_cfg == f_BlockConfig->f_solution_Configuration
+  *
+  * Now, curr_cfg (if not nullptr) can be of two different types:
+  *
+  * - a SimpleConfiguration< int >
+  *
+  * - a SimpleConfiguration< std::pair< int , Configuration * > >
+  *
+  * Let ws = curr_cfg->f_value in the first case and
+  * ws = curr_cfg->f_value.first in the second (0 if curr_cfg == nullptr),
+  * and innr_cfg = curr_cfg->f_value.second in the second case (nullptr
+  * in the first case or if curr_cfg == nullptr). Then, in all cases the
+  * value of the design variables is saved. If ws is nonzero, then the
+  * Solution of the inner Block in the InvestmentFunction is saved as well,
+  * passing innr_cfg (which may be nullptr) when read()-ing it.
+  *
+  * Note that InvestmentBlock may not contain some or all of the required
+  * solution, if the corresponding Variable/InvestmentFunction have not
+  * been constructed yet: this throws an exception, unless emptys = true, in
+  * which case the InvestmentBlockSolution object is only prepped for
+  * getting a solution, but it is not really getting one now.
+  *
+  * Note that, although the method clearly returns a InvestmentBlockSolution,
+  * formally the return type is Solution *. This is because it is not
+  * possible to forward declare InvestmentBlockSolution as a derived class
+  * from Solution, nor to define InvestmentBlockSolution before
+  * InvestmentBlock because the former uses some type information declared
+  * in the latter. */ 
+
+ Solution * get_Solution( Configuration *solc = nullptr ,
+			  bool emptys = true ) override;
+
+/** @} ---------------------------------------------------------------------*/
 /*------------- METHODS FOR Saving THE DATA OF THE InvestmentBlock ---------*/
 /*--------------------------------------------------------------------------*/
 /** @name Saving the data of the InvestmentBlock
@@ -293,7 +342,7 @@ public:
 
  void serialize( netCDF::NcGroup & group ) const override;
 
-/**@} ----------------------------------------------------------------------*/
+/** @} ---------------------------------------------------------------------*/
 /*----------- METHODS FOR READING THE DATA OF THE InvestmentBlock ----------*/
 /*--------------------------------------------------------------------------*/
 /** @name Reading the data of the InvestmentBlock
@@ -304,59 +353,57 @@ public:
   *
   * @return The number of Variable of this InvestmentBlock. */
 
- Index get_number_variables() const {
-  return v_variables.size();
- }
+ Index get_number_variables( void ) const {
+  return( v_variables.size() );
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the vector of ColVariable of this InvestmentBlock
  /** This function returns a const reference to the vector of ColVariable of
   * this InvestmentBlock.
   *
-  * @return A const reference to the vector of ColVariable of
-  *         this InvestmentBlock. */
+  * @return a const reference to the vector of ColVariable of this
+  *         InvestmentBlock. */
 
- const std::vector< ColVariable > & get_variables() const {
-  return v_variables;
- }
+ const std::vector< ColVariable > & get_variables( void ) const {
+  return( v_variables );
+  }
 
 /*--------------------------------------------------------------------------*/
-
- /// returns a vector with the values of the ColVariable of this InvestmentBlock
- /** This function return a vector containing the values of the of ColVariable
-  * of this InvestmentBlock.
+ /// returns a vector with the values of the ColVariable
+ /** This function return a std::vector< double >  containing the values of
+  * the of ColVariable of this InvestmentBlock.
   *
   * @return A vector containing the values of the of ColVariable
   *         of this InvestmentBlock. */
 
- std::vector< double > get_variable_values() const {
+ std::vector< double > get_variable_values( void ) const {
   std::vector< double > variable_values;
   variable_values.reserve( v_variables.size() );
   for( const auto & variable : v_variables )
    variable_values.push_back( variable.get_value() );
-  return variable_values;
- }
+  return( variable_values );
+  }
 
 /*--------------------------------------------------------------------------*/
 
- Function * get_function() const {
-  return objective.get_function();
- }
+ Function * get_function( void ) const {
+  return( objective.get_function() );
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the lower bound on each Variable
+
  const std::vector< double > & get_variable_lower_bound() const {
   return v_lower_bound;
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// returns the box constraints on the Variable
+
  const std::vector< BoxConstraint > & get_constraints() const {
   return v_constraints;
- }
+  }
 
 /**@} ----------------------------------------------------------------------*/
 /*----------- METHODS DESCRIBING THE BEHAVIOR OF A InvestmentBlock ---------*/
@@ -380,10 +427,9 @@ public:
             v_variables.size() ) );
   for( Index i = 0 ; i < v_variables.size() ; ++i )
    v_variables[ i ].set_value( values[ i ] );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// sets the values of the Variable of this InvestmentBlock
  /** This function sets the values of the Variable defined in this
   * InvestmentBlock according to the given \p values. The size of the \p
@@ -399,10 +445,9 @@ public:
             v_variables.size() ) );
   for( Index i = 0 ; i < v_variables.size() ; ++i )
    v_variables[ i ].set_value( values( i ) );
- }
+  }
 
 /*--------------------------------------------------------------------------*/
-
  /// sets the values of the Variable of this InvestmentBlock
  /** This function sets the values of the Variable defined in this
   * InvestmentBlock according to the values given by the iterator \p it. The
@@ -417,7 +462,7 @@ public:
  void set_variable_values( Iterator it ) {
   for( Index i = 0 ; i < v_variables.size() ; ++i , std::advance( it , 1 ) )
    v_variables[ i ].set_value( * it );
- }
+  }
 
 /** @} ---------------------------------------------------------------------*/
 /*---------------- Methods for checking the InvestmentBlock ----------------*/
@@ -470,17 +515,17 @@ public:
   *
   * Notice that, if none of the BoxConstraint is relaxed, these two checks are
   * identical. However, if some bounds are violated and the corresponding
-  * BoxConstraint (if generated) are relaxed, then this function will return \c
-  * true if \p useabstract is \c true, and \c false if \p useabstract is \c
-  * false.
+  * BoxConstraint (if generated) are relaxed, then this function will return
+  * \c true if \p useabstract is \c true, and \c false if \p useabstract is
+  * \c false.
   *
-  * @param useabstract It indicates whether the abstract representation of the
-  *        constraints (if it has been generated) must be used to determine if
-  *        the current solution is feasible.
+  * @param useabstract It indicates whether the abstract representation of
+  *        the constraints (if it has been generated) must be used to
+  *        determine if the current solution is feasible.
   *
-  * @param fsbc If it is a pointer to a SimpleConfiguration< double >, then the
-  *        value stored in that SimpleConfiguration will be the tolerance that
-  *        determines if a solution is feasible. */
+  * @param fsbc If it is a pointer to a SimpleConfiguration< double >, then
+  *        the value stored in that SimpleConfiguration will be the
+  *        tolerance that determines if a solution is feasible. */
 
  bool is_feasible( bool useabstract = false ,
                    Configuration * fsbc = nullptr ) override;
@@ -496,8 +541,9 @@ protected:
 /*--------------------------------------------------------------------------*/
 
  void load( std::istream &input , char frmt = 0 ) override {
-  throw( std::logic_error( "InvestmentBlock::load(): not implemented yet." ) );
- }
+  throw( std::logic_error( "InvestmentBlock::load(): not implemented yet." )
+	 );
+  }
 
  /// states that the Variable of the UnitBlock have been generated
  void set_variables_generated() { AR |= HasVar; }
@@ -521,25 +567,20 @@ protected:
 /*---------------------------- PROTECTED FIELDS ----------------------------*/
 /*--------------------------------------------------------------------------*/
 
- /// The sense of the Objective
- int f_objective_sense = Objective::eMin;
+ int f_objective_sense = Objective::eMin;  ///< the sense of the Objective
 
- /// It indicates whether the bound constraints must be reformulated
+ /// indicates whether the bound constraints must be reformulated
  int f_reformulate_bounds = 0;
 
  Index f_num_sub_blocks_per_stage = 1;
 
- /// The Objective of this InvestmentBlock
- FRealObjective objective;
+ FRealObjective objective;  ///< the Objective of this InvestmentBlock
 
- /// The Variable that are the active ones in the InvestmentFunction
+ /// the active Variable in the InvestmentFunction
  std::vector< ColVariable > v_variables;
 
- /// Lower bound on the Variable
- std::vector< double > v_lower_bound;
-
- /// Upper bound on the Variable
- std::vector< double > v_upper_bound;
+ std::vector< double > v_lower_bound;  ///< lower bound on the Variable
+ std::vector< double > v_upper_bound;  ///< upper bound on the Variable
 
  /// Box constraints on the Variable
  std::vector< BoxConstraint > v_constraints;
@@ -548,7 +589,7 @@ protected:
 /*--------------------- PRIVATE PART OF THE CLASS --------------------------*/
 /*--------------------------------------------------------------------------*/
 
-private:
+ private:
 
 /*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE FIELDS --------------------------------*/
@@ -567,9 +608,128 @@ private:
 
 /*--------------------------------------------------------------------------*/
 
-};   // end( class InvestmentBlock )
+ };   // end( class InvestmentBlock )
 
-/** @} end( group( InvestmentBlock_CLASSES ) ) */
+/*--------------------------------------------------------------------------*/
+/*--------------------- CLASS InvestmentBlockSolution ----------------------*/
+/*--------------------------------------------------------------------------*/
+/*--------------------------- GENERAL NOTES --------------------------------*/
+/*--------------------------------------------------------------------------*/
+/// a Solution of a InvestmentBlock
+/** The InvestmentBlockSolution class, derived from Solution, represents a
+ * solution of a InvestmentBlock, i.e.:
+ *
+ * - the values of the design variables
+ *
+ * - optionally, the :Solution to the inner Block in the InvestmentFunction
+ *   of the InvestmentBlock
+ *
+ * Note that the InvestmentBlockSolution can be provided with an inner
+ * Configuration that is passed to the inner Block in the InvestmentFunction
+ * of the InvestmentBlock when retrieving its :Solution. This Configuration
+ * is *not* serialize()-d and deserialize()-d because it is only useful when
+ * the InvestmentBlockSolution is first read(); when it is deserialize()-d the
+ * exact details of the inner :Solution are already known, and therefore there
+ * is no point in serialize()-ing the Configuration. */
+
+class InvestmentBlockSolution : public Solution
+{
+/*--------------------------------------------------------------------------*/
+/*----------------------- PUBLIC PART OF THE CLASS -------------------------*/
+/*--------------------------------------------------------------------------*/
+
+ public:
+
+/*------------------------------- FRIENDS ----------------------------------*/
+
+ using Index = Block::Index;  // "import" Index
+ 
+/*------------------------------- FRIENDS ----------------------------------*/
+
+ friend InvestmentBlock;  ///< make InvestmentBlock friend
+
+/*---------- CONSTRUCTING AND DESTRUCTING InvestmentBlockSolution ----------*/
+
+ explicit InvestmentBlockSolution( void ) :
+           f_inner_Solution( nullptr ) , f_inner_Configuration( nullptr ) { }
+ /// constructor, it has nothing to do
+
+/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+
+ void deserialize( const netCDF::NcGroup & group ) override final;
+
+/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+
+ ~InvestmentBlockSolution() {
+  delete f_inner_Configuration;
+  delete f_inner_Solution;
+  }
+
+/*------- METHODS DESCRIBING THE BEHAVIOR OF A InvestmentBlockSolution -----*/
+
+ void read( const Block * block ) override final;
+
+ void write( Block * block ) override final;
+
+/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+ /// serialize a InvestmentBlockSolution into a netCDF::NcGroup
+ /** Serialize a InvestmentBlockSolution into a netCDF::NcGroup, with the
+  * following format:
+  *
+  * - The mandatory dimension "NumDesignVariables" containing the number of
+  *   design variables in the InvestmentBlock
+  *
+  * - The mandatory variable "DesignVariables", of type netCDF::NcDouble and
+  *   indexed over the dimension "NumDesignVariables"; DesignVariables[ i ]
+  *   is assumed to contain the vaule of the i-th design variable
+  *
+  * - The group "InnerSolution" containing the [:Solution] of the inner
+  *   Block of the InvestmentBlock corresponding to the value of the design
+  *   variables. The group is optional. */
+
+ void serialize( netCDF::NcGroup & group ) const override final;
+
+/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+
+ InvestmentBlockSolution * scale( double factor ) const override final;
+
+ void sum( const Solution * solution , double multiplier ) override final;
+
+ InvestmentBlockSolution * clone( bool empty = false ) const override final;
+
+/*-------------------- PROTECTED PART OF THE CLASS -------------------------*/
+
+ protected:
+
+/*-------------------------- PROTECTED METHODS -----------------------------*/
+
+ void print( std::ostream &output ) const override final {
+  output << "InvestmentBlockSolution [" << this << "]: " << std::endl;
+  }
+
+/*---------------------- PRIVATE PART OF THE CLASS -------------------------*/
+
+ private:
+
+/*---------------------------- PRIVATE FIELDS ------------------------------*/
+
+ std::vector< double > v_design;  ///< the design variables
+
+ Solution * f_inner_Solution;  ///< the :Solution of the InnerBlock
+
+ Configuration * f_inner_Configuration;
+             ///< the Configuration for the inner :Solution of the InnerBlock
+
+/*--------------------------------------------------------------------------*/
+
+ SMSpp_insert_in_factory_h;
+
+/*--------------------------------------------------------------------------*/
+
+ };  // end( class( InvestmentBlockSolution ) )
+
+/** @} end( group( InvestmentBlock_CLASSES ) ) -----------------------------*/
+/*--------------------------------------------------------------------------*/
 
 }  // end( namespace SMSpp_di_unipi_it )
 
