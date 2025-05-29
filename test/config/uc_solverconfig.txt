@@ -8,7 +8,7 @@ CPXMILPSolver
 
 1  # The number of ComputeConfigs
 
-# now all the ComputeConfigs
+# now all the ComputeConfig
 # 1st --------------------------------------
 ComputeConfig  # Type of the object
 1  # differential
