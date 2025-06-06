@@ -64,7 +64,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 {
  Index num_assets = 0;
 
- if( ! ::deserialize_dim( group , "NumAssets" , num_assets ) )
+ if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
 
  v_variables.resize( num_assets );
@@ -78,7 +78,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
                 true , true );
 
  f_objective_sense = Objective::eMin;
- if( ::deserialize_dim( group , "ObjectiveSense" , f_objective_sense ) &&
+ if( deserialize_dim( group , "ObjectiveSense" , f_objective_sense ) &&
      ( ! f_objective_sense ) )
   f_objective_sense = Objective::eMax;
 
@@ -326,7 +326,7 @@ void InvestmentBlockSolution::deserialize( const netCDF::NcGroup & group )
 {
  // "NumDesignVariables" is mandatory - - - - - - - - - - - - - - - - - - - -
  Index num_design;
- ::deserialize_dim( group , "NumDesignVariables" , num_design , false );
+ deserialize_dim( group , "NumDesignVariables" , num_design , false );
 
  // deserialize the DesignVariables - - - - - - - - - - - - - - - - - - - - -
  ::deserialize< double >( group , "DesignVariables" , num_design ,

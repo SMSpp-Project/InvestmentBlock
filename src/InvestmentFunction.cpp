@@ -133,7 +133,7 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  Index num_assets;
 
- if( ! ::deserialize_dim( group , "NumAssets" , num_assets ) )
+ if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
 
  if( ! v_x.empty() ) {
@@ -148,7 +148,7 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  Index num_constraints;
 
- if( ! ::deserialize_dim( group , "NumConstraints" , num_constraints ) )
+ if( ! deserialize_dim( group , "NumConstraints" , num_constraints ) )
   num_constraints = 0;
 
  // Deserialize the assets
