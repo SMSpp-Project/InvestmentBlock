@@ -214,7 +214,7 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
 
 Solution * InvestmentBlock::get_Solution( Configuration *solc , bool emptys )
 {
- int wsol = 0;
+ int wsol = 1;
  Configuration * innr_cfg = nullptr;
 
  if( ( ! solc ) && f_BlockConfig )

@@ -304,7 +304,7 @@ public:
   * - a SimpleConfiguration< std::pair< int , Configuration * > >
   *
   * Let ws = curr_cfg->f_value in the first case and
-  * ws = curr_cfg->f_value.first in the second (0 if curr_cfg == nullptr),
+  * ws = curr_cfg->f_value.first in the second (1 if curr_cfg == nullptr),
   * and innr_cfg = curr_cfg->f_value.second in the second case (nullptr
   * in the first case or if curr_cfg == nullptr). Then, in all cases the
   * value of the design variables is saved. If ws is nonzero, then the
