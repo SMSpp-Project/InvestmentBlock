@@ -352,6 +352,11 @@ void InvestmentBlockSolution::read( const Block * block )
 	"InvestmentBlockSolution::read: block is not a InvestmentBlock" ) );
 
  v_design = IB->get_variable_values();
+ if( ( ! IB->v_lower_bound.empty() ) && IB->f_reformulate_bounds ) {
+  for( Index i = 0 ; i < v_design.size() ; ++i )
+   if( IB->v_lower_bound[ i ] > -Inf< double >() )
+    v_design[ i ] += IB->v_lower_bound[ i ];
+  }
 
  if( f_inner_Solution ) {  // if the inner Solution need be saved
   delete f_inner_Solution;
@@ -385,8 +390,17 @@ void InvestmentBlockSolution::write( Block * block )
   throw( std::invalid_argument(
 	    "InvestmentBlockSolution::write: inconsistent variables size" ) );
 
- IB->set_variable_values< double >( v_design );
- 
+ if( ( ! IB->v_lower_bound.empty() ) && IB->f_reformulate_bounds ) {
+  auto td = v_design;
+  for( Index i = 0 ; i < td.size() ; ++i )
+   if( IB->v_lower_bound[ i ] > -Inf< double >() )
+    td[ i ] -= IB->v_lower_bound[ i ];
+
+  IB->set_variable_values< double >( td );
+  }
+ else
+  IB->set_variable_values< double >( v_design );
+
  if( f_inner_Solution ) {
   auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() );
   if( ! IF )
