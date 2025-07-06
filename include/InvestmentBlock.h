@@ -405,7 +405,12 @@ public:
   return v_constraints;
   }
 
-/**@} ----------------------------------------------------------------------*/
+/*--------------------------------------------------------------------------*/
+ /// returns true if the Variable are shifted by their lower bound
+
+ bool get_reformulate_bounds() const { return( f_reformulate_bounds ); }
+
+/** @} ---------------------------------------------------------------------*/
 /*----------- METHODS DESCRIBING THE BEHAVIOR OF A InvestmentBlock ---------*/
 /*--------------------------------------------------------------------------*/
 /** @name Methods describing the behavior of a InvestmentBlock
