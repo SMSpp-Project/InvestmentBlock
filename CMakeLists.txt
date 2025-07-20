@@ -11,9 +11,6 @@
 #                                                                             #
 #        $ cmake --build <build-path> --target install                        #
 #                                                                             #
-#    Note: this file tries to respect the principles of Modern CMake,         #
-#          keep it in mind when editing it.                                   #
-#                                                                             #
 #                            Rafael Durbano Lobato                            #
 #                         Dipartimento di Informatica                         #
 #                             Universita' di Pisa                             #
