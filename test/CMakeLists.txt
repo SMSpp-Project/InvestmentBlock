@@ -61,6 +61,11 @@ if (TARGET SMS++::InvestmentBlock)
 
     add_test(NAME InvestmentBlock_test
              COMMAND InvestmentBlock_test)
+
+    # Install
+    include(GNUInstallDirs)
+    install(TARGETS InvestmentBlock_test
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()
 
 # --------------------------------------------------------------------------- #
