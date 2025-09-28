@@ -139,10 +139,10 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  if( ! v_x.empty() ) {
   if( num_assets != v_x.size() )
-   throw std::logic_error( "InvestmentFunction::deserialize: the number of "
-                           "assets to invest (" + std::to_string( num_assets ) +
-                           ") is different from the number of active variables "
-                           "(" + std::to_string( v_x.size() ) + ")." );
+   throw( std::logic_error( "InvestmentFunction::deserialize: the number of "
+                            "assets to invest (" + std::to_string( num_assets ) +
+                            ") is different from the number of active variables "
+                            "(" + std::to_string( v_x.size() ) + ")." ) );
  }
 
  // Number of linear constraints
@@ -315,20 +315,20 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  auto inner_block_group = group.getGroup( BLOCK_NAME );
  if( inner_block_group.isNull() )
-  throw std::logic_error( "InvestmentFunction::deserialize: the '" +
-                          BLOCK_NAME + "' group must be present." );
+  throw( std::logic_error( "InvestmentFunction::deserialize: the '" +
+                           BLOCK_NAME + "' group must be present." ) );
 
  auto inner_block = Block::new_Block( inner_block_group , this );
 
  if( ! inner_block )
-  throw std::logic_error( "InvestmentFunction::deserialize: it was not "
-                          "possible to create the inner Block from group '" +
-                          BLOCK_NAME + "'." );
+  throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
+                           "possible to create the inner Block from group '" +
+                           BLOCK_NAME + "'." ) );
 
  if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
          dynamic_cast< UCBlock * >( inner_block ) ) )
-  throw std::logic_error( "InvestmentFunction::deserialize: the inner "
-                          "Block is neither an SDDPBlock nor a UCBlock." );
+  throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
+                           "Block is neither an SDDPBlock nor a UCBlock." ) );
 
  set_inner_block( inner_block );
 
