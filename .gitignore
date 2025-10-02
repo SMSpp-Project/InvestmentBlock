@@ -656,3 +656,4 @@ TSWLatexianTemp*
 *.lpz
 
 test/uc_lp.lp
+test/*.btr
