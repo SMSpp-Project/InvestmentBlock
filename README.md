@@ -143,6 +143,12 @@ conduct, and the process for submitting merge requests to us.
   Dipartimento di Informatica  
   Universit√† di Pisa
 
+### Contributors 
+
+- **Antonio Frangioni**  
+  Dipartimento di Informatica  
+  Universit‡ di Pisa
+
 
 ## License
 
