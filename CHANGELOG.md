@@ -13,9 +13,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed 
 
+
+## [0.1.1] - 2025-12-12
+
+### Added 
+
+- added Configuration for output Solution
+
+- integration of test/ with common_utils (although test/
+  will have to be removed)
+
+- InvestmentBlockSolution and its handling
+
+### Changed 
+
+- adapted to new standard organization of makefiles
+
+### Fixed 
+
+- properly translated investment variable values in
+  InvestmentBlockSolution when f\_reformulate\_bounds
+  == true
+
+
 ## [0.1.0] - 2024-02-29
 
 - First test release
 
-[Unreleased]: https://gitlab.com/smspp/lagrangiandualsolver/-/compare/0.1.0...develop
+[Unreleased]: https://gitlab.com/smspp/investmentblock/-/compare/0.1.1...develop
+[0.1.1]: https://gitlab.com/smspp/investmentblock/-/compare/0.1.0...0.1.1
+[0.1.0]: https://gitlab.com/smspp/investmentblock/-/tags/0.1.0
 

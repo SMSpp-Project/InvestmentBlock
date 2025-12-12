@@ -1,0 +1,37 @@
+netcdf InvestmentBlock {
+
+// global attributes:
+		:SMS++_file_type = 1 ;
+
+group: InvestmentBlock {
+  dimensions:
+  	NumAssets = 1 ;
+  variables:
+  	double LowerBound ;
+  	double UpperBound ;
+  	uint Assets(NumAssets) ;
+  	byte AssetType ;
+  	double Cost ;
+
+  // group attributes:
+  		:type = "InvestmentBlock" ;
+  data:
+
+   LowerBound = 0 ;
+
+   UpperBound = 5 ;
+
+   Assets = 2 ;
+
+   AssetType = 0 ;
+
+   Cost = 32534.25 ;
+
+  group: InnerBlock {
+
+    // group attributes:
+    		:id = "0" ;
+    		:filename = "10_0_1_w.nc4" ;
+    } // group InnerBlock
+  } // group InvestmentBlock
+}

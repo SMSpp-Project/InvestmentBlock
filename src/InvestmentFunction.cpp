@@ -37,6 +37,7 @@
 #include "UCBlock.h"
 
 #include <cmath>
+#include <chrono>
 #include <functional>
 #include <queue>
 
@@ -133,22 +134,22 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  Index num_assets;
 
- if( ! ::deserialize_dim( group , "NumAssets" , num_assets ) )
+ if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
 
  if( ! v_x.empty() ) {
   if( num_assets != v_x.size() )
-   throw std::logic_error( "InvestmentFunction::deserialize: the number of "
-                           "assets to invest (" + std::to_string( num_assets ) +
-                           ") is different from the number of active variables "
-                           "(" + std::to_string( v_x.size() ) + ")." );
+   throw( std::logic_error( "InvestmentFunction::deserialize: the number of "
+                            "assets to invest (" + std::to_string( num_assets ) +
+                            ") is different from the number of active variables "
+                            "(" + std::to_string( v_x.size() ) + ")." ) );
  }
 
  // Number of linear constraints
 
  Index num_constraints;
 
- if( ! ::deserialize_dim( group , "NumConstraints" , num_constraints ) )
+ if( ! deserialize_dim( group , "NumConstraints" , num_constraints ) )
   num_constraints = 0;
 
  // Deserialize the assets
@@ -186,7 +187,7 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
   // Deserialize the lower bound on the active variables
 
-  ::deserialize( group , "LowerBound" , { num_assets } , v_lower_bound ,
+  ::deserialize( group , "LowerBound" , num_assets , v_lower_bound ,
                  true , true );
 
   if( ! v_lower_bound.empty() ) {
@@ -314,20 +315,20 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  auto inner_block_group = group.getGroup( BLOCK_NAME );
  if( inner_block_group.isNull() )
-  throw std::logic_error( "InvestmentFunction::deserialize: the '" +
-                          BLOCK_NAME + "' group must be present." );
+  throw( std::logic_error( "InvestmentFunction::deserialize: the '" +
+                           BLOCK_NAME + "' group must be present." ) );
 
  auto inner_block = Block::new_Block( inner_block_group , this );
 
  if( ! inner_block )
-  throw std::logic_error( "InvestmentFunction::deserialize: it was not "
-                          "possible to create the inner Block from group '" +
-                          BLOCK_NAME + "'." );
+  throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
+                           "possible to create the inner Block from group '" +
+                           BLOCK_NAME + "'." ) );
 
  if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
          dynamic_cast< UCBlock * >( inner_block ) ) )
-  throw std::logic_error( "InvestmentFunction::deserialize: the inner "
-                          "Block is neither an SDDPBlock nor a UCBlock." );
+  throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
+                           "Block is neither an SDDPBlock nor a UCBlock." ) );
 
  set_inner_block( inner_block );
 
@@ -363,20 +364,20 @@ void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::set_ComputeConfig( ComputeConfig * scfg ) {
-
+void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
+{
  if( v_Block.empty() ||
      std::any_of( v_Block.cbegin() , v_Block.cend() ,
                   []( Block * b ) { return( b == nullptr ); } ) )
   throw( std::logic_error( "InvestmentFunction::set_ComputeConfig: "
-                           "the inner Block is not present." ) );
+                           "the inner Block is not present" ) );
 
  if( ! scfg ) {
   // scfg is nullptr
   ThinComputeInterface::set_ComputeConfig();
   set_default_inner_Block_configuration();
   return;
- }
+  }
 
  if( ! scfg->f_extra_Configuration ) {
   // scfg->f_extra_Configuration is nullptr
@@ -384,68 +385,69 @@ void InvestmentFunction::set_ComputeConfig( ComputeConfig * scfg ) {
   if( ! scfg->f_diff )
    set_default_inner_Block_configuration();
   return;
- }
+  }
 
  auto config_map = dynamic_cast
   < SimpleConfiguration< std::map< std::string , Configuration * > > * >
   ( scfg->f_extra_Configuration );
 
  if( ! config_map )
-  // An invalid extra Configuration has not been provided.
+  // An invalid extra Configuration has been provided
   throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
-                                "invalid extra_Configuration." ) );
+                                "invalid extra_Configuration" ) );
 
  ThinComputeInterface::set_ComputeConfig( scfg );
 
  for( const auto & [ key , config ] : config_map->f_value ) {
-
   if( key == "BlockConfig" ) {
    if( ! config ) {
     if( ! scfg->f_diff )
      // A BlockConfig for the inner Block was not provided. The inner Block is
      // configured to its default configuration.
      set_default_inner_Block_BlockConfig();
-   }
+    }
    else if( auto block_config = dynamic_cast< BlockConfig * >( config ) ) {
     // A BlockConfig for the inner Block has been provided. Apply it.
     block_config->apply( v_Block.front() );
    }
    else
     // An invalid Configuration has been provided.
-    throw( std::invalid_argument
-           ( "InvestmentFunction::set_ComputeConfig: the Configuration "
-             "associated with key \"BlockConfig\" is not a BlockConfig." ) );
-  }
-  else if( key == "BlockSolverConfig" ) {
-   if( ! config ) {
-    if( ! scfg->f_diff )
-     // A BlockSolverConfig for the inner Block was not provided. The Solver
-     // of the inner Block (and their sub-Block, recursively) are unregistered
-     // and deleted.
-     set_default_inner_Block_BlockSolverConfig();
+    throw( std::invalid_argument(
+	     "InvestmentFunction::set_ComputeConfig: the Configuration "
+             "associated with key \"BlockConfig\" is not a BlockConfig" ) );
    }
-   else if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
-    // A BlockSolverConfig for the inner Block has been provided. Apply it.
-    bsc->apply( v_Block.front() );
-   }
-   else
-    // An invalid Configuration has been provided.
-    throw( std::invalid_argument
-           ( "InvestmentFunction::set_ComputeConfig: the Configuration "
+  else
+   if( key == "BlockSolverConfig" ) {
+    if( ! config ) {
+     if( ! scfg->f_diff )
+      // A BlockSolverConfig for the inner Block was not provided. The Solver
+      // of the inner Block (and their sub-Block, recursively) are
+      // unregistered and deleted
+      set_default_inner_Block_BlockSolverConfig();
+     }
+    else
+     if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
+      // A BlockSolverConfig for the inner Block has been provided. Apply it.
+      bsc->apply( v_Block.front() );
+      }
+     else
+      // An invalid Configuration has been provided.
+      throw( std::invalid_argument(
+	     "InvestmentFunction::set_ComputeConfig: the Configuration "
              "associated with key \"BlockSolverConfig\" is not a "
-             "BlockSolverConfig." ) );
-  }
-  else {
-   // An invalid key has been provided.
-   throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
-                                 "invalid key: " + key ) );
+             "BlockSolverConfig" ) );
+    }
+   else
+    // An invalid key has been provided.
+    throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
+				  "invalid key: " + key ) );
   }
  }
-}
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::set_variables( VarVector && x ) {
+void InvestmentFunction::set_variables( VarVector && x )
+{
  if( ! v_cost.empty() )
   if( v_cost.size() != x.size() )
    throw( std::logic_error("InvestmentFunction::set_variables: given x has "
@@ -679,7 +681,7 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
                            "Variable index " + std::to_string( i ) + "." ) );
 
  auto var = v_x[ i ];
- v_x.erase( v_x.begin() + i );    // erase it in v_x
+ v_x.erase( v_x.begin() + i ); // erase it in v_x
 
  // Erase the asset index, asset type, and the linear coefficient associated
  // with the Variable being removed
@@ -1205,7 +1207,6 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   }
  }
 
-
  // Optimization phase
 
  if( f_sddp_solver ) {
@@ -1385,7 +1386,7 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  f_has_value = true;
 
- // Finally, handle the events that happens at the end of compute()
+ // Finally, handle the events that happen at the end of compute()
 
  for( auto & event : v_events[ eBeforeTermination ] ) {
   auto result = event();
@@ -1416,50 +1417,47 @@ static RealObjective::OFValue get_recours_obj( const Block * blck ) {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
-Function::FunctionValue InvestmentFunction::get_constant_term( void ) const {
+Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
+{
  if( auto bk = get_nested_Block( 0 ) )
   return( get_recours_obj( bk ) );
- else
-  return( 0 );
+ return( 0 );
 }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_convex( void ) const {
- return( true );
-}
+bool InvestmentFunction::is_convex( void ) { return( true ); }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_concave( void ) const {
- return( false );
-}
+bool InvestmentFunction::is_concave( void ) { return( false ); }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::has_linearization( const bool diagonal ) {
+bool InvestmentFunction::has_linearization( bool diagonal )
+{
  if( diagonal ) {
   f_diagonal_linearization_required = true;
   return( f_has_diagonal_linearization );
- }
- else {
-  f_diagonal_linearization_required = false;
-  return( f_violated_constraint.first < Inf< Index >() );
- }
+  }
+ f_diagonal_linearization_required = false;
+ return( f_violated_constraint.first < Inf< Index >() );
 }  // end( InvestmentFunction::has_linearization )
 
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::compute_new_linearization( bool diagonal ) {
+bool InvestmentFunction::compute_new_linearization( bool diagonal )
+{
  if( diagonal )
   return( false );
  return( ! constraints_are_satisfied() );
-}
+ }
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::store_linearization( Index name , ModParam issueMod ) {
+void InvestmentFunction::store_linearization( Index name , ModParam issueMod )
+{
  if( name >= global_pool.size() )
   throw( std::invalid_argument( "InvestmentFunction::store_linearization: "
                                 "invalid global pool name: " +
@@ -1477,7 +1475,7 @@ void InvestmentFunction::store_linearization( Index name , ModParam issueMod ) {
                                  Observer::par2concern( issueMod ) ) ,
                                Observer::par2chnl( issueMod ) );
 
-} // end InvestmentFunction::store_linearization( Index )
+ } // end InvestmentFunction::store_linearization( Index )
 
 /*--------------------------------------------------------------------------*/
 
@@ -1691,11 +1689,14 @@ InvestmentFunction::get_linearization_constant( Index name ) {
 
 /*--------------------------------------------------------------------------*/
 
-Function::FunctionValue InvestmentFunction::get_value( void ) const {
+Function::FunctionValue InvestmentFunction::get_value( void )
+{
  if( f_has_value )
   return( f_value );
+
  return( worst_value() );
-} // end ( InvestmentFunction::get_value )
+
+ }  // end ( InvestmentFunction::get_value )
 
 /*--------------------------------------------------------------------------*/
 
@@ -3051,7 +3052,7 @@ void InvestmentFunction::GlobalPool::deserialize
 
  if( global_pool_size ) {
 
-  ::deserialize( group , "InvestmentFunction_Constants" , { global_pool_size } ,
+  ::deserialize( group , "InvestmentFunction_Constants" , global_pool_size ,
                  linearization_constants , false , false );
 
   auto nct = group.getVar( "InvestmentFunction_Type" );

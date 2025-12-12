@@ -2,7 +2,7 @@
 test/IB_test
 
 ### data directories
-test/investment_candidates.txt
+investment_candidates.txt
 
 ### C/C++ template
 # Prerequisites
@@ -654,3 +654,6 @@ TSWLatexianTemp*
 
 # Makeindex log files
 *.lpz
+
+test/uc_lp.lp
+test/*.btr

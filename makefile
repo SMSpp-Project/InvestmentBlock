@@ -44,7 +44,7 @@ InvsBkH   = $(InvsBkSDR)/include/InvestmentBlock.h \
 clean::
 	rm -f $(InvsBkOBJ) $(InvsBkSDR)/*~
 
-# dependencies: every .o from its .C + every recursively included .h- - - - -
+# dependencies: every .o from its .cpp + every recursively included .h- - - -
 
 $(InvsBkSDR)/obj/InvestmentBlock.o: $(InvsBkSDR)/src/InvestmentBlock.cpp \
 	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(UCBckH) \
