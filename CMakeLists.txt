@@ -62,6 +62,10 @@ configure_file(cmake/${modName}Config.h.in ${modName}Config.h)
 add_library(${modName})
 target_compile_features(${modName} PUBLIC cxx_std_17)
 
+if (MSVC AND BUILD_SHARED_LIBS)
+    target_link_options(${modName} INTERFACE "/INCLUDE:SMSpp_force_load_${modName}")
+endif()
+
 # When adding source files with target_sources(), PRIVATE means that the files
 # should only be added to this library, whereas PUBLIC means they should be
 # added to this library and to any target that links to it.
