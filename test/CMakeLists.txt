@@ -57,15 +57,14 @@ if (TARGET SMS++::InvestmentBlock)
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
     endif ()]]
 
-    if (WIN32 AND BUILD_SHARED_LIBS)
+    if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
         # copy runtime DLLs next to the exe after build
         add_custom_command(TARGET InvestmentBlock_test POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:InvestmentBlock_test>
-                $<TARGET_FILE_DIR:InvestmentBlock_test>
-                COMMAND_EXPAND_LISTS
-                COMMENT "Copying runtime DLLs next to InvestmentBlock_test.exe"
-        )
+                           COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                           $<TARGET_RUNTIME_DLLS:InvestmentBlock_test>
+                           $<TARGET_FILE_DIR:InvestmentBlock_test>
+                           COMMAND_EXPAND_LISTS
+                           COMMENT "Copying runtime DLLs next to InvestmentBlock_test.exe")
     endif()
 
     add_test(NAME InvestmentBlock_test
