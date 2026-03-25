@@ -2499,9 +2499,9 @@ void InvestmentFunction::update_linearization_network_blocks
       dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
 
    // HVDC lines
-
-   const auto network_data = dynamic_cast< DCNetworkBlock::DCNetworkData * >
-    ( ucblock->get_NetworkData() );
+   const auto network_data =
+    dynamic_cast< DCNetworkBlock::DCNetworkData * >(
+					       ucblock->get_NetworkData() );
    assert( ( ! network_data ) || network_data->is_HVDC() );
 
    const auto & constraints = dc_network->get_power_flow_limit_HVDC_bounds();

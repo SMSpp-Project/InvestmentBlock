@@ -66,7 +66,7 @@
 /*------------------------------ INCLUDES ----------------------------------*/
 /*--------------------------------------------------------------------------*/
 
-#include "../../tools/block_solver/common_utils.h"
+#include "common_utils.h"
 
 #include <filesystem>
 #include <iomanip>
