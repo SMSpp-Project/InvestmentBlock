@@ -45,7 +45,8 @@ endif ()
 # ----- Tests --------------------------------------------------------------- #
 if (TARGET SMS++::InvestmentBlock)
 
-    add_executable(InvestmentBlock_test test.cpp)
+    add_executable(InvestmentBlock_test ../../tools/block_solver/common_utils.cpp
+                                        test.cpp)
     target_link_libraries(InvestmentBlock_test PRIVATE SMS++::InvestmentBlock
                                                        SMS++::BundleSolver) # TODO this line needs to be removed and the following should be uncomment
 
