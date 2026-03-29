@@ -5,7 +5,7 @@
 #    Tests that should be supported by ctest executable must be added         #
 #    with the add_test() command.                                             #
 #                                                                             #
-#                            Rafael Durbano Lobato                            #
+#                                Donato Meoli                                 #
 #                         Dipartimento di Informatica                         #
 #                             Universita' di Pisa                             #
 # --------------------------------------------------------------------------- #

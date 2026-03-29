@@ -11,7 +11,7 @@
 #                                                                             #
 #        $ cmake --build <build-path> --target install                        #
 #                                                                             #
-#                            Rafael Durbano Lobato                            #
+#                                Donato Meoli                                 #
 #                         Dipartimento di Informatica                         #
 #                             Universita' di Pisa                             #
 # --------------------------------------------------------------------------- #
