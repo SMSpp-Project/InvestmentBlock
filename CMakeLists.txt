@@ -15,7 +15,7 @@
 #                         Dipartimento di Informatica                         #
 #                             Universita' di Pisa                             #
 # --------------------------------------------------------------------------- #
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 cmake_policy(VERSION 3.15)
 project(InvestmentBlock
         VERSION 0.1.1
@@ -64,7 +64,7 @@ target_compile_features(${modName} PUBLIC cxx_std_17)
 
 if (MSVC AND BUILD_SHARED_LIBS)
     target_link_options(${modName} INTERFACE "/INCLUDE:SMSpp_force_load_${modName}")
-endif()
+endif ()
 
 # When adding source files with target_sources(), PRIVATE means that the files
 # should only be added to this library, whereas PUBLIC means they should be
@@ -73,8 +73,8 @@ endif()
 # but should be added to anything that links to it.
 # Note: do not GLOB files here.
 target_sources(${modName} PRIVATE
-               src/InvestmentFunction.cpp
-               src/InvestmentBlock.cpp)
+        src/InvestmentFunction.cpp
+        src/InvestmentBlock.cpp)
 
 # When using target_include_directories(), PUBLIC means that any targets
 # that link to this target also need that include directory.
@@ -97,8 +97,8 @@ target_include_directories(
 # library, INTERFACE means they will be linked only to the targets that depend
 # on this library.
 target_link_libraries(${modName} PUBLIC
-                      ${modNamespace}::SDDPBlock
-                      ${modNamespace}::UCBlock)
+        ${modNamespace}::SDDPBlock
+        ${modNamespace}::UCBlock)
 
 # This alias is defined so that executables in this same project can use
 # the library with this notation.
@@ -175,8 +175,8 @@ install(FILES
 # dynamic loading will look into it.
 if (hasParent)
     set(SMSPP_BUILD_RPATH
-        "${SMSPP_BUILD_RPATH};${CMAKE_CURRENT_BINARY_DIR}"
-        PARENT_SCOPE)
+            "${SMSPP_BUILD_RPATH};${CMAKE_CURRENT_BINARY_DIR}"
+            PARENT_SCOPE)
 endif ()
 
 # ----- Packaging support --------------------------------------------------- #
@@ -191,9 +191,9 @@ if (NOT hasParent)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/LICENSE")
     set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_LIST_DIR}/README.md")
     set(CPACK_SOURCE_IGNORE_FILES
-        \\\\.git/
-        \\\\.gitignore$
-        \\\\.gitattributes$)
+            \\\\.git/
+            \\\\.gitignore$
+            \\\\.gitattributes$)
     include(CPack)
 endif ()
 
