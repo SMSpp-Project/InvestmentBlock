@@ -59,45 +59,24 @@ if (TARGET SMS++::InvestmentBlock)
         target_link_libraries(InvestmentBlock_test PRIVATE SMS++::MILPSolver)
     endif ()]]
 
+    if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
+        # copy runtime DLLs next to the exe after build
+        add_custom_command(TARGET InvestmentBlock_test POST_BUILD
+                           COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                           $<TARGET_RUNTIME_DLLS:InvestmentBlock_test>
+                           $<TARGET_FILE_DIR:InvestmentBlock_test>
+                           COMMAND_EXPAND_LISTS
+                           COMMENT "Copying runtime DLLs next to InvestmentBlock_test.exe")
+    endif()
+
     add_test(NAME InvestmentBlock_test
              COMMAND InvestmentBlock_test)
 
     # TODO this part needs to be removed when investment_solver in /tools will be aligned to InvestmentBlock
     # Install
     include(GNUInstallDirs)
-    if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
-        add_custom_command(TARGET InvestmentBlock_test POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:InvestmentBlock_test>
-                $<TARGET_FILE_DIR:InvestmentBlock_test>
-                COMMAND_EXPAND_LISTS
-                COMMENT "Copying runtime DLLs next to InvestmentBlock_test.exe")
-
-        install(TARGETS InvestmentBlock_test
-                RUNTIME_DEPENDENCY_SET InvestmentBlock_test_deps
-                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-        install(RUNTIME_DEPENDENCY_SET InvestmentBlock_test_deps
-                DESTINATION ${CMAKE_INSTALL_BINDIR}
-                DIRECTORIES
-                "${SCIP_ROOT}/bin"
-                "${GUROBI_ROOT}/win64/bin"
-                "${CPLEX_ROOT}/cplex/bin/x64_win64"
-                PRE_EXCLUDE_REGEXES
-                "api-ms-.*"
-                "ext-ms-.*"
-                "^azureattestmanager\\.dll$"
-                "^azureattestnormal\\.dll$"
-                "^hvsifiletrust\\.dll$"
-                "^pdmutilities\\.dll$"
-                "^wpaxholder\\.dll$"
-                POST_EXCLUDE_REGEXES
-                ".*[\\/]system32[\\/].*"
-                ".*[\\/]windows[\\/].*")
-    else ()
-        install(TARGETS InvestmentBlock_test
-                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    endif ()
+    install(TARGETS InvestmentBlock_test
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()
 
 # --------------------------------------------------------------------------- #
