@@ -62,21 +62,21 @@ if (TARGET SMS++::InvestmentBlock)
     # TODO this part needs to be removed when investment_solver in /tools will be aligned to InvestmentBlock
     include(GNUInstallDirs)
     # Install
-    # smspp_install(InvestmentBlock)
+    # smspp_install(InvestmentBlock_test)
 
     if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
         # On Windows with shared libraries enabled copies all runtime DLL
         # dependencies next to the executable in the build directory
         # (POST_BUILD), using CMake's TARGET_RUNTIME_DLLS generator expression
-        add_custom_command(TARGET InvestmentBlock POST_BUILD
+        add_custom_command(TARGET InvestmentBlock_test POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:InvestmentBlock>
-                $<TARGET_FILE_DIR:InvestmentBlock>
+                $<TARGET_RUNTIME_DLLS:InvestmentBlock_test>
+                $<TARGET_FILE_DIR:InvestmentBlock_test>
                 COMMAND_EXPAND_LISTS
-                COMMENT "Copying runtime DLLs next to InvestmentBlock.exe")
+                COMMENT "Copying runtime DLLs next to InvestmentBlock_test.exe")
     endif ()
 
-    install(TARGETS InvestmentBlock
+    install(TARGETS InvestmentBlock_test
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()
 
