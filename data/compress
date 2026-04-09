@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+tar -czf nc4.tgz nc4

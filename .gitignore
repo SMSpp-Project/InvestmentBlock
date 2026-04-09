@@ -1,3 +1,8 @@
+### DataSets
+data/nc4
+data/nc4.tgz
+data/.extracted
+
 ### Makefile-generated binaries
 test/IB_test
 
