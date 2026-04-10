@@ -150,7 +150,7 @@ const std::vector< option > my_long_opts = {
 const std::string my_help =
  "  -l, --load-cuts <file>          load cuts from a file\n"
  "  -n, --num-blocks <number>       number of sub-Blocks per stage\n"
- "  -r, --relax                     eelax integer variables\n"
+ "  -r, --relax                     relax integer variables\n"
  "  -s, --simulate                  simulate the given investment\n"
  "  -x, --initial-investment <file> initial investment\n";
 
