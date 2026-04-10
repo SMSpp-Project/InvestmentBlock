@@ -3,12 +3,6 @@ data/nc4
 data/nc4.tgz
 data/.extracted
 
-### Makefile-generated binaries
-test/IB_test
-
-### data directories
-investment_candidates.txt
-
 ### C/C++ template
 # Prerequisites
 *.d
@@ -659,6 +653,3 @@ TSWLatexianTemp*
 
 # Makeindex log files
 *.lpz
-
-test/uc_lp.lp
-test/*.btr
