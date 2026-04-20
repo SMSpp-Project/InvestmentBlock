@@ -2300,7 +2300,7 @@ double InvestmentFunction::compute_kappa_linearization
   * constraint. The linearization coefficient for the investment variable
   * associated with the BatteryUnitBlock is
   *
-  *   P^{min} ' (lambda_min + (1 - u^+) * alpha_min_u) -
+  *   P^{min} ' (lambda_min + alpha_min + (1 - u^+) * alpha_min_u) -
   *   P^{max} ' (lambda_max + alpha_max + u^+ * alpha_max_u) +
   *   V^{min} ' beta_min - V^{max} ' beta_max -
   *   P^{pr max} ' gamma_pr - P^{sc max} ' gamma_sc
@@ -2317,6 +2317,8 @@ double InvestmentFunction::compute_kappa_linearization
  // Intake and outtake level bounds
 
  const auto & intake_bound_constraints = unit->get_max_intake_bounds();
+
+ const auto & outtake_bound_constraints = unit->get_max_outtake_bounds();
 
  const auto & max_intake_binary_constraints =
   unit->get_max_intake_binary_constraints();
@@ -2363,15 +2365,17 @@ double InvestmentFunction::compute_kappa_linearization
   // Intake and outtake level bounds
 
   if( intake_bound_constraints ) {
-   /* get_max_intake_bounds() models an upper bound on the intake power.
-    * Its contribution to the kappa linearization should therefore depend on
-    * the magnitude of the associated multiplier, not on the solver-specific
-    * sign convention used for the reported dual value.
-    */
    const auto alpha_max =
     std::abs( intake_bound_constraints[ t ].get_dual() );
 
    linearization += - alpha_max * max_power;
+  }
+
+  if( outtake_bound_constraints ) {
+   const auto alpha_min =
+    std::abs( outtake_bound_constraints[ t ].get_dual() );
+
+   linearization += min_power * alpha_min;
   }
 
   if( max_intake_binary_constraints ) {
