@@ -2363,16 +2363,15 @@ double InvestmentFunction::compute_kappa_linearization
   // Intake and outtake level bounds
 
   if( intake_bound_constraints ) {
-   const auto dual = intake_bound_constraints[ t ].get_dual();
+   /* get_max_intake_bounds() models an upper bound on the intake power.
+    * Its contribution to the kappa linearization should therefore depend on
+    * the magnitude of the associated multiplier, not on the solver-specific
+    * sign convention used for the reported dual value.
+    */
+   const auto alpha_max =
+    std::abs( intake_bound_constraints[ t ].get_dual() );
 
-   // Now determine which bound is associated with the dual value
-
-   double bound = 0;
-   if( obj_sign * dual < 0 )
-    // The dual is associated with the upper bound constraint
-    bound = max_power;
-
-   linearization += - dual * bound;
+   linearization += - alpha_max * max_power;
   }
 
   if( max_intake_binary_constraints ) {
