@@ -28,7 +28,14 @@
 #include "IntermittentUnitBlock.h"
 #include "InvestmentFunction.h"
 #include "SDDPBlock.h"
-//!!#include "SDDPBlockSolutionOutput.h"
+// Solution-output utility lives under tools/sddp_solver/. It is purely
+// optional: when its header is on the include path (e.g. when the tool
+// makefile passes -I.../tools/sddp_solver) the f_output_solution path
+// emits per-scenario solutions; otherwise that path silently no-ops.
+#if __has_include("SDDPBlockSolutionOutput.h")
+ #include "SDDPBlockSolutionOutput.h"
+ #define InvF_HAVE_SDDP_SOLUTION_OUTPUT 1
+#endif
 #include "SDDPGreedySolver.h"
 #include "SDDPSolver.h"
 #include "SMSTypedefs.h"
@@ -43,6 +50,12 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+#endif
+
+#ifdef USE_MPI
+#include <boost/mpi/communicator.hpp>
+#include <boost/mpi/collectives.hpp>
+#include <boost/serialization/vector.hpp>
 #endif
 
 /*--------------------------------------------------------------------------*/
@@ -311,26 +324,53 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  } // end( deserialize linear constraints )
 
- // Deserialize the inner Block
+ // Deserialize the inner Block(s)
 
  auto inner_block_group = group.getGroup( BLOCK_NAME );
  if( inner_block_group.isNull() )
   throw( std::logic_error( "InvestmentFunction::deserialize: the '" +
                            BLOCK_NAME + "' group must be present." ) );
 
- auto inner_block = Block::new_Block( inner_block_group , this );
+ if( f_num_sub_blocks <= 1 ) {
 
- if( ! inner_block )
-  throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
-                           "possible to create the inner Block from group '" +
-                           BLOCK_NAME + "'." ) );
+  // Single-Block path (legacy): create one inner Block, which may be either
+  // an SDDPBlock or a UCBlock.
 
- if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
-         dynamic_cast< UCBlock * >( inner_block ) ) )
-  throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
-                           "Block is neither an SDDPBlock nor a UCBlock." ) );
+  auto inner_block = Block::new_Block( inner_block_group , this );
 
- set_inner_block( inner_block );
+  if( ! inner_block )
+   throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
+                            "possible to create the inner Block from group '" +
+                            BLOCK_NAME + "'." ) );
+
+  if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
+          dynamic_cast< UCBlock * >( inner_block ) ) )
+   throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
+                            "Block is neither an SDDPBlock nor a UCBlock." ) );
+
+  set_inner_block( inner_block );
+  }
+ else {
+
+  // Multi-replica path: create f_num_sub_blocks identical inner Blocks. In
+  // this path only SDDPBlock inner Blocks are supported.
+
+  std::vector< Block * > blocks;
+  blocks.reserve( f_num_sub_blocks );
+  for( Index i = 0 ; i < f_num_sub_blocks ; ++i ) {
+   auto inner_block = Block::new_Block( inner_block_group , this );
+   if( ! inner_block )
+    throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
+                             "possible to create the inner Block from group '"
+                             + BLOCK_NAME + "'." ) );
+   if( ! dynamic_cast< SDDPBlock * >( inner_block ) )
+    throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
+                             "Block is not an SDDPBlock (only SDDPBlock is "
+                             "supported in the multi-replica path)." ) );
+   blocks.push_back( inner_block );
+   }
+  set_inner_blocks( blocks );
+  }
 
  Block::deserialize( group );
 
@@ -341,25 +381,27 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::set_default_inner_Block_BlockConfig() {
- if( v_Block.empty() || ( ! v_Block.front() ) )
-  return;
- assert( v_Block.size() == 1 );
- auto config = new OCRBlockConfig( v_Block.front() );
- config->clear();
- config->apply( v_Block.front() );
- delete config;
+ for( auto inner_block : v_Block ) {
+  if( ! inner_block )
+   continue;
+  auto config = new OCRBlockConfig( inner_block );
+  config->clear();
+  config->apply( inner_block );
+  delete config;
+  }
 }
 
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
- if( v_Block.empty() || ( ! v_Block.front() ) )
-  return;
- assert( v_Block.size() == 1 );
- auto solver_config = new RBlockSolverConfig( v_Block.front() );
- solver_config->clear();
- solver_config->apply( v_Block.front() );
- delete solver_config;
+ for( auto inner_block : v_Block ) {
+  if( ! inner_block )
+   continue;
+  auto solver_config = new RBlockSolverConfig( inner_block );
+  solver_config->clear();
+  solver_config->apply( inner_block );
+  delete solver_config;
+  }
 }
 
 /*--------------------------------------------------------------------------*/
@@ -407,8 +449,10 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
      set_default_inner_Block_BlockConfig();
     }
    else if( auto block_config = dynamic_cast< BlockConfig * >( config ) ) {
-    // A BlockConfig for the inner Block has been provided. Apply it.
-    block_config->apply( v_Block.front() );
+    // A BlockConfig for the inner Block has been provided. Apply it to
+    // every (replica) inner Block.
+    for( auto inner_block : v_Block )
+     block_config->apply( inner_block );
    }
    else
     // An invalid Configuration has been provided.
@@ -427,8 +471,10 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
      }
     else
      if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
-      // A BlockSolverConfig for the inner Block has been provided. Apply it.
-      bsc->apply( v_Block.front() );
+      // A BlockSolverConfig for the inner Block has been provided. Apply
+      // it to every (replica) inner Block.
+      for( auto inner_block : v_Block )
+       bsc->apply( inner_block );
       }
      else
       // An invalid Configuration has been provided.
@@ -995,14 +1041,18 @@ int InvestmentFunction::compute( bool changedvars ) {
   throw( std::logic_error( "InvestmentFunction::compute: there must be at "
                            "least one sub-Block, but there is none." ) );
 
- // For the InvestmentFunction to be correctly computed, the inner Block
- // cannot be modified by other entities. Therefore, the inner Block must be
- // locked.
+ // Multi-replica SDDPBlock path: handles its own locking internally
+ // (one lock per replica). This path is triggered as soon as the
+ // InvestmentFunction was given more than one inner Block via
+ // set_inner_blocks() or by the multi-replica deserialize() path.
 
- bool owned;
+ if( v_Block.size() > 1 )
+  return( compute_SDDPBlock_replicas( changedvars ) );
 
- // Try to lock the inner Block.
- owned = v_Block.front()->is_owned_by( f_id );
+ // Legacy single-Block path: lock the (only) inner Block then dispatch
+ // based on its concrete type.
+
+ bool owned = v_Block.front()->is_owned_by( f_id );
  if( ( ! owned ) && ( ! v_Block.front()->lock( f_id ) ) )
   return( kError ); // If this does not work, this is clearly an error.
 
@@ -1405,6 +1455,298 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
 /*--------------------------------------------------------------------------*/
 
+void InvestmentFunction::handle_events( int type ) const {
+ for( auto & event : v_events[ type ] )
+  event();
+}
+
+/*--------------------------------------------------------------------------*/
+
+int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
+
+ // Verify that every replica is an SDDPBlock.
+
+ for( auto block : v_Block )
+  if( ! dynamic_cast< SDDPBlock * >( block ) )
+   throw( std::invalid_argument( "InvestmentFunction::compute_SDDPBlock_"
+                                 "replicas: every replica must be an "
+                                 "SDDPBlock." ) );
+
+ // For the InvestmentFunction to be correctly computed, the inner Blocks
+ // cannot be modified by other entities. Therefore, every inner Block must
+ // be locked.
+
+ std::vector< bool > owned( v_Block.size() );
+
+ for( Index i = 0 ; i < v_Block.size() ; ++i ) {
+  owned[ i ] = v_Block[ i ]->is_owned_by( f_id );
+  if( ( ! owned[ i ] ) && ( ! v_Block[ i ]->lock( f_id ) ) ) {
+   f_value = worst_value();
+   output_function_value();
+   f_solver_status = kError;
+   handle_events( eBeforeTermination );
+   return( f_solver_status );
+   }
+  }
+
+ // Since the inner Solver may need to lock the inner Block, the
+ // InvestmentFunction lends its identity to the inner Solver.
+
+ std::vector< void * > solver_ids( v_Block.size() );
+ for( Index i = 0 ; i < v_Block.size() ; ++i ) {
+  if( auto solver = get_solver( i ) ) {
+   solver_ids[ i ] = solver->id();
+   solver->set_id( f_id );
+   }
+  }
+
+ if( generator_node_map.empty() )
+  build_generator_node_map();
+
+ if( changedvars || ( ! f_blocks_are_updated ) ) {
+  // Update the Blocks.
+  try {
+   update_blocks();
+   }
+  catch( const std::exception & e ) {
+   for( Index i = 0 ; i < v_Block.size() ; ++i ) {
+    if( auto solver = get_solver( i ) )
+     solver->set_id( solver_ids[ i ] );
+    if( ! owned[ i ] )
+     v_Block[ i ]->unlock( f_id );
+    }
+   std::cerr << "InvestmentFunction::compute_SDDPBlock_replicas: an error "
+                "occurred while updating the Blocks: '" << e.what() << "'"
+             << std::endl;
+   f_value = worst_value();
+   output_function_value();
+   f_solver_status = kError;
+   handle_events( eBeforeTermination );
+   return( f_solver_status );
+   }
+  }
+
+ const auto num_scenarios = get_number_scenarios();
+ f_value = 0.0;
+
+ const auto saved_f_ignore_modifications = f_ignore_modifications;
+ f_ignore_modifications = true;
+
+ f_solver_status = kUnEval;
+
+ // Indicates whether the loop over the scenarios must be interrupted. The
+ // loop is interrupted when either a solution for a subproblem is not
+ // found or when an error occurs while updating the linearization.
+ bool interrupt_loop = false;
+
+ int local_error = 0;
+
+ auto simulation_value = decltype( f_value )( 0 );
+
+ std::vector< double > local_linearization( v_linearization.size() , 0 );
+
+#ifdef USE_MPI
+ boost::mpi::communicator world;
+ const auto world_rank = world.rank();
+ const auto world_size = world.size();
+
+ const int chunk_size = (int)( num_scenarios / world_size );
+ const int remainder = num_scenarios % world_size;
+
+ const auto scenario_start = world_rank * chunk_size +
+  std::min( world_rank , remainder );
+ const auto scenario_end = scenario_start + chunk_size +
+  ( world_rank < remainder ? 1 : 0 );
+#else
+ const auto scenario_start = 0;
+ const auto scenario_end = num_scenarios;
+#endif
+
+ #pragma omp parallel for reduction( + : simulation_value )
+ for( int scenario = scenario_start ; scenario < int( scenario_end ) ;
+      ++scenario ) {
+
+  if( interrupt_loop )
+   continue;
+
+  const auto sub_block_index = lock_sub_block();
+  auto solver = get_solver< SDDPGreedySolver >( sub_block_index );
+  if( ! solver ) {
+   #pragma omp critical( InvestmentFunction )
+   {
+    interrupt_loop = true;
+    local_error = 1;
+    }
+   unlock_sub_block( sub_block_index );
+   continue;
+   }
+  solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
+  const auto status = solver->compute( true );
+
+  if( ! solver->has_var_solution() ) {
+   #pragma omp critical( InvestmentFunction )
+   {
+    interrupt_loop = true;
+    local_error = 1;
+    }
+   unlock_sub_block( sub_block_index );
+   continue;
+   }
+
+  try {
+   #pragma omp critical( InvestmentFunction )
+   {
+    f_solver_status = status;
+    if( f_compute_linearization )
+     update_linearization( sub_block_index , local_linearization );
+    }
+   }
+  catch( const std::exception & e ) {
+   std::cerr << "InvestmentFunction::compute_SDDPBlock_replicas: an error "
+                "occurred while updating the linearization: '"
+             << e.what() << "'" << std::endl;
+   unlock_sub_block( sub_block_index );
+   #pragma omp critical( InvestmentFunction )
+   {
+    interrupt_loop = true;
+    local_error = 1;
+    }
+   continue;
+   }
+
+  // Update the value of the InvestmentFunction
+  simulation_value += solver->get_var_value();
+
+  // Possibly output the solution (if compiled with the helper available)
+  if( f_output_solution ) {
+#ifdef InvF_HAVE_SDDP_SOLUTION_OUTPUT
+   SDDPBlockSolutionOutput( f_output_solution_directory ).
+    print( get_sddp_block( sub_block_index ) , scenario , true );
+#endif
+   }
+
+  // Unlock the sub-Block
+  unlock_sub_block( sub_block_index );
+
+  } // end( for each scenario )
+
+#ifdef USE_MPI
+ // Check whether there was an error in computing any scenario
+ int global_error = 0;
+ boost::mpi::reduce( world , local_error , global_error ,
+                     boost::mpi::maximum< int >() , 0 );
+ boost::mpi::broadcast( world , global_error , 0 );
+
+ if( global_error == 1 )
+  local_error = 1;
+#endif
+
+ if( local_error ) {
+  for( Index i = 0 ; i < v_Block.size() ; ++i ) {
+   if( auto solver = get_solver( i ) )
+    solver->set_id( solver_ids[ i ] );
+   if( ! owned[ i ] )
+    v_Block[ i ]->unlock( f_id );
+   unlock_sub_block( i );
+   }
+
+  f_solver_status = kError;
+  f_value = worst_value();
+
+#ifdef USE_MPI
+  if( ! world.rank() ) {
+#endif
+   output_function_value();
+   handle_events( eBeforeTermination );
+#ifdef USE_MPI
+   }
+#endif
+
+  return( f_solver_status );
+  }
+
+ auto local_value = simulation_value;
+
+ f_ignore_modifications = saved_f_ignore_modifications;
+
+ // Compute the expectation of the operational costs
+ local_value /= num_scenarios;
+
+ // Compute the expectation of the linearization
+ for( Index i = 0 ; i < local_linearization.size() ; ++i )
+  local_linearization[ i ] /= num_scenarios;
+
+ // Consider the linear term of the objective
+#ifdef USE_MPI
+ if( ! world.rank() ) {
+#endif
+
+ for( Index i = 0 ; i < v_x.size() ; ++i ) {
+  const auto installed_quantity = get_installed_quantity( i );
+  const auto x = get_var_value( i , false );
+
+  if( x > installed_quantity ) {
+   const auto cost = get_cost( i );
+   local_value += cost * ( x - installed_quantity );
+   local_linearization[ i ] += cost;
+   }
+  else {
+   const auto disinvestment_cost = get_disinvestment_cost( i );
+   local_value += disinvestment_cost * ( installed_quantity - x );
+   local_linearization[ i ] -= disinvestment_cost;
+   }
+  }
+
+#ifdef USE_MPI
+ }
+#endif
+
+ f_value = 0.0;
+
+#ifdef USE_MPI
+ boost::mpi::reduce( world , local_value , f_value ,
+                     std::plus< double >() , 0 );
+ boost::mpi::broadcast( world , f_value , 0 );
+
+ boost::mpi::reduce( world , local_linearization , v_linearization ,
+                     std::plus< double >() , 0 );
+ boost::mpi::broadcast( world , v_linearization , 0 );
+#else
+ f_value = local_value;
+ v_linearization = local_linearization;
+#endif
+
+ // Unlock the inner Blocks if needed; restore solver identities.
+ for( Index i = 0 ; i < v_Block.size() ; ++i ) {
+  if( auto solver = get_solver( i ) )
+   solver->set_id( solver_ids[ i ] );
+  if( ! owned[ i ] )
+   v_Block[ i ]->unlock( f_id );
+  }
+
+ // At this point, if a linearization has been computed, then a diagonal
+ // linearization is available.
+ f_has_diagonal_linearization = f_compute_linearization;
+
+ f_has_value = true;
+
+ f_solver_status = kOK;
+
+#ifdef USE_MPI
+ if( ! world.rank() ) {
+#endif
+  output_function_value();
+  handle_events( eBeforeTermination );
+#ifdef USE_MPI
+  }
+#endif
+
+ return( f_solver_status );
+
+}  // end( InvestmentFunction::compute_SDDPBlock_replicas )
+
+/*--------------------------------------------------------------------------*/
+
 static RealObjective::OFValue get_recours_obj( const Block * blck ) {
  RealObjective::OFValue rv = 0;
  if( auto obj = dynamic_cast< RealObjective * >( blck->get_objective() ) )
@@ -1441,7 +1783,21 @@ bool InvestmentFunction::has_linearization( bool diagonal )
   return( f_has_diagonal_linearization );
   }
  f_diagonal_linearization_required = false;
- return( f_violated_constraint.first < Inf< Index >() );
+
+ if( f_violated_constraint.first < Inf< Index >() ) {
+  // A constraint has been violated. Compute the vertical linearization
+  // (gradient of the violated constraint, with sign according to which
+  // side -- LHS or RHS -- was violated).
+  assert( f_violated_constraint.first < v_A.size() );
+  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
+  const auto i = f_violated_constraint.first;
+  v_linearization.resize( v_x.size() );
+  for( Index j = 0 ; j < Index( v_x.size() ) ; ++j )
+   v_linearization[ j ] = sign * v_A[ i ][ j ];
+  return( true );
+  }
+
+ return( false );
 }  // end( InvestmentFunction::has_linearization )
 
 
@@ -1717,15 +2073,37 @@ bool InvestmentFunction::constraints_are_satisfied( void ) {
 
  for( Index i = start ; i < v_A.size() ; ++i ) {
   auto constraint_value = compute_linear_constraint_value( i );
-  if( constraint_value < v_constraints_lower_bound[ i ] ) {
-   f_violated_constraint = { i , eLHS };
-   return( false );
-  }
 
-  if( constraint_value > v_constraints_upper_bound[ i ] ) {
-   f_violated_constraint = { i , eRHS };
-   return( false );
-  }
+  // Lower bound: declare infeasible only if the relative violation exceeds
+  // f_constraints_tolerance (with the standard "max(1, |rhs|)" denominator
+  // to handle zero/tiny bounds).
+  {
+   auto lower_violation = v_constraints_lower_bound[ i ] - constraint_value;
+   if( lower_violation > 0 ) {
+    lower_violation /=
+     std::max( decltype( v_constraints_lower_bound )::value_type( 1 ) ,
+               std::abs( v_constraints_lower_bound[ i ] ) );
+    if( lower_violation > f_constraints_tolerance ) {
+     f_violated_constraint = { i , eLHS };
+     return( false );
+     }
+    }
+   }
+
+  // Upper bound: symmetric check.
+  {
+   auto upper_violation = constraint_value - v_constraints_upper_bound[ i ];
+   if( upper_violation > 0 ) {
+    upper_violation /=
+     std::max( decltype( v_constraints_upper_bound )::value_type( 1 ) ,
+               std::abs( v_constraints_upper_bound[ i ] ) );
+    if( upper_violation > f_constraints_tolerance ) {
+     f_violated_constraint = { i , eRHS };
+     return( false );
+     }
+    }
+   }
+
  }
 
  return( true );
@@ -1758,7 +2136,10 @@ int InvestmentFunction::get_inner_block_objective_sense() const {
 UCBlock * InvestmentFunction::get_ucblock( Index stage , Index i ) const {
  if( auto ucblock = get_ucblock() )
   return( ucblock );
- assert( i < f_num_sub_blocks_per_stage );
+ if( v_Block.size() > 1 )
+  assert( i < v_Block.size() );
+ else
+  assert( i < f_num_sub_blocks_per_stage );
  auto benders_function = get_benders_function( stage , i );
  assert( benders_function );
  return( dynamic_cast< UCBlock * >( benders_function->get_inner_block() ) );
@@ -1780,6 +2161,14 @@ SDDPBlock * InvestmentFunction::get_sddp_block() const {
 
 /*--------------------------------------------------------------------------*/
 
+SDDPBlock * InvestmentFunction::get_sddp_block( Index i ) const {
+ if( i >= v_Block.size() )
+  return( nullptr );
+ return( dynamic_cast< SDDPBlock * >( v_Block[ i ] ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
 CDASolver * InvestmentFunction::get_ucblock_solver( Index stage ,
                                                     Index i ) const {
  if( auto ucblock = get_ucblock( stage , i ) )
@@ -1795,15 +2184,33 @@ BendersBFunction *
 InvestmentFunction::get_benders_function( Index stage ,
                                           Index sub_block_index ) const {
 
- auto sddp_block = get_sddp_block();
- assert( sddp_block );
- if( stage >= sddp_block->get_time_horizon() )
-  throw( std::invalid_argument( "InvestmentFunction::get_benders_function: "
-                                "invalid stage index: " +
-                                std::to_string( stage ) ) );
+ // In the multi-replica path (v_Block.size() > 1) sub_block_index is the
+ // index of the SDDPBlock replica; in the legacy single-Block path it is
+ // the index of the sub-Block per stage within the (single) SDDPBlock.
 
- auto benders_block = static_cast< BendersBlock * >
-  ( sddp_block->get_sub_Block( stage , sub_block_index )->get_inner_block() );
+ SDDPBlock * sddp_block = nullptr;
+ BendersBlock * benders_block = nullptr;
+
+ if( v_Block.size() > 1 ) {
+  sddp_block = get_sddp_block( sub_block_index );
+  assert( sddp_block );
+  if( stage >= sddp_block->get_time_horizon() )
+   throw( std::invalid_argument( "InvestmentFunction::get_benders_function: "
+                                 "invalid stage index: " +
+                                 std::to_string( stage ) ) );
+  benders_block = static_cast< BendersBlock * >
+   ( sddp_block->get_sub_Block( stage )->get_inner_block() );
+  }
+ else {
+  sddp_block = get_sddp_block();
+  assert( sddp_block );
+  if( stage >= sddp_block->get_time_horizon() )
+   throw( std::invalid_argument( "InvestmentFunction::get_benders_function: "
+                                 "invalid stage index: " +
+                                 std::to_string( stage ) ) );
+  benders_block = static_cast< BendersBlock * >
+   ( sddp_block->get_sub_Block( stage , sub_block_index )->get_inner_block() );
+  }
 
  auto objective = static_cast< FRealObjective * >
   ( benders_block->get_objective() );
@@ -2481,6 +2888,55 @@ void InvestmentFunction::update_linearization_unit_blocks
 
 /*--------------------------------------------------------------------------*/
 
+void InvestmentFunction::update_linearization_unit_blocks
+( Index stage , Index sub_block_index ,
+  const std::vector< std::pair< Index , Index > > & block_indices ,
+  std::vector< double > & linearization ) {
+
+ // Same body as the v_linearization-targeted overload above, but writes
+ // the accumulated terms into the caller-supplied `linearization` vector.
+ // Used by the multi-replica path to keep accumulation thread-local
+ // (modulo OpenMP critical-section serialization in the caller).
+
+ const auto ucblock = get_ucblock( stage , sub_block_index );
+
+ for( const auto & [ block_index , var_index ] : block_indices ) {
+
+  auto block = ucblock->get_unit_block( block_index );
+
+  if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
+   linearization[ var_index ] +=
+    compute_scale_linearization( block_index , stage , sub_block_index );
+  }
+  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
+   if( f_replicate_battery )
+    linearization[ var_index ] +=
+     compute_scale_linearization( block_index , stage , sub_block_index );
+   else
+    linearization[ var_index ] +=
+     compute_kappa_linearization( unit , var_index );
+  }
+  else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
+   if( f_replicate_intermittent )
+    linearization[ var_index ] +=
+     compute_scale_linearization( block_index , stage , sub_block_index );
+   else
+    linearization[ var_index ] +=
+     compute_kappa_linearization( unit , var_index );
+  }
+  else {
+   auto error_message = "InvestmentFunction::update_linearization: "
+    "unrecognized UnitBlock: " + block->classname();
+   if( ! block->name().empty() )
+    error_message += " with name '" + block->name() + "'";
+   error_message += ".";
+   throw( std::logic_error( error_message ) );
+  }
+ }
+} // end( InvestmentFunction::update_linearization_unit_blocks, out variant )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentFunction::update_linearization_network_blocks
 ( Index stage , Index sub_block_index ,
   const std::vector< std::pair< Index , Index > > & line_indices ) {
@@ -2554,6 +3010,63 @@ void InvestmentFunction::update_linearization_network_blocks
 
 /*--------------------------------------------------------------------------*/
 
+void InvestmentFunction::update_linearization_network_blocks
+( Index stage , Index sub_block_index ,
+  const std::vector< std::pair< Index , Index > > & line_indices ,
+  std::vector< double > & linearization ) {
+
+ // Same body as the v_linearization-targeted overload above, but writes
+ // into the caller-supplied `linearization` vector.
+
+ if( line_indices.empty() )
+  return;
+
+ const auto ucblock = get_ucblock( stage , sub_block_index );
+ const auto time_horizon = ucblock->get_time_horizon();
+
+ for( Index t = 0 ; t < time_horizon ; ++t ) {
+
+  const auto network_block = ucblock->get_network_block( t );
+
+  if( const auto dc_network =
+      dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
+
+   const auto network_data =
+    dynamic_cast< DCNetworkBlock::DCNetworkData * >(
+                                               ucblock->get_NetworkData() );
+   assert( ( ! network_data ) || network_data->is_HVDC() );
+
+   const auto & constraints = dc_network->get_power_flow_limit_HVDC_bounds();
+
+   if( constraints.empty() )
+    continue;
+
+   const auto obj_sign =
+    ( dc_network->get_objective_sense() == Objective::eMin ) ? - 1 : 1;
+
+   for( const auto & [ line , var_index ] : line_indices ) {
+
+    const auto dual = constraints[ line ].get_dual();
+    const auto min_flow = dc_network->get_min_power_flow( line );
+    const auto max_flow = dc_network->get_max_power_flow( line );
+
+    auto bound = max_flow;
+    if( obj_sign * dual > 0 )
+     bound = min_flow;
+
+    linearization[ var_index ] += - dual * bound;
+    }
+   }
+  else {
+   auto error_message = "InvestmentFunction::update_linearization_network_"
+    "blocks: unrecognized NetworkBlock: " + network_block->classname() + ".";
+   throw( std::logic_error( error_message ) );
+   }
+  }
+} // end( InvestmentFunction::update_linearization_network_blocks, out variant )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentFunction::update_linearization( Index sub_block_index ) {
 
  const auto num_stages = get_number_stages();
@@ -2617,6 +3130,72 @@ void InvestmentFunction::update_linearization( Index sub_block_index ) {
  } // end( for each stage )
 
 }  // end( InvestmentFunction::update_linearization() )
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::update_linearization
+( Index sub_block_index , std::vector< double > & linearization ) {
+
+ // Multi-replica variant: identifies the appropriate solver in the
+ // sub_block_index-th replica SDDPBlock, retrieves its dual/primal
+ // solution, and accumulates the per-stage contributions into the
+ // caller-supplied `linearization` vector.
+
+ SDDPBlock * sddp_block = nullptr;
+ if( v_Block.size() > 1 )
+  sddp_block = get_sddp_block( sub_block_index );
+ else
+  sddp_block = get_sddp_block();
+
+ if( ! sddp_block )
+  throw( std::logic_error( "InvestmentFunction::update_linearization: the "
+                           "multi-replica linearization update requires an "
+                           "SDDPBlock inner Block." ) );
+
+ const auto num_stages = sddp_block->get_time_horizon();
+
+ std::vector< std::pair< Index , Index > > block_indices;
+ block_indices.reserve( v_asset_indices.size() );
+ std::vector< std::pair< Index , Index > > line_indices;
+ line_indices.reserve( v_asset_indices.size() );
+
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
+  const auto asset_type = v_asset_type[ i ];
+  const auto asset_index = v_asset_indices[ i ];
+  if( asset_type == eUnitBlock )
+   block_indices.push_back( { asset_index , i } );
+  else if( asset_type == eLine )
+   line_indices.push_back( { asset_index , i } );
+  else
+   throw( std::logic_error( "InvestmentFunction::update_linearization: "
+                            "invalid asset type: " +
+                            std::to_string( asset_type ) ) );
+  }
+
+ auto solver = get_solver< CDASolver >( sub_block_index );
+
+ if( solver && solver->has_dual_solution() )
+  solver->get_dual_solution();
+ else
+  throw( std::logic_error( "InvestmentFunction::update_linearization: "
+                           "dual solution not available." ) );
+
+ if( ! block_indices.empty() ) {
+  if( solver && solver->has_var_solution() )
+   solver->get_var_solution();
+  else
+   throw( std::logic_error( "InvestmentFunction::update_linearization: "
+                            "primal solution not available." ) );
+  }
+
+ for( Index stage = 0 ; stage < num_stages ; ++stage ) {
+  update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
+                                    linearization );
+  update_linearization_network_blocks( stage , sub_block_index , line_indices ,
+                                       linearization );
+  }
+
+}  // end( InvestmentFunction::update_linearization, out variant )
 
 /*--------------------------------------------------------------------------*/
 

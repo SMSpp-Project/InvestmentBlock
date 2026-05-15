@@ -322,6 +322,14 @@ class InvestmentFunction : public C05Function , public Block {
    * compute()-ed. If it is empty, then the variable and function values are
    * not output. The default value for this parameter is the empty string. */
 
+  strOutputSolutionDirectory ,
+  ///< path to the directory where the solution should be output
+  /**< If the solution must be output (see #intOutputSolution) then this is
+   * the path to the directory where the solution will be output. If it is
+   * empty, then the solution is output to the working directory. The default
+   * value of this parameter is empty. This parameter is only used by the
+   * multi-replica SDDPBlock path. */
+
   strLastParInvestmentF
   ///< first allowed new string parameter for derived classes
   /**< Convenience value for easily allow derived classes to extend the set of
@@ -608,6 +616,52 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
+ /// set the sub-Blocks of the InvestmentFunction
+ /** This method sets the sub-Blocks of the InvestmentFunction as a vector of
+  * (identical) Blocks. This enables the multi-replica execution path: each
+  * Block is a self-contained replica of the inner problem, and scenarios
+  * are distributed across replicas using OpenMP (and, if compiled with
+  * USE_MPI, across MPI processes).
+  *
+  * @param blocks the pointers to the (identical) Blocks satisfying the
+  *        conditions stated in the definition of this InvestmentFunction.
+  *
+  * @param destroy_previous_blocks indicates whether the previous inner
+  *        Blocks must be destroyed. The default value of this parameter is
+  *        \c true, which means that the previous inner Blocks (if any) are
+  *        destroyed and their allocated memory is released. */
+
+ void set_inner_blocks( std::vector< Block * > & blocks ,
+                        bool destroy_previous_blocks = true ) {
+  if( ( ! v_Block.empty() ) && ( blocks.size() == v_Block.size() ) &&
+      ( ! destroy_previous_blocks ) ) {
+
+   bool blocks_are_here = true;
+   for( Index i = 0 ; i < blocks.size() ; ++i )
+    if( blocks[ i ] != v_Block[ i ] ) {
+     blocks_are_here = false;
+     break;
+     }
+
+   if( blocks_are_here )
+    return; // the given Blocks are already here; silently return
+   }
+
+  if( destroy_previous_blocks )
+   for( auto block : v_Block )
+    delete block;
+
+  v_Block.clear();
+  v_Block = blocks;
+
+  for( auto block : v_Block )
+   if( block )
+    block->set_f_Block( this );
+
+  send_nuclear_modification();
+  }
+
+/*--------------------------------------------------------------------------*/
  /// set a given integer (int) numerical parameter
  /** Set a given integer (int) numerical parameter. InvestmentFunction takes
   * care of the following parameters:
@@ -668,15 +722,21 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * - #strOutputFilename
   *
+  * - #strOutputSolutionDirectory
+  *
   * @param par The parameter to be set.
   *
   * @return The value of the parameter. */
 
  void set_par( idx_type par , std::string && value ) override
  {
-  if( par == strOutputFilename ) {
-   f_output_filename = std::move( value );
-   return;
+  switch( par ) {
+   case( strOutputFilename ):
+    f_output_filename = std::move( value );
+    return;
+   case( strOutputSolutionDirectory ):
+    f_output_solution_directory = std::move( value );
+    return;
    }
 
   C05Function::set_par( par , value );
@@ -769,8 +829,10 @@ class InvestmentFunction : public C05Function , public Block {
 
  const std::string & get_str_par( const idx_type par ) const override
  {
-  if( par == strOutputFilename )
-   return( f_output_filename );
+  switch( par ) {
+   case( strOutputFilename ):          return( f_output_filename );
+   case( strOutputSolutionDirectory ): return( f_output_solution_directory );
+   }
 
   return( C05Function::get_str_par( par ) );
   }
@@ -840,6 +902,9 @@ class InvestmentFunction : public C05Function , public Block {
   if( name == "strOutputFilename" )
    return( strOutputFilename );
 
+  if( name == "strOutputSolutionDirectory" )
+   return( strOutputSolutionDirectory );
+
   return( C05Function::str_par_str2idx( name ) );
   }
 
@@ -871,7 +936,8 @@ class InvestmentFunction : public C05Function , public Block {
  const std::string & str_par_idx2str( const idx_type idx ) const override
  {
   static const std::vector< std::string > parameter_names = {
-                                                       "strOutputFilename" };
+                                                "strOutputFilename" ,
+                                                "strOutputSolutionDirectory" };
   if( ( idx >= str_par_type_C05F::strLastParC05F ) &&
       ( idx < str_par_type_InvestmentF::strLastParInvestmentF ) )
    return( parameter_names[ idx - str_par_type_C05F::strLastParC05F ] );
@@ -1138,6 +1204,29 @@ class InvestmentFunction : public C05Function , public Block {
 
  void set_num_sub_blocks_per_stage( Index n ) {
   f_num_sub_blocks_per_stage = n;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// set the number of (replica) sub-Blocks of the InvestmentFunction
+ /** Sets the number of identical sub-Blocks that this InvestmentFunction
+  * holds. This is the multi-replica analogue of
+  * #set_num_sub_blocks_per_stage(), and is used by the new SDDPBlock
+  * parallel execution path: the InvestmentFunction holds \p n identical
+  * SDDPBlocks as inner Blocks (one per OpenMP thread / MPI process), and
+  * scenarios are partitioned across replicas. Setting this value when an
+  * inner Block is already present is illegal: if non-null Blocks are
+  * registered, this asserts and the call has no effect.
+  *
+  * Note: #set_num_sub_blocks_per_stage() and #set_number_sub_blocks() are
+  * NOT aliases; they govern two orthogonal parallelism levels (multi
+  * sub-Block per stage within a single inner SDDPBlock vs. multiple
+  * inner SDDPBlock replicas). */
+
+ void set_number_sub_blocks( Index n ) {
+  assert( v_Block.empty() ||
+          std::all_of( v_Block.cbegin() , v_Block.cend() ,
+                       []( Block * b ) { return( b == nullptr ); } ) );
+  f_num_sub_blocks = n;
   }
 
 /** @} ---------------------------------------------------------------------*/
@@ -1462,11 +1551,29 @@ class InvestmentFunction : public C05Function , public Block {
 
  template< class T = Solver >
  inline T * get_solver( Index i ) const {
-  if( i >= v_Block.front()->get_registered_solvers().size() )
+  if( v_Block.empty() )
    return( nullptr );
+
+  if( v_Block.size() == 1 ) {
+   // single-Block mode: get the i-th solver registered on the single
+   // inner Block (legacy behavior)
+   if( i >= v_Block.front()->get_registered_solvers().size() )
+    return( nullptr );
+   return( dynamic_cast< T * >(
+              * std::next( v_Block.front()->get_registered_solvers().begin() ,
+                           i ) ) );
+   }
+
+  // multi-replica mode: get the first solver registered on the i-th
+  // replica Block
+  if( i >= v_Block.size() )
+   return( nullptr );
+
+  if( v_Block[ i ]->get_registered_solvers().empty() )
+   return( nullptr );
+
   return( dynamic_cast< T * >(
-	     * std::next( v_Block.front()->get_registered_solvers().begin() ,
-			  i ) ) );
+            v_Block[ i ]->get_registered_solvers().front() ) );
   }
 
 /**@} ----------------------------------------------------------------------*/
@@ -1506,6 +1613,19 @@ class InvestmentFunction : public C05Function , public Block {
   assert( asset < v_installed_quantity.size() );
   return( v_installed_quantity[ asset ] );
   }
+
+/*--------------------------------------------------------------------------*/
+ /// returns a pointer to the i-th SDDPBlock replica (if any)
+ /** This function returns a pointer to the i-th SDDPBlock replica of this
+  * InvestmentFunction. If the i-th sub-Block is not an SDDPBlock or \p i is
+  * out of range, this returns nullptr.
+  *
+  * @param i The index of a sub-Block of this InvestmentFunction.
+  *
+  * @return A pointer to the i-th SDDPBlock of this InvestmentFunction, or
+  *         nullptr if not available. */
+
+ SDDPBlock * get_sddp_block( Index i ) const;
 
 /** @} ---------------------------------------------------------------------*/
 /*-------------------- Methods for handling Modification -------------------*/
@@ -1596,7 +1716,20 @@ class InvestmentFunction : public C05Function , public Block {
  ///< a diagonal linearization is available
 
  Index f_num_sub_blocks_per_stage = 1;
- ///< number of sub-Blocks per stage in SDDPBlock
+ ///< number of sub-Blocks per stage in SDDPBlock (single-Block mode)
+
+ Index f_num_sub_blocks = 1;
+ ///< number of (identical) replica sub-Blocks (multi-replica mode)
+ /**< Number of identical inner Blocks held by this InvestmentFunction in
+  * the multi-replica execution path. When >1, deserialize() will create
+  * this many copies of the inner Block, and compute() dispatches to the
+  * multi-replica SDDP code path. */
+
+ double f_constraints_tolerance = 1.0e-6;
+ ///< relative tolerance to declare feasible a linear constraint
+ /**< Tolerance used in the relative-violation feasibility check performed
+  * by constraints_are_satisfied(). The violation of a constraint is
+  * divided by max(1, abs(rhs)) and compared against this tolerance. */
 
  void * f_id;  ///< the "identity" of the InvestmentFunction
 
@@ -1661,6 +1794,11 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::string f_output_filename;
  ///< name of the file into which the variable and function values are output
+
+ std::string f_output_solution_directory;
+ ///< path to the directory where the solution will be output
+ /**< Used by the multi-replica SDDPBlock path; see
+  * #strOutputSolutionDirectory. */
 
 /*--------------------------------------------------------------------------*/
 /*--------------------- PRIVATE PART OF THE CLASS --------------------------*/
@@ -2320,6 +2458,45 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 
  int compute_SDDPBlock( bool changedvars , bool owned );
+
+/*--------------------------------------------------------------------------*/
+ /// compute the InvestmentFunction in the multi-replica SDDPBlock path
+ /** Executes compute() against multiple identical SDDPBlock replicas held
+  * in v_Block, with scenarios partitioned across OpenMP threads (and MPI
+  * processes if compiled with USE_MPI). Called from compute() when
+  * v_Block.size() > 1 (or when a single replica was explicitly registered
+  * via set_inner_blocks()). */
+
+ int compute_SDDPBlock_replicas( bool changedvars );
+
+/*--------------------------------------------------------------------------*/
+ /// fire all event handlers registered for the given event \p type
+
+ void handle_events( int type ) const;
+
+/*--------------------------------------------------------------------------*/
+ /// update the linearization, accumulating into the given vector
+ /** Multi-replica variant of update_linearization() that accumulates the
+  * linearization terms into the caller-supplied vector \p linearization
+  * rather than into v_linearization. This is required for thread-safe
+  * accumulation across OpenMP-parallel scenario loops. */
+
+ void update_linearization( Index sub_block_index ,
+                            std::vector< double > & linearization );
+
+/*--------------------------------------------------------------------------*/
+
+ void update_linearization_unit_blocks(
+   Index stage , Index sub_block_index ,
+   const std::vector< std::pair< Index , Index > > & block_indices ,
+   std::vector< double > & linearization );
+
+/*--------------------------------------------------------------------------*/
+
+ void update_linearization_network_blocks(
+   Index stage , Index sub_block_index ,
+   const std::vector< std::pair< Index , Index > > & line_indices ,
+   std::vector< double > & linearization );
 
 /*--------------------------------------------------------------------------*/
 
