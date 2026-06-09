@@ -282,6 +282,18 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
+ /// set the number of (replica) sub-Blocks of the InvestmentFunction
+ /** This value is propagated to the underlying InvestmentFunction at
+  * deserialize() time. It is the number of identical inner Block replicas
+  * to construct when the inner Block is an SDDPBlock and the multi-replica
+  * parallel execution path is desired. See
+  * InvestmentFunction::set_number_sub_blocks() for the precise meaning. */
+
+ void set_number_sub_blocks( Index n ) {
+  f_num_sub_blocks = n;
+  }
+
+/*--------------------------------------------------------------------------*/
 /*----------------------- Methods for handling Solution --------------------*/
 /*--------------------------------------------------------------------------*/
  /// returns a InvestmentBlockSolution with the current solution
@@ -578,6 +590,9 @@ protected:
  int f_reformulate_bounds = 0;
 
  Index f_num_sub_blocks_per_stage = 1;
+
+ Index f_num_sub_blocks = 1;
+ ///< number of replica sub-Blocks for the multi-replica SDDPBlock path
 
  FRealObjective objective;  ///< the Objective of this InvestmentBlock
 

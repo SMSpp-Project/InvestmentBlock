@@ -110,7 +110,7 @@ necessary libraries comprising the "core SMS++" one, or
 [makefile-s](makefile-s) including all necessary libraries but not the "core
 SMS++" one (for the common case in which this is used together with other
 modules that already include them). One relevant case is the
-[InvestmentBlock main in the tools/ repo](https://gitlab.com/smspp/tools/-/blob/develop/investment_solver/investment_solver.cpp?ref_type=heads). The makefiles
+[InvestmentBlock main in the tools/ repo](https://gitlab.com/smspp/tools/-/blob/develop/investmentblock_solver/investmentblock_solver.cpp?ref_type=heads). The makefiles
 in turn recursively include all the required other makefiles, hence one should
 only need to edit the "main makefile" for compilation type (C++ compiler and
 its options) and it all should be good to go. In case some of the external
