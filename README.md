@@ -123,6 +123,24 @@ Check the [SMS++ installation wiki](https://gitlab.com/smspp/smspp-project/-/wik
 for further details.
 
 
+## Data
+
+We provide some data sets that are used, among other things, by some of the
+testers of the [test repo](https://gitlab.com/smspp/tests). Since they are
+large they are not included in the repo. They are automatically downloaded by
+CMake if the test repo is included, but if you are not using CMake to build
+the system you need to do it by hand, via
+
+```sh
+cd data
+wget https://gitlab.com/api/v4/projects/45125867/packages/generic/nc4/latest/nc4.tgz
+tar xzvf nc4.tgz
+```
+
+This builds the [data/nc4](data/nc4) folder with the `InvestmentBlock`
+instances (such as the `resilient-data` set) used by the tests.
+
+
 ## Getting help
 
 If you need support, you want to submit bugs or propose a new feature, you can
