@@ -38,7 +38,7 @@ build:
 test:
   stage: test
   script:
-    - ctest -V -C Release --test-dir smspp-project/build
+    - ctest -V -C Release -L "$CI_PROJECT_NAME" --test-dir smspp-project/build
   only:
     refs:
       - develop
