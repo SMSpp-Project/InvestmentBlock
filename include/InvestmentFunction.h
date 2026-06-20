@@ -2269,42 +2269,6 @@ class InvestmentFunction : public C05Function , public Block {
                                      Index sub_block_index );
 
 /*--------------------------------------------------------------------------*/
- /// returns the contribution to the linearization by the given Block
- /** This function computes and returns the contribution to the linearization
-  * by the given IntermittentUnitBlock, considering the constraints that are
-  * affected by kappa.
-  *
-  * @param unit A pointer to the IntermittentUnitBlock.
-  *
-  * @param var_index The index of the active Variable associated with the
-  *        IntermittentUnitBlock's kappa.
-  *
-  * @return the contribution to the linearization by the given
-  *         IntermittentUnitBlock, considering the constraints that are
-  *         affected by kappa. */
-
- double compute_kappa_linearization( IntermittentUnitBlock * unit ,
-                                     Index var_index );
-
-/*--------------------------------------------------------------------------*/
- /// returns the contribution to the linearization by the given Block
- /** This function computes and returns the contribution to the linearization
-  * by the given BatteryUnitBlock, considering the constraints that are
-  * affected by kappa.
-  *
-  * @param unit A pointer to the BatteryUnitBlock.
-  *
-  * @param var_index The index of the active Variable associated with the
-  *        BatteryUnitBlock's kappa.
-  *
-  * @return the contribution to the linearization by the given
-  *         BatteryUnitBlock, considering the constraints that are affected by
-  *         kappa. */
-
- double compute_kappa_linearization( const BatteryUnitBlock * unit ,
-                                     Index var_index );
-
-/*--------------------------------------------------------------------------*/
  /// updates the linearization to reflect the most recent scenario considered
  /** This function updates the linearization to reflect the most recent
   * scenario considered, whose subproblem was solved by the Solver attached to
