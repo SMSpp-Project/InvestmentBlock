@@ -1174,6 +1174,9 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
 
  solver->set_id( solver_id );
 
+ // w * F: scale the diagonal value and linearization by the component weight
+ scale_diagonal_by_weight();
+
  // At this point, if a linearization has been computed, then a diagonal
  // linearization is available.
  f_has_diagonal_linearization = f_compute_linearization;
@@ -1429,6 +1432,9 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  // Unlock the inner Block if it is necessary
  unlend_identity();
+
+ // w * F: scale the diagonal value and linearization by the component weight
+ scale_diagonal_by_weight();
 
  // At this point, if a linearization has been computed, then a diagonal
  // linearization is available.
@@ -1724,6 +1730,10 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    v_Block[ i ]->unlock( f_id );
   }
 
+ // w * F: scale the diagonal value and linearization by the component weight
+ // (after the MPI reduce/broadcast, so every rank scales identical values)
+ scale_diagonal_by_weight();
+
  // At this point, if a linearization has been computed, then a diagonal
  // linearization is available.
  f_has_diagonal_linearization = f_compute_linearization;
@@ -1761,8 +1771,10 @@ static RealObjective::OFValue get_recours_obj( const Block * blck ) {
 
 Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 {
+ // w * F: the recourse-objective constant is part of the value and scales by
+ // the component weight (it does not flow through f_value)
  if( auto bk = get_nested_Block( 0 ) )
-  return( get_recours_obj( bk ) );
+  return( f_weight * get_recours_obj( bk ) );
  return( 0 );
 }
 

@@ -123,6 +123,27 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
+ /// adds one weighted component to the disaggregated (1:K) structure
+ /** Wraps \p f in a bare AbstractBlock sub-Block holding an FRealObjective
+  * over it (one BundleSolver component per sub-Block) and stores \p weight.
+  * Call it once per component to assemble the disaggregated (1:K) structure
+  * in code. This is currently the only way to build it: the netCDF format
+  * does not yet describe multiple components, so deserialize() builds only
+  * the single-component (legacy) Block.
+  *
+  * \p weight is validated ( > 0 ) and applied to the component (value and
+  * diagonal linearization) via InvestmentFunction::set_weight(). The active
+  * Variable of \p f must be set by the caller, and this must be called before
+  * the abstract representation is generated.
+  *
+  * @param f      the InvestmentFunction of the component; ownership is taken
+  *               (handed to an FRealObjective, or deleted on failure).
+  *
+  * @param weight the component weight w ( > 0 ). */
+
+ void add_component( InvestmentFunction * f , double weight );
+
+/*--------------------------------------------------------------------------*/
  /// destructor
 
  virtual ~InvestmentBlock();
@@ -381,6 +402,15 @@ public:
   return( v_variables );
   }
 
+ /// returns the (writable) vector of design ColVariable
+ /** Writable counterpart of get_variables(), needed by the programmatic
+  * construction path: the caller wires these ColVariable as the active
+  * Variable of each component InvestmentFunction after construction. */
+
+ std::vector< ColVariable > & get_variables_writable( void ) {
+  return( v_variables );
+  }
+
 /*--------------------------------------------------------------------------*/
  /// returns a vector with the values of the ColVariable
  /** This function return a std::vector< double >  containing the values of
@@ -408,6 +438,13 @@ public:
 
  const std::vector< double > & get_variable_lower_bound() const {
   return v_lower_bound;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the upper bound on each Variable
+
+ const std::vector< double > & get_variable_upper_bound() const {
+  return v_upper_bound;
   }
 
 /*--------------------------------------------------------------------------*/
@@ -462,6 +499,36 @@ public:
             v_variables.size() ) );
   for( Index i = 0 ; i < v_variables.size() ; ++i )
    v_variables[ i ].set_value( values( i ) );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the lower and upper bounds of the design Variable
+ /** This function sets the lower and upper bounds of the design Variable
+  * defined in this InvestmentBlock according to the given \p lb and \p ub.
+  * The size of both the \p lb and \p ub array parameters must be equal to the
+  * number of Variable defined in this InvestmentBlock, so that the i-th
+  * Variable will be bounded in [ lb[ i ] , ub[ i ] ], for each i in
+  * {0, ..., get_number_variables() - 1}.
+  *
+  * This is meant for the programmatic construction path: in the netCDF path
+  * the bounds are filled by deserialize(). It must be called before the
+  * abstract constraints are generated.
+  *
+  * @param lb the vector with the lower bound of each design Variable.
+  *
+  * @param ub the vector with the upper bound of each design Variable. */
+
+ void set_variable_bounds( std::vector< double > lb ,
+                           std::vector< double > ub ) {
+  if( constraints_generated() )
+   throw( std::logic_error( "InvestmentBlock::set_variable_bounds: "
+                            "constraints already generated" ) );
+  if( ( lb.size() != v_variables.size() ) ||
+      ( ub.size() != v_variables.size() ) )
+   throw( std::invalid_argument( "InvestmentBlock::set_variable_bounds: "
+                                 "lb/ub size != number of variables" ) );
+  v_lower_bound = std::move( lb );
+  v_upper_bound = std::move( ub );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -599,6 +666,7 @@ protected:
  /// the active Variable in the InvestmentFunction
  std::vector< ColVariable > v_variables;
 
+ std::vector< double > v_weights;      ///< the weights of the K components
  std::vector< double > v_lower_bound;  ///< lower bound on the Variable
  std::vector< double > v_upper_bound;  ///< upper bound on the Variable
 

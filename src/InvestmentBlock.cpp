@@ -24,6 +24,8 @@
 
 #include "OneVarConstraint.h"
 
+#include "AbstractBlock.h"
+
 /*--------------------------------------------------------------------------*/
 /*------------------------- NAMESPACE AND USING ----------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -44,6 +46,43 @@ SMSpp_insert_in_factory_cpp_0( InvestmentBlockSolution );
 
 /*--------------------------------------------------------------------------*/
 /*-------------- CONSTRUCTING AND DESTRUCTING InvestmentBlock --------------*/
+/*--------------------------------------------------------------------------*/
+
+void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
+{
+ // the structure must be defined before the abstract representation
+ if( objective_generated() || constraints_generated() )
+  throw( std::logic_error( "InvestmentBlock::add_component: "
+                           "abstract representation already generated" ) );
+
+ if( v_variables.empty() )   // a component has no active Variable to bind to
+  throw( std::logic_error( "InvestmentBlock::add_component: "
+                           "no design variables" ) );
+
+ if( ! f )
+  throw( std::invalid_argument( "InvestmentBlock::add_component: "
+                                "null component" ) );
+
+ // f is adopted: on success an FRealObjective deletes it, so on failure it
+ // must be freed here or it leaks. weight must be > 0 (BundleSolver eMin)
+ if( weight <= 0 ) {
+  delete f;
+  throw( std::invalid_argument( "InvestmentBlock::add_component: "
+                                "weight must be > 0" ) );
+  }
+
+ // one bare AbstractBlock per component, holding an FRealObjective over f:
+ // BundleSolver sees one component per sub-Block
+ auto sub = new AbstractBlock( this );
+ f->set_f_Block( sub );
+ f->set_weight( weight );                     // component behaves as weight * f
+ auto obj = new FRealObjective( sub , f );
+ obj->set_sense( Objective::eMin );          // convex component => eMin only
+ sub->set_objective( obj , eNoMod );
+ add_nested_Block( sub );
+ v_weights.push_back( weight );
+ }
+
 /*--------------------------------------------------------------------------*/
 
 InvestmentBlock::~InvestmentBlock()
@@ -142,9 +181,17 @@ void InvestmentBlock::generate_objective( Configuration * objc )
  if( objective_generated() )
   return;  // Objective has already been generated
 
- objective.set_sense( f_objective_sense );
-
- set_objective( & objective );  // set Block objective
+ if( v_weights.empty() ) {
+  // single-component path: the InvestmentFunction lives in this Block's own
+  // FRealObjective
+  objective.set_sense( f_objective_sense );
+  set_objective( & objective );
+  }
+ else
+  // multi-component path: each component sub-Block already holds its own
+  // FRealObjective (set at construction); just let them generate it
+  for( Index k = 0 ; k < get_number_nested_Blocks() ; ++k )
+   get_nested_Block( k )->generate_objective( objc );
 
  set_objective_generated();
  }
@@ -167,8 +214,18 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( config )
   f_reformulate_bounds = config->f_value;
 
- if( auto function =
-     dynamic_cast< InvestmentFunction * >( objective.get_function() ) )
+ if( ! v_weights.empty() ) {
+  // multi-component path: reformulating the bounds would shift the design
+  // variables on the master, but the per-component InvestmentFunction are not
+  // informed of the shift and would compute with the wrong bounds. Refuse
+  // instead of silently returning wrong values.
+  if( f_reformulate_bounds )
+   throw( std::logic_error(
+    "InvestmentBlock::generate_abstract_constraints: bound reformulation not "
+    "supported with multiple components" ) );
+  }
+ else if( auto function =
+          dynamic_cast< InvestmentFunction * >( objective.get_function() ) )
   function->reformulated_bounds( f_reformulate_bounds );
 
  // Initialize the constraints

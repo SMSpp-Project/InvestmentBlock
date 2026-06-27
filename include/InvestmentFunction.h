@@ -583,6 +583,31 @@ class InvestmentFunction : public C05Function , public Block {
  void set_variables( VarVector && x );
 
 /*--------------------------------------------------------------------------*/
+ /// sets the multiplicative weight w ( > 0 ) of this component
+ /** Makes the InvestmentFunction behave as w * F, with w > 0 (BundleSolver
+  * convex components require a strictly positive weight that lives inside the
+  * Function). The weight scales the value and the diagonal linearization; the
+  * feasibility (vertical) linearizations are weight-invariant and not scaled.
+  *
+  * Must be set ONCE before the function is first computed / attached to a
+  * Solver: it is a plain setter that issues no Modification and does not
+  * rescale linearizations already stored in the global pool.
+  *
+  * @param w the component weight ( > 0 ). */
+
+ void set_weight( double w ) {
+  if( w <= 0 )
+   throw( std::invalid_argument( "InvestmentFunction::set_weight: "
+                                 "weight must be > 0" ) );
+  f_weight = w;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the multiplicative weight w of this component
+
+ double get_weight( void ) const { return( f_weight ); }
+
+/*--------------------------------------------------------------------------*/
  /// set the (only) sub-Block of the InvestmentFunction
  /** This method sets the only sub-Block of the InvestmentFunction
   * (a.k.a. Block B representing problem (B) in the definition of this
@@ -1736,6 +1761,12 @@ class InvestmentFunction : public C05Function , public Block {
  FunctionValue f_value;
  ///< the value of this InvestmentFunction after compute() is called
 
+ double f_weight = 1.0;
+ ///< multiplicative weight w ( > 0 ): the function behaves as w * F
+ /**< Set once before solving via set_weight(). Applied to the value and the
+  * diagonal linearization at the end of compute() (scale_diagonal_by_weight);
+  * the vertical/feasibility linearizations from v_A are weight-invariant. */
+
  std::vector< Index > v_block_indices_map;
  ///< map the index of an UnitBlock to the index of the asset under investment
 
@@ -2432,6 +2463,24 @@ class InvestmentFunction : public C05Function , public Block {
   * via set_inner_blocks()). */
 
  int compute_SDDPBlock_replicas( bool changedvars );
+
+/*--------------------------------------------------------------------------*/
+ /// scales the diagonal value and linearization by the component weight
+ /** Applied at the end of each compute() path, where f_value and
+  * v_linearization (the diagonal value/subgradient) are finalized. The
+  * vertical (feasibility) linearization built from v_A is weight-invariant
+  * (the domain { x : l <= A x <= u } does not change under a positive scale)
+  * and is deliberately NOT touched here; see set_weight(). f_value and
+  * v_linearization must be scaled together to keep the diagonal constant
+  * alpha = f_value - <v_linearization,x> equal to w * alpha. */
+
+ void scale_diagonal_by_weight() {
+  if( f_weight == 1.0 )
+   return;
+  f_value *= f_weight;
+  for( auto & c : v_linearization )
+   c *= f_weight;
+  }
 
 /*--------------------------------------------------------------------------*/
  /// fire all event handlers registered for the given event \p type

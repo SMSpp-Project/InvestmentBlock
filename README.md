@@ -3,6 +3,16 @@
 `InvestmentBlock` is designed to model the investment in different assets
 defined in `UCBlock`, like generating units and transmission lines.
 
+> **Work in progress — disaggregated (1:K) extension.** `InvestmentBlock` is
+> being extended from a single `InvestmentFunction` to a weighted sum of K of
+> them, exposed separately to `BundleSolver` instead of one aggregated function.
+>
+> It can currently be built only programmatically (`add_component`,
+> `set_weight`); the netCDF (1:K) schema is still to come. Solving it with two
+> or more components needs an OSiMP master, as the default `QPPenaltyMP` does
+> not handle a decomposed objective. The single-component (legacy) path is
+> unchanged.
+
 The `InvestmentBlock` class, which derives from `Block`, has a vector of
 `ColVariable`, each of which represents the investment in a particular asset.
 The number of `ColVariable` is thus the number of assets that are subject to

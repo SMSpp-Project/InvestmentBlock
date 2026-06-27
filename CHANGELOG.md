@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added 
 
+- `add_component()` to build an InvestmentBlock as a weighted sum of several
+  InvestmentFunction components, each exposed separately to BundleSolver (the
+  disaggregated 1:K path). For now the only way to build it, since the netCDF
+  format does not yet describe multiple components; the single-component
+  (legacy) path is unchanged.
+
+- `set_weight()` on InvestmentFunction, to weight a component (> 0)
+
+- a setter for the design variable bounds and accessors for the programmatic
+  construction path
+
 ### Changed 
+
+- `generate_objective` now builds a disaggregated sum when there are multiple
+  components; the single-component (legacy) path is unchanged
+- the `f_reformulate_bounds` option cannot be combined with the
+  multi-component (1:K) construction: it is now rejected with an error rather
+  than silently producing wrong results
+
 
 ### Fixed 
 
