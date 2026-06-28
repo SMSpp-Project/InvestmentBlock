@@ -1,0 +1,3 @@
+# build artifacts produced by build_and_run.sh
+build/
+*.o
