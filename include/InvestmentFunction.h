@@ -1222,7 +1222,90 @@ class InvestmentFunction : public C05Function , public Block {
   *        "natural" ones. */
 
  void reformulated_bounds( bool reformulated ) {
+  if( reformulated && ( ! v_asset_var_index.empty() ) )
+   throw( std::logic_error( "InvestmentFunction::reformulated_bounds: bound "
+                            "reformulation is not supported together with a "
+                            "non-identity asset-to-variable mapping" ) );
   f_reformulated_bounds = reformulated;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the mapping from assets to active variables
+ /** Sets which active variable each asset invests in: \p avi has one entry per
+  * asset, and avi[ i ] is the index of asset i's variable among the active
+  * ones.
+  *
+  * This is needed when several InvestmentFunction share the same active
+  * variables (as the components of a disaggregated InvestmentBlock do) but each
+  * invests only in some of them, so there are more variables than assets and
+  * the position alone no longer says which variable an asset uses.
+  *
+  * If \p avi is empty (the default) the mapping is the identity: asset i uses
+  * the i-th active variable.
+  *
+  * @param avi one entry per asset, each the index of its variable among the
+  *        active ones. */
+
+ void set_asset_variable_indices( std::vector< Index > avi ) {
+  if( ! avi.empty() ) {
+   if( avi.size() != v_asset_indices.size() )
+    throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
+                             "the mapping has " + std::to_string( avi.size() ) +
+                             " entries, but there are " +
+                             std::to_string( v_asset_indices.size() ) +
+                             " assets" ) );
+   for( const auto j : avi )
+    if( j >= v_x.size() )
+     throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
+                              "variable index " + std::to_string( j ) +
+                              " is out of range (there are " +
+                              std::to_string( v_x.size() ) +
+                              " active variables)" ) );
+   if( f_reformulated_bounds )
+    throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
+                             "a non-identity mapping is not supported when the "
+                             "bounds have been reformulated" ) );
+   }
+  v_asset_var_index = std::move( avi );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the implicit linear constraints on the active variables
+ /** Sets the linear constraints  lb <= A x <= ub  on the active variables x.
+  * These are the linking constraints (for instance inter-period monotonicity,
+  * caps or budgets) the InvestmentFunction enforces via its vertical
+  * linearizations.
+  *
+  * It is the programmatic counterpart of reading the Constraints_A,
+  * Constraints_LowerBound and Constraints_UpperBound netCDF fields: use it when
+  * the function is built in memory rather than read from a file.
+  *
+  * Each row of \p A has one coefficient per active variable (not per asset);
+  * \p lb and \p ub have one entry per constraint (per row of \p A). The checks
+  * mirror those of the deserialization and stop silent out-of-bounds reads.
+  *
+  * @param A coefficient matrix: one row per constraint, one column per active
+  *        variable.
+  * @param lb lower bounds, one per constraint.
+  * @param ub upper bounds, one per constraint. */
+
+ void set_implicit_constraints( MultiVector A , RealVector lb , RealVector ub )
+ {
+  if( ( lb.size() != A.size() ) || ( ub.size() != A.size() ) )
+   throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
+                            "A, lb and ub need one entry per constraint" ) );
+  for( Index i = 0 ; i < A.size() ; ++i ) {
+   if( ( ! v_x.empty() ) && ( A[ i ].size() != v_x.size() ) )
+    throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
+                             "each row of A needs one coefficient per "
+                             "active variable" ) );
+   if( lb[ i ] > ub[ i ] )
+    throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
+                             "lb[ i ] > ub[ i ]" ) );
+   }
+  v_A = std::move( A );
+  v_constraints_lower_bound = std::move( lb );
+  v_constraints_upper_bound = std::move( ub );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -1773,6 +1856,13 @@ class InvestmentFunction : public C05Function , public Block {
  std::vector< Index > v_asset_indices;
  ///< indices of the assets that are subject to investment
 
+ std::vector< Index > v_asset_var_index;
+ ///< maps each asset to its active variable
+ /**< When empty (the default) the mapping is the identity: asset i uses the
+  * i-th active variable. When set, v_asset_var_index[ i ] is the index of
+  * asset i's variable among the active ones, letting several InvestmentFunction
+  * share the same active variables while each invests only in some of them. */
+
  std::vector< Index > v_greedy_solvers;
  ///< indices of the SDDPGreedySolver
 
@@ -2153,6 +2243,16 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE METHODS -------------------------------*/
+/*--------------------------------------------------------------------------*/
+ /// returns the active variable that asset \p i invests in
+ /** Index of asset \p i's variable among the active ones. With no mapping set
+  * (the common case) it is the identity: asset i uses the i-th active variable.
+  * See set_asset_variable_indices(). */
+
+ Index asset_var( Index i ) const {
+  return( v_asset_var_index.empty() ? i : v_asset_var_index[ i ] );
+  }
+
 /*--------------------------------------------------------------------------*/
  /// Update the given UnitBlock according to the given \p investment
  /** This function updates the given UnitBlock according to the given \p

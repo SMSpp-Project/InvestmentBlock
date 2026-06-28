@@ -494,19 +494,26 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
 
 void InvestmentFunction::set_variables( VarVector && x )
 {
+ // The cost vectors are indexed by asset, so their size is the number of
+ // assets, which need not equal the number of active variables (the latter is
+ // larger when several components share the same variables; see
+ // set_asset_variable_indices()).
  if( ! v_cost.empty() )
-  if( v_cost.size() != x.size() )
-   throw( std::logic_error("InvestmentFunction::set_variables: given x has "
-                           "size " + std::to_string( x.size() ) + ", but the "
-                           "number of linear coefficients is " +
-                           std::to_string( v_cost.size() ) ) );
+  if( v_cost.size() != v_asset_indices.size() )
+   throw( std::logic_error("InvestmentFunction::set_variables: the number of "
+                           "linear coefficients is " +
+                           std::to_string( v_cost.size() ) + ", but there are " +
+                           std::to_string( v_asset_indices.size() ) +
+                           " assets" ) );
 
  if( ! v_disinvestment_cost.empty() )
-  if( v_disinvestment_cost.size() != x.size() )
-   throw( std::logic_error("InvestmentFunction::set_variables: given x has "
-                           "size " + std::to_string( x.size() ) + ", but the "
-                           "number of linear coefficients is " +
-                           std::to_string( v_disinvestment_cost.size() ) ) );
+  if( v_disinvestment_cost.size() != v_asset_indices.size() )
+   throw( std::logic_error("InvestmentFunction::set_variables: the number of "
+                           "disinvestment coefficients is " +
+                           std::to_string( v_disinvestment_cost.size() ) +
+                           ", but there are " +
+                           std::to_string( v_asset_indices.size() ) +
+                           " assets" ) );
 
  v_x = std::move( x );
  f_blocks_are_updated = false;
@@ -1151,10 +1158,11 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
 
  // Consider the linear term of the objective
 
- for( Index i = 0 ; i < v_x.size() ; ++i ) {
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
 
+  const auto var_index = asset_var( i );
   const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( i , false );
+  const auto x = get_var_value( var_index , false );
 
   // Update the objective value and the linearization
 
@@ -1162,13 +1170,13 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
    // An investment is being made in asset i
    const auto cost = get_cost( i );
    f_value += cost * ( x - installed_quantity );
-   v_linearization[ i ] += cost;
+   v_linearization[ var_index ] += cost;
   }
   else {
    // A disinvestment is being made in asset i
    const auto disinvestment_cost = get_disinvestment_cost( i );
    f_value += disinvestment_cost * ( installed_quantity - x );
-   v_linearization[ i ] -= disinvestment_cost;
+   v_linearization[ var_index ] -= disinvestment_cost;
   }
  }
 
@@ -1409,10 +1417,11 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  // Consider the linear term of the objective
 
- for( Index i = 0 ; i < v_x.size() ; ++i ) {
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
 
+  const auto var_index = asset_var( i );
   const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( i , false );
+  const auto x = get_var_value( var_index , false );
 
   // Update the objective value and the linearization
 
@@ -1420,13 +1429,13 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    // An investment is being made in asset i
    const auto cost = get_cost( i );
    f_value += cost * ( x - installed_quantity );
-   v_linearization[ i ] += cost;
+   v_linearization[ var_index ] += cost;
   }
   else {
    // A disinvestment is being made in asset i
    const auto disinvestment_cost = get_disinvestment_cost( i );
    f_value += disinvestment_cost * ( installed_quantity - x );
-   v_linearization[ i ] -= disinvestment_cost;
+   v_linearization[ var_index ] -= disinvestment_cost;
   }
  }
 
@@ -1687,19 +1696,20 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  if( ! world.rank() ) {
 #endif
 
- for( Index i = 0 ; i < v_x.size() ; ++i ) {
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
+  const auto var_index = asset_var( i );
   const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( i , false );
+  const auto x = get_var_value( var_index , false );
 
   if( x > installed_quantity ) {
    const auto cost = get_cost( i );
    local_value += cost * ( x - installed_quantity );
-   local_linearization[ i ] += cost;
+   local_linearization[ var_index ] += cost;
    }
   else {
    const auto disinvestment_cost = get_disinvestment_cost( i );
    local_value += disinvestment_cost * ( installed_quantity - x );
-   local_linearization[ i ] -= disinvestment_cost;
+   local_linearization[ var_index ] -= disinvestment_cost;
    }
   }
 
@@ -2832,10 +2842,10 @@ void InvestmentFunction::update_linearization( Index sub_block_index ) {
   const auto asset_index = v_asset_indices[ i ];
 
   if( asset_type == eUnitBlock ) {
-   block_indices.push_back( { asset_index , i } );
+   block_indices.push_back( { asset_index , asset_var( i ) } );
   }
   else if( asset_type == eLine ) {
-   line_indices.push_back( { asset_index , i } );
+   line_indices.push_back( { asset_index , asset_var( i ) } );
   }
   else {
    throw( std::logic_error( "InvestmentFunction::update_linearization: invalid"
@@ -2910,9 +2920,9 @@ void InvestmentFunction::update_linearization
   const auto asset_type = v_asset_type[ i ];
   const auto asset_index = v_asset_indices[ i ];
   if( asset_type == eUnitBlock )
-   block_indices.push_back( { asset_index , i } );
+   block_indices.push_back( { asset_index , asset_var( i ) } );
   else if( asset_type == eLine )
-   line_indices.push_back( { asset_index , i } );
+   line_indices.push_back( { asset_index , asset_var( i ) } );
   else
    throw( std::logic_error( "InvestmentFunction::update_linearization: "
                             "invalid asset type: " +
@@ -3061,7 +3071,7 @@ void InvestmentFunction::update_blocks() {
 
   const auto asset_type =  v_asset_type[ i ];
   const auto asset_index =  v_asset_indices[ i ];
-  const auto var_value = get_var_value( i , false );
+  const auto var_value = get_var_value( asset_var( i ) , false );
 
   if( asset_type == eUnitBlock ) {
    block_indices.push_back( asset_index );

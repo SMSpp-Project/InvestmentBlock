@@ -8,10 +8,13 @@ defined in `UCBlock`, like generating units and transmission lines.
 > them, exposed separately to `BundleSolver` instead of one aggregated function.
 >
 > It can currently be built only programmatically (`add_component`,
-> `set_weight`); the netCDF (1:K) schema is still to come. Solving it with two
-> or more components needs an OSiMP master, as the default `QPPenaltyMP` does
-> not handle a decomposed objective. The single-component (legacy) path is
-> unchanged.
+> `set_weight`, `set_asset_variable_indices`, `set_implicit_constraints`); the
+> netCDF (1:K) schema is still to come. Components may all share the same design
+> variables (multi-scenario), or each act on its own subset of them subject to
+> linking constraints such as inter-period monotonicity (multi-period). Solving
+> it with two or more components needs an OSiMP master, as the default
+> `QPPenaltyMP` does not handle a decomposed objective. The single-component
+> (legacy) path is unchanged.
 
 The `InvestmentBlock` class, which derives from `Block`, has a vector of
 `ColVariable`, each of which represents the investment in a particular asset.
