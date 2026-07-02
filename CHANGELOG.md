@@ -11,9 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `add_component()` to build an InvestmentBlock as a weighted sum of several
   InvestmentFunction components, each exposed separately to BundleSolver (the
-  disaggregated path). For now the only way to build it, since the netCDF
-  format does not yet describe multiple components; the single-component
-  (legacy) path is unchanged.
+  disaggregated path); the single-component (legacy) path is unchanged.
+
+- netCDF (1:K) format for the disaggregated InvestmentBlock: the group may now
+  hold a `NumComponents` dimension plus one `Component_<k>` sub-group per
+  component, each a legacy InvestmentFunction description with its own
+  `Weight` attribute and, for the multi-period case, its own `AssetVarIndex`
+  variable; both deserialize and serialize support it, and the legacy
+  single-component format is read and written unchanged
+
+- `InvestmentBlockSolution` now carries one inner Solution per component,
+  serialized as `InnerSolution_<k>` groups with a `NumInnerSolutions`
+  round-trip guardrail; the legacy single-`InnerSolution` format is unchanged
 
 - `set_weight()` on InvestmentFunction, to weight a component (> 0)
 
@@ -35,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the `f_reformulate_bounds` option cannot be combined with a multi-component
   construction: it is now rejected with an error rather than silently producing
   wrong results
+
+- the deserialize consistency check between the number of assets and of
+  active variables is now mapping-aware (a component with an `AssetVarIndex`
+  may invest in a subset of the design variables)
 
 
 ### Fixed 

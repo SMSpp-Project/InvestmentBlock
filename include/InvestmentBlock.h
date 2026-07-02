@@ -739,7 +739,7 @@ class InvestmentBlockSolution : public Solution
 /*---------- CONSTRUCTING AND DESTRUCTING InvestmentBlockSolution ----------*/
 
  explicit InvestmentBlockSolution( void ) :
-           f_inner_Solution( nullptr ) , f_inner_Configuration( nullptr ) { }
+           f_inner_Configuration( nullptr ) { }
  /// constructor, it has nothing to do
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
@@ -750,7 +750,8 @@ class InvestmentBlockSolution : public Solution
 
  ~InvestmentBlockSolution() {
   delete f_inner_Configuration;
-  delete f_inner_Solution;
+  for( auto s : v_inner_Solutions )
+   delete s;
   }
 
 /*------- METHODS DESCRIBING THE BEHAVIOR OF A InvestmentBlockSolution -----*/
@@ -803,7 +804,10 @@ class InvestmentBlockSolution : public Solution
 
  std::vector< double > v_design;  ///< the design variables
 
- Solution * f_inner_Solution;  ///< the :Solution of the InnerBlock
+ std::vector< Solution * > v_inner_Solutions;
+ ///< the :Solution(s) of the inner Block(s): 1 (legacy) or K (disaggregated)
+
+ bool f_inner_wanted = false;  ///< whether the inner :Solution(s) must be read
 
  Configuration * f_inner_Configuration;
              ///< the Configuration for the inner :Solution of the InnerBlock

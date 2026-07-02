@@ -26,6 +26,10 @@
 
 #include "AbstractBlock.h"
 
+#include <algorithm>
+
+#include <iostream>
+
 /*--------------------------------------------------------------------------*/
 /*------------------------- NAMESPACE AND USING ----------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -141,13 +145,69 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 			     " 1, or 'NumAssets'." ) );
   }
 
+ // bind every component to the SAME master design ColVariables, in the same
+ // order (the BundleSolver "same active variables" rule); a fresh pointer
+ // vector per call so set_variables() can move it
+ auto master_var_pointers = [ this ]() {
+  std::vector< ColVariable * > p;
+  p.reserve( v_variables.size() );
+  for( auto & variable : v_variables )
+   p.push_back( & variable );
+  return( p );
+  };
+
+ // discriminator: the presence of the group "Component_0" selects the
+ // disaggregated (1:K) format; otherwise the legacy single-component format
+ // (which stays byte-identical, since nothing below is written for K == 1)
+ if( ! group.getGroup( "Component_0" ).isNull() ) {
+
+  // ---- disaggregated (1:K) path ----
+  // NumComponents is an optional guardrail; if present it must match the number
+  // of Component_<k> groups actually found
+  Index num_components = 0;
+  const bool have_count =
+   deserialize_dim( group , "NumComponents" , num_components );
+
+  for( Index k = 0 ; ; ++k ) {   // access by numeric suffix => deterministic order
+   auto grp_k = group.getGroup( "Component_" + std::to_string( k ) );
+   if( grp_k.isNull() ) {
+    if( have_count && ( k != num_components ) )
+     throw( std::logic_error(
+      "InvestmentBlock::deserialize: NumComponents = " +
+      std::to_string( num_components ) + " but found " + std::to_string( k ) +
+      " Component_<k> groups." ) );
+    break;
+    }
+   if( have_count && ( k >= num_components ) )
+    throw( std::logic_error(
+     "InvestmentBlock::deserialize: more Component_<k> groups than the declared "
+     "NumComponents = " + std::to_string( num_components ) + "." ) );
+
+   auto f_k = new InvestmentFunction();
+   f_k->set_variables( master_var_pointers() );
+   f_k->deserialize( grp_k );    // reads Weight, AssetVarIndex, Constraints, ...
+   add_component( f_k , f_k->get_weight() );  // wraps in a bare AbstractBlock
+   }
+
+  // #4 guardrail: K > 1 components all at the default weight 1.0 almost always
+  // means the per-component weights were forgotten (a weighted expectation
+  // needs w_k = probability x discount). Warn loudly; do not fail.
+  if( ( v_weights.size() > 1 ) &&
+      std::all_of( v_weights.begin() , v_weights.end() ,
+                   []( double w ){ return( w == 1.0 ); } ) )
+   std::cerr << "InvestmentBlock::deserialize: WARNING - " << v_weights.size()
+             << " components all have weight 1.0; if these are "
+                "scenarios/periods of a weighted expectation, set a per-component"
+                " 'Weight' (probability x discount)." << std::endl;
+
+  Block::deserialize( group );
+  return;
+  }
+
+ // ---- legacy single-component path (unchanged behaviour) ----
  auto investment_function = new InvestmentFunction();
 
- std::vector< ColVariable * > p_variables;
- p_variables.reserve( v_variables.size() );
- for( auto & variable : v_variables )
-  p_variables.push_back( & variable );
- investment_function->set_variables( std::move( p_variables ) );
+ investment_function->set_variables( master_var_pointers() );
 
  investment_function->set_num_sub_blocks_per_stage(
 					       f_num_sub_blocks_per_stage );
@@ -290,9 +350,9 @@ Solution * InvestmentBlock::get_Solution( Configuration *solc , bool emptys )
 
  auto sol = new InvestmentBlockSolution();
 
- // if wsol != 0 allocate a placeholder Solution object meant to say "do
- // read the Solution of the inner Block when you are asked to"
- sol->f_inner_Solution = wsol ? new Solution() : nullptr;
+ // wsol != 0 means "read the inner Block :Solution(s) when asked to"; the
+ // actual K (1 legacy / K disaggregated) is resolved at read() time
+ sol->f_inner_wanted = ( wsol != 0 );
  sol->f_inner_Configuration = innr_cfg;
 
  if( ! emptys )
@@ -323,8 +383,25 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
  ::serialize( group , "UpperBound" , netCDF::NcDouble() , NumAssets ,
               v_upper_bound );
 
- if( auto function = objective.get_function() )
-  static_cast< InvestmentFunction * >( function )->serialize( group );
+ if( v_weights.empty() ) {
+  // legacy single-component: write the InvestmentFunction at the root group
+  // (byte-identical to before: no Component_<k>, no NumComponents)
+  if( auto function = objective.get_function() )
+   static_cast< InvestmentFunction * >( function )->serialize( group );
+  }
+ else {
+  // disaggregated (1:K): one Component_<k> group per nested sub-Block, each the
+  // existing InvestmentFunction serialize (which writes its own Weight and
+  // AssetVarIndex when non-default); NumComponents is the round-trip guardrail
+  group.addDim( "NumComponents" , get_number_nested_Blocks() );
+  for( Index k = 0 ; k < get_number_nested_Blocks() ; ++k ) {
+   auto sub = static_cast< const AbstractBlock * >( get_nested_Block( k ) );
+   auto obj = static_cast< const FRealObjective * >( sub->get_objective() );
+   auto f_k = static_cast< const InvestmentFunction * >( obj->get_function() );
+   auto grp_k = group.addGroup( "Component_" + std::to_string( k ) );
+   f_k->serialize( grp_k );
+   }
+  }
  }
 
 /*--------------------------------------------------------------------------*/
@@ -377,6 +454,34 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
  }
 
 /*--------------------------------------------------------------------------*/
+/*------------------------- COMPONENT NAVIGATION ---------------------------*/
+/*--------------------------------------------------------------------------*/
+
+// reach the InvestmentFunction of the k-th disaggregated component: each
+// component sub-Block is a bare AbstractBlock whose FRealObjective wraps one
+// InvestmentFunction (as add_component() builds it). The defensive dynamic_cast
+// + throw mirrors how the consumer of these blocks navigates them (see
+// BundleSolver: one FRealObjective / C05Function per component sub-Block).
+
+static InvestmentFunction * component_function( const Block * IB ,
+						Block::Index k )
+{
+ auto sub = dynamic_cast< AbstractBlock * >( IB->get_nested_Block( k ) );
+ if( ! sub )
+  throw( std::invalid_argument( "InvestmentBlock: component " +
+	 std::to_string( k ) + " is not an AbstractBlock" ) );
+ auto obj = dynamic_cast< FRealObjective * >( sub->get_objective() );
+ if( ! obj )
+  throw( std::invalid_argument( "InvestmentBlock: component " +
+	 std::to_string( k ) + " has no FRealObjective" ) );
+ auto fk = dynamic_cast< InvestmentFunction * >( obj->get_function() );
+ if( ! fk )
+  throw( std::invalid_argument( "InvestmentBlock: component " +
+	 std::to_string( k ) + " has no InvestmentFunction" ) );
+ return( fk );
+ }
+
+/*--------------------------------------------------------------------------*/
 /*----------------- METHODS OF InvestmentBlockSolution ---------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -390,14 +495,40 @@ void InvestmentBlockSolution::deserialize( const netCDF::NcGroup & group )
  ::deserialize< double >( group , "DesignVariables" , num_design ,
 			  v_design , false );
 
- // deserialize the InnerSolution - - - - - - - - - - - - - - - - - - - - - -
- delete f_inner_Solution;  // just to be on the safe side
+ // deserialize the inner :Solution(s) - - - - - - - - - - - - - - - - - - - -
+ for( auto s : v_inner_Solutions )
+  delete s;
+ v_inner_Solutions.clear();
+
+ // legacy format: a single "InnerSolution" group
  auto sub_group = group.getGroup( "InnerSolution" );
- if( sub_group.isNull() )
-  f_inner_Solution = nullptr;
- else
-  f_inner_Solution = Solution::new_Solution( sub_group );
- 
+ if( ! sub_group.isNull() )
+  v_inner_Solutions.push_back( Solution::new_Solution( sub_group ) );
+ else {
+  // disaggregated format: "InnerSolution_<k>" groups, in numeric order;
+  // "NumInnerSolutions", if present, is a round-trip guardrail (mirrors the
+  // "NumComponents" check in InvestmentBlock::deserialize)
+  Index num_inner = 0;
+  const bool have_count =
+   deserialize_dim( group , "NumInnerSolutions" , num_inner );
+  for( Index k = 0 ; ; ++k ) {
+   auto gk = group.getGroup( "InnerSolution_" + std::to_string( k ) );
+   if( gk.isNull() ) {
+    if( have_count && ( k != num_inner ) )
+     throw( std::logic_error(
+      "InvestmentBlockSolution::deserialize: NumInnerSolutions = " +
+      std::to_string( num_inner ) + " but found " + std::to_string( k ) +
+      " InnerSolution_<k> groups." ) );
+    break;
+    }
+   v_inner_Solutions.push_back( Solution::new_Solution( gk ) );
+   }
+  }
+
+ // a Solution deserialized with inner Solution(s) keeps refreshing them on
+ // read(), exactly like one produced by get_Solution() with wsol != 0
+ f_inner_wanted = ! v_inner_Solutions.empty();
+
  }  // end( InvestmentBlockSolution::deserialize )
 
 /*--------------------------------------------------------------------------*/
@@ -417,22 +548,39 @@ void InvestmentBlockSolution::read( const Block * block )
     v_design[ i ] += IB->get_variable_lower_bound()[ i ];
   }
 
- if( f_inner_Solution ) {  // if the inner Solution need be saved
-  delete f_inner_Solution;
-  f_inner_Solution = nullptr;
-  auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() );
-  if( ! IF )
+ // collect the inner Block :Solution(s) if requested. The InvestmentFunction
+ // to read from is 1 in the legacy path (the one in the master objective) or K
+ // in the disaggregated path (one per component sub-Block, reached through
+ // component_function() since the master objective is then empty).
+ for( auto s : v_inner_Solutions )
+  delete s;
+ v_inner_Solutions.clear();
+
+ if( ! f_inner_wanted )
+  return;
+
+ std::vector< InvestmentFunction * > funcs;
+ if( auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() ) )
+  funcs.push_back( IF );                                    // legacy: 1
+ else
+  for( Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
+   funcs.push_back( component_function( IB , k ) );          // disaggregated: K
+
+ if( funcs.empty() )
+  throw( std::invalid_argument(
+	    "InvestmentBlockSolution::read: empty InvestmentFunction" ) );
+
+ v_inner_Solutions.reserve( funcs.size() );
+ for( auto fk : funcs ) {
+  if( fk->get_nested_Blocks().empty() )
    throw( std::invalid_argument(
-	      "InvestmentBlockSolution::read: empty InvestmentFunction" ) );
-  if( IF->get_nested_Blocks().empty() )
-    throw( std::invalid_argument(
-		     "InvestmentBlockSolution::read: empty inner Block" ) );
-  f_inner_Solution = ( ( IF->get_nested_Blocks() ).front()
-			)->get_Solution( f_inner_Configuration , false );
-  if( ! f_inner_Solution )
+            "InvestmentBlockSolution::read: empty inner Block" ) );
+  auto s = fk->get_nested_Blocks().front()->get_Solution(
+                                              f_inner_Configuration , false );
+  if( ! s )
    throw( std::invalid_argument(
-	  "InvestmentBlockSolution::read: cannot read desired inner Solution"
-				) );
+     "InvestmentBlockSolution::read: cannot read desired inner Solution" ) );
+  v_inner_Solutions.push_back( s );
   }
  }  // end( InvestmentBlockSolution::read )
 
@@ -461,15 +609,33 @@ void InvestmentBlockSolution::write( Block * block )
  else
   IB->set_variable_values< double >( v_design );
 
- if( f_inner_Solution ) {
-  auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() );
-  if( ! IF )
+ if( v_inner_Solutions.empty() )
+  return;
+
+ // the InvestmentFunction to write into: 1 in the legacy path, K in the
+ // disaggregated path (reached through component_function()); the inner
+ // :Solution count must match.
+ std::vector< InvestmentFunction * > funcs;
+ if( auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() ) )
+  funcs.push_back( IF );                                    // legacy: 1
+ else
+  for( Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
+   funcs.push_back( component_function( IB , k ) );          // disaggregated: K
+
+ if( funcs.empty() )
+  throw( std::invalid_argument(
+	   "InvestmentBlockSolution::write: empty InvestmentFunction" ) );
+
+ if( v_inner_Solutions.size() != funcs.size() )
+  throw( std::invalid_argument(
+    "InvestmentBlockSolution::write: inconsistent inner Solution count" ) );
+
+ for( Index k = 0 ; k < funcs.size() ; ++k ) {
+  if( funcs[ k ]->get_nested_Blocks().empty() )
    throw( std::invalid_argument(
-	      "InvestmentBlockSolution::write: empty InvestmentFunction" ) );
-  if( IF->get_nested_Blocks().empty() )
-    throw( std::invalid_argument(
-		     "InvestmentBlockSolution::write: empty inner Block" ) );
-  f_inner_Solution->write( IF->get_nested_Blocks().front() );
+            "InvestmentBlockSolution::write: empty inner Block" ) );
+  if( v_inner_Solutions[ k ] )
+   v_inner_Solutions[ k ]->write( funcs[ k ]->get_nested_Blocks().front() );
   }
  }  // end( InvestmentBlockSolution::write )
 
@@ -484,9 +650,21 @@ void InvestmentBlockSolution::serialize( netCDF::NcGroup & group ) const
  ::serialize< double >( group , "DesignVariables" , netCDF::NcDouble() ,
 			ndv , v_design );
 
- if( f_inner_Solution ) {
-  auto sub_group = group.addGroup( "InnerSolution" );
-  f_inner_Solution->serialize( sub_group );
+ if( v_inner_Solutions.size() == 1 ) {
+  // legacy format: a single "InnerSolution" group (byte-compatible)
+  if( v_inner_Solutions.front() ) {
+   auto sub_group = group.addGroup( "InnerSolution" );
+   v_inner_Solutions.front()->serialize( sub_group );
+   }
+  }
+ else if( ! v_inner_Solutions.empty() ) {
+  // disaggregated format: one "InnerSolution_<k>" group per component
+  group.addDim( "NumInnerSolutions" , v_inner_Solutions.size() );
+  for( Index k = 0 ; k < v_inner_Solutions.size() ; ++k )
+   if( v_inner_Solutions[ k ] ) {
+    auto sub_group = group.addGroup( "InnerSolution_" + std::to_string( k ) );
+    v_inner_Solutions[ k ]->serialize( sub_group );
+    }
   }
  }  // end( InvestmentBlockSolution::serialize )
 
@@ -503,9 +681,10 @@ InvestmentBlockSolution * InvestmentBlockSolution::scale( double factor )
  for( auto & i : sol->v_design )
   i *= factor;
 
- if( sol->f_inner_Solution )
-  sol->f_inner_Solution->scale( factor );
- 
+ for( auto s : sol->v_inner_Solutions )
+  if( s )
+   s->scale( factor );
+
  return( sol );
 
  }  // end( InvestmentBlockSolution::scale )
@@ -524,8 +703,7 @@ void InvestmentBlockSolution::sum( const Solution * solution ,
   throw( std::invalid_argument(
 	    "InvestmentBlockSolution::sum: inconsistent variables size" ) );
 
- if( ( f_inner_Solution && ( ! IBS->f_inner_Solution ) ) ||
-     ( ( ! f_inner_Solution ) && IBS->f_inner_Solution )  )
+ if( v_inner_Solutions.size() != IBS->v_inner_Solutions.size() )
   throw( std::invalid_argument(
 	    "InvestmentBlockSolution::sum: inconsistent inner Solution" ) );
 
@@ -533,8 +711,9 @@ void InvestmentBlockSolution::sum( const Solution * solution ,
  for( auto & i : v_design )
   i += *(dit++) * multiplier;
 
- if( f_inner_Solution )
-  f_inner_Solution->sum( IBS->f_inner_Solution , multiplier );
+ for( Index k = 0 ; k < v_inner_Solutions.size() ; ++k )
+  if( v_inner_Solutions[ k ] && IBS->v_inner_Solutions[ k ] )
+   v_inner_Solutions[ k ]->sum( IBS->v_inner_Solutions[ k ] , multiplier );
 
  }  // end( InvestmentBlockSolution::sum )
 
@@ -547,8 +726,11 @@ InvestmentBlockSolution * InvestmentBlockSolution::clone( bool empty ) const
  if( ! empty ) {
   sol->v_design = v_design;
 
-  if( f_inner_Solution )
-   sol->f_inner_Solution = f_inner_Solution->clone();
+  sol->v_inner_Solutions.reserve( v_inner_Solutions.size() );
+  for( auto s : v_inner_Solutions )
+   sol->v_inner_Solutions.push_back( s ? s->clone() : nullptr );
+
+  sol->f_inner_wanted = f_inner_wanted;
   }
 
  return( sol );

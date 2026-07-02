@@ -150,8 +150,40 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
 
+ // Deserialize the per-component weight (optional; default 1.0). Stored as a
+ // netCDF attribute so legacy single-component files (weight == 1.0, attribute
+ // absent) round-trip byte-identically.
+ { auto w_att = group.getAtt( "Weight" );
+   if( ! w_att.isNull() ) {
+    w_att.getValues( & f_weight );
+    if( f_weight <= 0 )
+     throw( std::logic_error( "InvestmentFunction::deserialize: 'Weight' must "
+                              "be > 0." ) );
+    } }
+
+ // Deserialize the asset -> active-variable mapping (optional; default identity,
+ // i.e. asset i uses the i-th active variable). When set, asset i uses active
+ // variable v_asset_var_index[ i ]; this lets several InvestmentFunction share
+ // the same active variables while each invests only in some of them (the
+ // multi-period (1:K) case). Absent ⇒ identity (legacy).
+ ::deserialize( group , "AssetVarIndex" , num_assets , v_asset_var_index ,
+                true , true );
+
  if( ! v_x.empty() ) {
-  if( num_assets != v_x.size() )
+  if( ! v_asset_var_index.empty() ) {
+   // mapping mode: one entry per asset, each pointing to an active variable
+   if( v_asset_var_index.size() != num_assets )
+    throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetVarIndex', "
+                             "if provided, must have size 'NumAssets'." ) );
+   for( auto vi : v_asset_var_index )
+    if( vi >= v_x.size() )
+     throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetVarIndex' "
+                              "entry " + std::to_string( vi ) + " is out of "
+                              "range (>= number of active variables " +
+                              std::to_string( v_x.size() ) + ")." ) );
+   }
+  else if( num_assets != v_x.size() )
+   // identity mode (legacy): one asset per active variable, same order
    throw( std::logic_error( "InvestmentFunction::deserialize: the number of "
                             "assets to invest (" + std::to_string( num_assets ) +
                             ") is different from the number of active variables "
@@ -962,6 +994,11 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
   group.putAtt( "ReplicateIntermittentUnits" , netCDF::NcInt() ,
                 int( f_replicate_intermittent ) );
 
+ // per-component weight: written only if != 1.0, so legacy single-component
+ // files stay byte-identical (the default is restored on deserialize)
+ if( f_weight != 1.0 )
+  group.putAtt( "Weight" , netCDF::NcDouble() , f_weight );
+
  const auto num_assets = v_asset_indices.size();
  auto NumAssets = group.addDim( "NumAssets" , num_assets );
 
@@ -970,6 +1007,12 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
 
  ::serialize( group , "AssetType" , netCDF::NcUint() , NumAssets ,
               v_asset_type );
+
+ // asset -> active-variable mapping: written only if non-identity (non-empty),
+ // so legacy files stay byte-identical
+ if( ! v_asset_var_index.empty() )
+  ::serialize( group , "AssetVarIndex" , netCDF::NcUint() , NumAssets ,
+               v_asset_var_index );
 
  ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
               v_lower_bound );
