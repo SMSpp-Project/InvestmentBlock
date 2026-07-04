@@ -9,15 +9,18 @@ defined in `UCBlock`, like generating units and transmission lines.
 >
 > It can be built programmatically (`add_component`, `set_weight`,
 > `set_asset_variable_indices`, `set_implicit_constraints`) or from netCDF:
-> the (1:K) schema is "legacy × K" — a `NumComponents` dimension plus one
-> `Component_<k>` sub-group per component, each a legacy `InvestmentFunction`
-> description with its own `Weight` attribute and, for the multi-period case,
-> its own `AssetVarIndex` variable. Components may all share the same design
+> the (1:K) schema is "legacy × K" — one `Component_<k>` sub-group per component
+> (the presence of `Component_0` is what selects the disaggregated format), each
+> a self-contained legacy `InvestmentFunction` description carrying its own
+> `Weight` attribute and, for the multi-period case, its own `AssetVarIndex`
+> mapping; an optional `NumComponents` dimension, when present, is a round-trip
+> guardrail on the component count. Components may all share the same design
 > variables (multi-scenario), or each act on its own subset of them subject to
 > linking constraints such as inter-period monotonicity (multi-period). Solving
 > it with two or more components needs an OSiMP master, as the default
 > `QPPenaltyMP` does not handle a decomposed objective. The single-component
-> (legacy) path — netCDF format included — is unchanged.
+> (legacy) path — netCDF format included — is read and written byte-for-byte
+> unchanged.
 
 The `InvestmentBlock` class, which derives from `Block`, has a vector of
 `ColVariable`, each of which represents the investment in a particular asset.
