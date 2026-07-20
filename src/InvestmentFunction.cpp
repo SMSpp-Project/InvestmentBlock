@@ -1168,6 +1168,13 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
   f_value = worst_value();
   output_function_value();
   solver->set_id( solver_id );
+  // A *provably* infeasible inner subproblem is a kOK-type answer at the
+  // worst value (+Inf for a minimization), not an unrecoverable error: report
+  // it as such so the caller (e.g. the bundle) treats this point as infeasible
+  // and proceeds, exactly as done above for violated linear constraints. Only
+  // a genuine failure with no proof of infeasibility is a kError.
+  if( f_solver_status == Solver::kInfeasible )
+   return( Solver::kInfeasible );
   return( kError );
  }
 
@@ -1598,6 +1605,10 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  bool interrupt_loop = false;
 
  int local_error = 0;
+ // A scenario subproblem that is *provably* infeasible is not a hard error: it
+ // is tracked separately so the whole InvestmentFunction can be reported as
+ // infeasible (a kOK-type answer at the worst value) rather than as a kError.
+ int local_infeasible = 0;
 
  auto simulation_value = decltype( f_value )( 0 );
 
@@ -1645,7 +1656,11 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    #pragma omp critical( InvestmentFunction )
    {
     interrupt_loop = true;
-    local_error = 1;
+    // distinguish a provable infeasibility from a genuine failure
+    if( status == Solver::kInfeasible )
+     local_infeasible = 1;
+    else
+     local_error = 1;
     }
    unlock_sub_block( sub_block_index );
    continue;
@@ -1689,7 +1704,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
   } // end( for each scenario )
 
 #ifdef USE_MPI
- // Check whether there was an error in computing any scenario
+ // Check whether there was an error or an infeasibility in any scenario, on
+ // any rank
  int global_error = 0;
  boost::mpi::reduce( world , local_error , global_error ,
                      boost::mpi::maximum< int >() , 0 );
@@ -1697,9 +1713,17 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
 
  if( global_error == 1 )
   local_error = 1;
+
+ int global_infeasible = 0;
+ boost::mpi::reduce( world , local_infeasible , global_infeasible ,
+                     boost::mpi::maximum< int >() , 0 );
+ boost::mpi::broadcast( world , global_infeasible , 0 );
+
+ if( global_infeasible == 1 )
+  local_infeasible = 1;
 #endif
 
- if( local_error ) {
+ if( local_error || local_infeasible ) {
   for( Index i = 0 ; i < v_Block.size() ; ++i ) {
    if( auto solver = get_solver( i ) )
     solver->set_id( solver_ids[ i ] );
@@ -1708,7 +1732,10 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    unlock_sub_block( i );
    }
 
-  f_solver_status = kError;
+  // A genuine failure prevails over a provable infeasibility; a pure
+  // infeasibility is a kOK-type answer at the worst value, letting the caller
+  // (e.g. the bundle) treat this point as infeasible and proceed.
+  f_solver_status = local_error ? kError : Solver::kInfeasible;
   f_value = worst_value();
 
 #ifdef USE_MPI
