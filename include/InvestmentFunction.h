@@ -157,110 +157,68 @@ class InvestmentFunction : public C05Function , public Block {
  using ViolatedConstraint = std::pair< Index , ConstraintSide >;
 
 /*--------------------------------------------------------------------------*/
- /// virtualized concrete iterator
- /** A concrete class deriving from ThinVarDepInterface::v_iterator and
-  * implementing the concrete iterator for sifting through the "active"
-  * Variable of an InvestmentFunction. */
+ /// virtualized concrete iterator, templated over const-ness
+ /** A single concrete implementation of both ThinVarDepInterface::v_iterator
+  * and ThinVarDepInterface::v_const_iterator, parameterized over the abstract
+  * base \p Base (the v_iterator / v_const_iterator to derive from) and the
+  * underlying \p UnderIt (VarVector::iterator / ::const_iterator). It sifts
+  * through the "active" Variable of an InvestmentFunction; the two flavours
+  * are the #v_iterator and #v_const_iterator aliases below. */
 
- class v_iterator : public ThinVarDepInterface::v_iterator
+ template< class Base , class UnderIt >
+ class v_iterator_tmpl : public Base
  {
   public:
 
-  explicit v_iterator( VarVector::iterator & itr ) : itr_( itr ) {}
-  explicit v_iterator( VarVector::iterator && itr )
-   : itr_( std::move( itr ) ) {}
+  using reference = typename Base::reference;
+  using pointer   = typename Base::pointer;
 
-  v_iterator * clone( void ) override final {
-   return( new v_iterator( itr_ ) );
-   }
+  explicit v_iterator_tmpl( UnderIt & itr ) : itr_( itr ) {}
+  explicit v_iterator_tmpl( UnderIt && itr ) : itr_( std::move( itr ) ) {}
 
-  void operator++( void ) override final { ++(itr_); }
-
-  reference operator*( void ) const override final {
-   return( *( ( *itr_ ) ) );
-   }
-  pointer operator->( void ) const override final {
-   return( ( *itr_ ) );
-   }
-
-  bool operator==( const ThinVarDepInterface::v_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( itr_ == tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( tmp ? itr_ == tmp->itr_ : false );
-   #endif
-   }
-  bool operator!=( const ThinVarDepInterface::v_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( itr_ != tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( tmp ? itr_ != tmp->itr_ : true );
-   #endif
-   }
-
-  private:
-
-  VarVector::iterator itr_;
-  };
-
-/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
- /// virtualized concrete const_iterator
- /** A concrete class deriving from ThinVarDepInterface::v_const_iterator and
-  * implementing the concrete iterator for sifting through the "active"
-  * Variable of an InvestmentFunction. */
-
- class v_const_iterator : public ThinVarDepInterface::v_const_iterator
- {
-  public:
-
-  explicit v_const_iterator( VarVector::const_iterator & itr ) : itr_( itr ) {}
-  explicit v_const_iterator( VarVector::const_iterator && itr )
-   : itr_( std::move( itr ) ) {}
-
-  v_const_iterator * clone( void ) override final {
-   return( new v_const_iterator( itr_ ) );
+  Base * clone( void ) override final {
+   return( new v_iterator_tmpl( itr_ ) );
    }
 
   void operator++( void ) override final { ++( itr_ ); }
 
-  reference operator*( void ) const override final { return( *( ( *itr_ ) ) ); }
-  pointer operator->( void ) const override final { return( ( *itr_ ) ); }
+  reference operator*( void ) const override final { return( *( *itr_ ) ); }
+  pointer operator->( void ) const override final { return( *itr_ ); }
 
-  bool operator==( const ThinVarDepInterface::v_const_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( itr_ == tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( tmp ? itr_ == tmp->itr_ : false );
-   #endif
+  bool operator==( const Base & rhs ) const override final {
+   auto tmp = cast( rhs );
+   return( tmp ? itr_ == tmp->itr_ : false );
    }
-  bool operator!=( const ThinVarDepInterface::v_const_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( itr_ != tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( tmp ? itr_ != tmp->itr_ : true );
-   #endif
+  bool operator!=( const Base & rhs ) const override final {
+   auto tmp = cast( rhs );
+   return( tmp ? itr_ != tmp->itr_ : true );
    }
 
   private:
 
-  VarVector::const_iterator itr_;
+  // debug builds check the dynamic type; release builds trust the caller
+  static const v_iterator_tmpl * cast( const Base & rhs ) {
+   #ifdef NDEBUG
+    return( static_cast< const v_iterator_tmpl * >( & rhs ) );
+   #else
+    return( dynamic_cast< const v_iterator_tmpl * >( & rhs ) );
+   #endif
+   }
+
+  UnderIt itr_;
   };
+
+/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+ /// concrete iterator over the "active" Variable (non-const flavour)
+
+ using v_iterator =
+  v_iterator_tmpl< ThinVarDepInterface::v_iterator , VarVector::iterator >;
+
+ /// concrete iterator over the "active" Variable (const flavour)
+
+ using v_const_iterator =
+  v_iterator_tmpl< ThinVarDepInterface::v_const_iterator ,
+                   VarVector::const_iterator >;
 
 /*--------------------------------------------------------------------------*/
  /// public enum for the int algorithmic parameters

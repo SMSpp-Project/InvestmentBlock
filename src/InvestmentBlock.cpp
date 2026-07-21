@@ -37,6 +37,54 @@
 using namespace SMSpp_di_unipi_it;
 
 /*--------------------------------------------------------------------------*/
+/*------------------ FILE-LOCAL COMPONENT NAVIGATION -----------------------*/
+/*--------------------------------------------------------------------------*/
+
+// reach the InvestmentFunction of the k-th disaggregated component: each
+// component sub-Block is a bare AbstractBlock whose FRealObjective wraps one
+// InvestmentFunction (as add_component() builds it). The defensive dynamic_cast
+// + throw mirrors how the consumer of these blocks navigates them (see
+// BundleSolver: one FRealObjective / C05Function per component sub-Block).
+
+static InvestmentFunction * component_function( const Block * IB ,
+						Block::Index k )
+{
+ auto sub = dynamic_cast< AbstractBlock * >( IB->get_nested_Block( k ) );
+ if( ! sub )
+  throw( std::invalid_argument( "InvestmentBlock: component " +
+	 std::to_string( k ) + " is not an AbstractBlock" ) );
+ auto obj = dynamic_cast< FRealObjective * >( sub->get_objective() );
+ if( ! obj )
+  throw( std::invalid_argument( "InvestmentBlock: component " +
+	 std::to_string( k ) + " has no FRealObjective" ) );
+ auto fk = dynamic_cast< InvestmentFunction * >( obj->get_function() );
+ if( ! fk )
+  throw( std::invalid_argument( "InvestmentBlock: component " +
+	 std::to_string( k ) + " has no InvestmentFunction" ) );
+ return( fk );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// collect the InvestmentFunction(s) to read from / write into: exactly one in
+// the legacy path (the one in the master objective) or K in the disaggregated
+// path (one per component sub-Block, since the master objective is then empty).
+// This is the single load-bearing "legacy vs 1:K" dispatch; read() and write()
+// share it so the two paths cannot drift apart.
+
+static std::vector< InvestmentFunction * > component_functions( const Block * IB )
+{
+ std::vector< InvestmentFunction * > funcs;
+ if( auto IF = dynamic_cast< InvestmentFunction * >(
+		static_cast< const InvestmentBlock * >( IB )->get_function() ) )
+  funcs.push_back( IF );                                    // legacy: 1
+ else
+  for( Block::Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
+   funcs.push_back( component_function( IB , k ) );          // disaggregated: K
+ return( funcs );
+ }
+
+/*--------------------------------------------------------------------------*/
 /*----------------------------- STATIC MEMBERS -----------------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -75,6 +123,18 @@ void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
                                 "weight must be > 0" ) );
   }
 
+ // a component with no active Variable yet is bound to ALL the design
+ // ColVariable, in their natural order (the common case); a component that
+ // already has actives (the deserialize() path, or a caller picking a proper
+ // subset) is left untouched
+ if( ! f->get_num_active_var() ) {
+  std::vector< ColVariable * > p;
+  p.reserve( v_variables.size() );
+  for( auto & variable : v_variables )
+   p.push_back( & variable );
+  f->set_variables( std::move( p ) );
+  }
+
  // one bare AbstractBlock per component, holding an FRealObjective over f:
  // BundleSolver sees one component per sub-Block
  auto sub = new AbstractBlock( this );
@@ -84,7 +144,6 @@ void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
  obj->set_sense( Objective::eMin );          // convex component => eMin only
  sub->set_objective( obj , eNoMod );
  add_nested_Block( sub );
- v_weights.push_back( weight );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -125,25 +184,22 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
      ( ! f_objective_sense ) )
   f_objective_sense = Objective::eMax;
 
- if( ! v_lower_bound.empty() ) {
-  if( v_lower_bound.size() == 1 )
-   v_lower_bound.resize( num_assets , v_lower_bound.front() );
-  else
-   if( v_lower_bound.size() != num_assets )
-    throw( std::logic_error( "InvestmentBlock::deserialize: the 'LowerBound' "
-			     "netCDF variable, if provided, must have size 0,"
-			     " 1, or 'NumAssets'." ) );
-  }
+ // a bound vector, if provided, must have size 0, 1 (broadcast to NumAssets),
+ // or exactly NumAssets; enforce this once for both LowerBound and UpperBound
+ auto check_bound = [ num_assets ]( std::vector< double > & bound ,
+				    const char * name ) {
+  if( bound.empty() )
+   return;
+  if( bound.size() == 1 )
+   bound.resize( num_assets , bound.front() );
+  else if( bound.size() != num_assets )
+   throw( std::logic_error( std::string( "InvestmentBlock::deserialize: the '" )
+			    + name + "' netCDF variable, if provided, must have"
+			    " size 0, 1, or 'NumAssets'." ) );
+  };
 
- if( ! v_upper_bound.empty() ) {
-  if( v_upper_bound.size() == 1 )
-   v_upper_bound.resize( num_assets , v_upper_bound.front() );
-  else
-   if( v_upper_bound.size() != num_assets )
-    throw( std::logic_error( "InvestmentBlock::deserialize: the 'UpperBound' "
-			     "netCDF variable, if provided, must have size 0,"
-			     " 1, or 'NumAssets'." ) );
-  }
+ check_bound( v_lower_bound , "LowerBound" );
+ check_bound( v_upper_bound , "UpperBound" );
 
  // bind every component to the SAME master design ColVariables, in the same
  // order (the BundleSolver "same active variables" rule); a fresh pointer
@@ -162,40 +218,30 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  if( ! group.getGroup( "Component_0" ).isNull() ) {
 
   // ---- disaggregated (1:K) path ----
-  // NumComponents is an optional guardrail; if present it must match the number
-  // of Component_<k> groups actually found
+  // access by numeric suffix => deterministic order; the count is implicit
+  // (the loop stops at the first missing Component_<k> group)
   Index num_components = 0;
-  const bool have_count =
-   deserialize_dim( group , "NumComponents" , num_components );
+  bool all_unit_weights = true;
 
-  for( Index k = 0 ; ; ++k ) {   // access by numeric suffix => deterministic order
+  for( Index k = 0 ; ; ++k ) {
    auto grp_k = group.getGroup( "Component_" + std::to_string( k ) );
-   if( grp_k.isNull() ) {
-    if( have_count && ( k != num_components ) )
-     throw( std::logic_error(
-      "InvestmentBlock::deserialize: NumComponents = " +
-      std::to_string( num_components ) + " but found " + std::to_string( k ) +
-      " Component_<k> groups." ) );
+   if( grp_k.isNull() )
     break;
-    }
-   if( have_count && ( k >= num_components ) )
-    throw( std::logic_error(
-     "InvestmentBlock::deserialize: more Component_<k> groups than the declared "
-     "NumComponents = " + std::to_string( num_components ) + "." ) );
 
    auto f_k = new InvestmentFunction();
    f_k->set_variables( master_var_pointers() );
    f_k->deserialize( grp_k );    // reads Weight, AssetVarIndex, Constraints, ...
    add_component( f_k , f_k->get_weight() );  // wraps in a bare AbstractBlock
+   if( f_k->get_weight() != 1.0 )
+    all_unit_weights = false;
+   ++num_components;
    }
 
-  // #4 guardrail: K > 1 components all at the default weight 1.0 almost always
+  // guardrail: K > 1 components all at the default weight 1.0 almost always
   // means the per-component weights were forgotten (a weighted expectation
   // needs w_k = probability x discount). Warn loudly; do not fail.
-  if( ( v_weights.size() > 1 ) &&
-      std::all_of( v_weights.begin() , v_weights.end() ,
-                   []( double w ){ return( w == 1.0 ); } ) )
-   std::cerr << "InvestmentBlock::deserialize: WARNING - " << v_weights.size()
+  if( ( num_components > 1 ) && all_unit_weights )
+   std::cerr << "InvestmentBlock::deserialize: WARNING - " << num_components
              << " components all have weight 1.0; if these are "
                 "scenarios/periods of a weighted expectation, set a per-component"
                 " 'Weight' (probability x discount)." << std::endl;
@@ -241,7 +287,7 @@ void InvestmentBlock::generate_objective( Configuration * objc )
  if( objective_generated() )
   return;  // Objective has already been generated
 
- if( v_weights.empty() ) {
+ if( ! is_disaggregated() ) {
   // single-component path: the InvestmentFunction lives in this Block's own
   // FRealObjective
   objective.set_sense( f_objective_sense );
@@ -274,7 +320,7 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( config )
   f_reformulate_bounds = config->f_value;
 
- if( ! v_weights.empty() ) {
+ if( is_disaggregated() ) {
   // multi-component path: reformulating the bounds would shift the design
   // variables on the master, but the per-component InvestmentFunction are not
   // informed of the shift and would compute with the wrong bounds. Refuse
@@ -383,21 +429,21 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
  ::serialize( group , "UpperBound" , netCDF::NcDouble() , NumAssets ,
               v_upper_bound );
 
- if( v_weights.empty() ) {
+ if( ! is_disaggregated() ) {
   // legacy single-component: write the InvestmentFunction at the root group
-  // (byte-identical to before: no Component_<k>, no NumComponents)
+  // (byte-identical to before: no Component_<k>)
   if( auto function = objective.get_function() )
    static_cast< InvestmentFunction * >( function )->serialize( group );
   }
  else {
   // disaggregated (1:K): one Component_<k> group per nested sub-Block, each the
   // existing InvestmentFunction serialize (which writes its own Weight and
-  // AssetVarIndex when non-default); NumComponents is the round-trip guardrail
-  group.addDim( "NumComponents" , get_number_nested_Blocks() );
+  // AssetVarIndex when non-default); the count is implicit in the suffixes
   for( Index k = 0 ; k < get_number_nested_Blocks() ; ++k ) {
-   auto sub = static_cast< const AbstractBlock * >( get_nested_Block( k ) );
-   auto obj = static_cast< const FRealObjective * >( sub->get_objective() );
-   auto f_k = static_cast< const InvestmentFunction * >( obj->get_function() );
+   // reach the component's InvestmentFunction through the single navigation
+   // helper (checked in debug), so serialize does not re-encode the component
+   // structure sub-Block -> FRealObjective -> InvestmentFunction
+   const InvestmentFunction * f_k = component_function( this , k );
    auto grp_k = group.addGroup( "Component_" + std::to_string( k ) );
    f_k->serialize( grp_k );
    }
@@ -454,34 +500,6 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
  }
 
 /*--------------------------------------------------------------------------*/
-/*------------------------- COMPONENT NAVIGATION ---------------------------*/
-/*--------------------------------------------------------------------------*/
-
-// reach the InvestmentFunction of the k-th disaggregated component: each
-// component sub-Block is a bare AbstractBlock whose FRealObjective wraps one
-// InvestmentFunction (as add_component() builds it). The defensive dynamic_cast
-// + throw mirrors how the consumer of these blocks navigates them (see
-// BundleSolver: one FRealObjective / C05Function per component sub-Block).
-
-static InvestmentFunction * component_function( const Block * IB ,
-						Block::Index k )
-{
- auto sub = dynamic_cast< AbstractBlock * >( IB->get_nested_Block( k ) );
- if( ! sub )
-  throw( std::invalid_argument( "InvestmentBlock: component " +
-	 std::to_string( k ) + " is not an AbstractBlock" ) );
- auto obj = dynamic_cast< FRealObjective * >( sub->get_objective() );
- if( ! obj )
-  throw( std::invalid_argument( "InvestmentBlock: component " +
-	 std::to_string( k ) + " has no FRealObjective" ) );
- auto fk = dynamic_cast< InvestmentFunction * >( obj->get_function() );
- if( ! fk )
-  throw( std::invalid_argument( "InvestmentBlock: component " +
-	 std::to_string( k ) + " has no InvestmentFunction" ) );
- return( fk );
- }
-
-/*--------------------------------------------------------------------------*/
 /*----------------- METHODS OF InvestmentBlockSolution ---------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -506,8 +524,7 @@ void InvestmentBlockSolution::deserialize( const netCDF::NcGroup & group )
   v_inner_Solutions.push_back( Solution::new_Solution( sub_group ) );
  else {
   // disaggregated format: "InnerSolution_<k>" groups, in numeric order;
-  // "NumInnerSolutions", if present, is a round-trip guardrail (mirrors the
-  // "NumComponents" check in InvestmentBlock::deserialize)
+  // "NumInnerSolutions", if present, is a round-trip guardrail
   Index num_inner = 0;
   const bool have_count =
    deserialize_dim( group , "NumInnerSolutions" , num_inner );
@@ -559,12 +576,7 @@ void InvestmentBlockSolution::read( const Block * block )
  if( ! f_inner_wanted )
   return;
 
- std::vector< InvestmentFunction * > funcs;
- if( auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() ) )
-  funcs.push_back( IF );                                    // legacy: 1
- else
-  for( Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
-   funcs.push_back( component_function( IB , k ) );          // disaggregated: K
+ auto funcs = component_functions( IB );
 
  if( funcs.empty() )
   throw( std::invalid_argument(
@@ -615,12 +627,7 @@ void InvestmentBlockSolution::write( Block * block )
  // the InvestmentFunction to write into: 1 in the legacy path, K in the
  // disaggregated path (reached through component_function()); the inner
  // :Solution count must match.
- std::vector< InvestmentFunction * > funcs;
- if( auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() ) )
-  funcs.push_back( IF );                                    // legacy: 1
- else
-  for( Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
-   funcs.push_back( component_function( IB , k ) );          // disaggregated: K
+ auto funcs = component_functions( IB );
 
  if( funcs.empty() )
   throw( std::invalid_argument(
