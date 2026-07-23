@@ -102,6 +102,14 @@ InvestmentFunction::InvestmentFunction
  v_cost = std::move( cost );
  v_disinvestment_cost = std::move( disinvestment_cost );
 
+ // convexity precondition, same as in deserialize(): with a negative cost
+ // the (dis)investment term is not convex and the subgradient at the kink
+ // is silently invalid
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+  if( ( get_cost( i ) < 0 ) || ( get_disinvestment_cost( i ) < 0 ) )
+   throw( std::invalid_argument( "InvestmentFunction: Cost and "
+                                 "DisinvestmentCost must be >= 0" ) );
+
  f_violated_constraint = { Inf< Index >() , eLHS };
 
  v_events.resize( max_event_number() );
@@ -190,6 +198,29 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                             "(" + std::to_string( v_x.size() ) + ")." ) );
  }
 
+ // Deserialize the per-asset variable baseline (optional; absent => the
+ // baseline is the InstalledQuantity datum, as in the single-period case).
+ // When present, entry i is the index of the active variable whose value is
+ // asset i's baseline -- the multi-period transition: the component of period
+ // t reads the design variable of period t-1 (see add_linear_term()).
+ ::deserialize( group , "AssetBaselineVarIndex" , num_assets ,
+                v_asset_baseline_var_index , true , true );
+
+ if( ! v_asset_baseline_var_index.empty() ) {
+  if( v_asset_baseline_var_index.size() != num_assets )
+   throw( std::logic_error( "InvestmentFunction::deserialize: "
+                            "'AssetBaselineVarIndex', if provided, must have "
+                            "size 'NumAssets'." ) );
+  if( ! v_x.empty() )
+   for( auto vi : v_asset_baseline_var_index )
+    if( vi >= v_x.size() )
+     throw( std::logic_error( "InvestmentFunction::deserialize: "
+                              "'AssetBaselineVarIndex' entry " +
+                              std::to_string( vi ) + " is out of range (>= "
+                              "number of active variables " +
+                              std::to_string( v_x.size() ) + ")." ) );
+  }
+
  // Number of linear constraints
 
  Index num_constraints;
@@ -276,6 +307,19 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    v_disinvestment_cost.resize( num_assets , 0 );
   }
 
+  // Convexity precondition of the format: the transition cost
+  // max( c+ d , -c- d ) is convex iff c+ + c- >= 0; the format requires the
+  // stronger (and natural) c+ >= 0 and c- >= 0, failing loud.
+  for( Index i = 0 ; i < num_assets ; ++i )
+   if( ( get_cost( i ) < 0 ) || ( get_disinvestment_cost( i ) < 0 ) )
+    throw( std::logic_error( "InvestmentFunction::deserialize: 'Cost' and "
+                             "'DisinvestmentCost' must be >= 0 (convexity "
+                             "precondition of the format), but asset " +
+                             std::to_string( i ) + " has ( " +
+                             std::to_string( get_cost( i ) ) + " , " +
+                             std::to_string( get_disinvestment_cost( i ) ) +
+                             " )." ) );
+
   // Deserialize the amount of assets currently installed in the system
 
   if( ::deserialize( group , "InstalledQuantity" , num_assets ,
@@ -287,6 +331,14 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                              "'InstalledCapacity' netCDF variable, if provided,"
                              " must have size 0, 1, or 'NumAssets'." ) );
   }
+
+  // A variable baseline excludes the InstalledQuantity datum: both answer
+  // "how much was there before", having the two together is ambiguous.
+  if( ( ! v_asset_baseline_var_index.empty() ) &&
+      ( ! v_installed_quantity.empty() ) )
+   throw( std::logic_error( "InvestmentFunction::deserialize: "
+                            "'AssetBaselineVarIndex' cannot be combined with "
+                            "'InstalledQuantity'." ) );
 
  } // end( if( num_assets ) )
 
@@ -1014,6 +1066,10 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
   ::serialize( group , "AssetVarIndex" , netCDF::NcUint() , NumAssets ,
                v_asset_var_index );
 
+ if( ! v_asset_baseline_var_index.empty() )
+  ::serialize( group , "AssetBaselineVarIndex" , netCDF::NcUint() , NumAssets ,
+               v_asset_baseline_var_index );
+
  ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
               v_lower_bound );
 
@@ -1206,29 +1262,10 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
 
  f_ignore_modifications = saved_f_ignore_modifications;
 
- // Consider the linear term of the objective
+ // Consider the linear term of the objective (investment/transition cost;
+ // baseline-aware, see add_linear_term())
 
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-
-  const auto var_index = asset_var( i );
-  const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( var_index , false );
-
-  // Update the objective value and the linearization
-
-  if( x > installed_quantity ) {
-   // An investment is being made in asset i
-   const auto cost = get_cost( i );
-   f_value += cost * ( x - installed_quantity );
-   v_linearization[ var_index ] += cost;
-  }
-  else {
-   // A disinvestment is being made in asset i
-   const auto disinvestment_cost = get_disinvestment_cost( i );
-   f_value += disinvestment_cost * ( installed_quantity - x );
-   v_linearization[ var_index ] -= disinvestment_cost;
-  }
- }
+ add_linear_term( f_value , v_linearization );
 
  solver->set_id( solver_id );
 
@@ -1465,29 +1502,10 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   v_linearization[ i ] /= num_scenarios;
  }
 
- // Consider the linear term of the objective
+ // Consider the linear term of the objective (investment/transition cost;
+ // baseline-aware, see add_linear_term())
 
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-
-  const auto var_index = asset_var( i );
-  const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( var_index , false );
-
-  // Update the objective value and the linearization
-
-  if( x > installed_quantity ) {
-   // An investment is being made in asset i
-   const auto cost = get_cost( i );
-   f_value += cost * ( x - installed_quantity );
-   v_linearization[ var_index ] += cost;
-  }
-  else {
-   // A disinvestment is being made in asset i
-   const auto disinvestment_cost = get_disinvestment_cost( i );
-   f_value += disinvestment_cost * ( installed_quantity - x );
-   v_linearization[ var_index ] -= disinvestment_cost;
-  }
- }
+ add_linear_term( f_value , v_linearization );
 
  // Unlock the inner Block if it is necessary
  unlend_identity();
@@ -1766,22 +1784,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  if( ! world.rank() ) {
 #endif
 
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-  const auto var_index = asset_var( i );
-  const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( var_index , false );
-
-  if( x > installed_quantity ) {
-   const auto cost = get_cost( i );
-   local_value += cost * ( x - installed_quantity );
-   local_linearization[ var_index ] += cost;
-   }
-  else {
-   const auto disinvestment_cost = get_disinvestment_cost( i );
-   local_value += disinvestment_cost * ( installed_quantity - x );
-   local_linearization[ var_index ] -= disinvestment_cost;
-   }
-  }
+ // investment/transition cost; baseline-aware, see add_linear_term()
+ add_linear_term( local_value , local_linearization );
 
 #ifdef USE_MPI
  }
@@ -1877,15 +1881,10 @@ bool InvestmentFunction::has_linearization( bool diagonal )
  f_diagonal_linearization_required = false;
 
  if( f_violated_constraint.first < Inf< Index >() ) {
-  // A constraint has been violated. Compute the vertical linearization
-  // (gradient of the violated constraint, with sign according to which
-  // side -- LHS or RHS -- was violated).
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
-  v_linearization.resize( v_x.size() );
-  for( Index j = 0 ; j < Index( v_x.size() ) ; ++j )
-   v_linearization[ j ] = sign * v_A[ i ][ j ];
+  // A constraint has been violated: materialize the vertical linearization
+  // (gradient of the violated constraint, per-asset columns landing on each
+  // asset's variable -- see vertical_linearization()).
+  vertical_linearization( v_linearization );
   return( true );
   }
 
@@ -1997,12 +1996,11 @@ void InvestmentFunction::get_linearization_coefficients
    g[ i - range.first ] = v_linearization[ i ];
  }
  else {
-  // Vertical linearization
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
+  // Vertical linearization (per-asset columns, see vertical_linearization())
+  std::vector< double > vl;
+  vertical_linearization( vl );
   for( Index j = range.first ; j < range.second ; ++j )
-   g[ j - range.first ] = sign * v_A[ i ][ j ];
+   g[ j - range.first ] = vl[ j ];
  }
 }  // end( InvestmentFunction::get_linearization_coefficients( * , range ) )
 
@@ -2027,12 +2025,11 @@ void InvestmentFunction::get_linearization_coefficients
    g.coeffRef( i ) = v_linearization[ i ];
  }
  else {
-  // Vertical linearization
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
+  // Vertical linearization (per-asset columns, see vertical_linearization())
+  std::vector< double > vl;
+  vertical_linearization( vl );
   for( Index j = range.first ; j < range.second ; ++j )
-   g.coeffRef( j ) = sign * v_A[ i ][ j ];
+   g.coeffRef( j ) = vl[ j ];
  }
 }  // end( InvestmentFunction::get_linearization_coefficients( sv , range ) )
 
@@ -2054,13 +2051,12 @@ void InvestmentFunction::get_linearization_coefficients
    g[ k++ ] = v_linearization[ i ];
  }
  else {
-  // Vertical linearization
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
+  // Vertical linearization (per-asset columns, see vertical_linearization())
+  std::vector< double > vl;
+  vertical_linearization( vl );
   Index k = 0;
   for( auto j : subset )
-   g[ k++ ] = sign * v_A[ i ][ j ];
+   g[ k++ ] = vl[ j ];
  }
 }  // end( InvestmentFunction::get_linearization_coefficients( * , subset ) )
 
@@ -2081,12 +2077,11 @@ void InvestmentFunction::get_linearization_coefficients
    g.coeffRef( i ) = v_linearization[ i ];
  }
  else {
-  // Vertical linearization
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
+  // Vertical linearization (per-asset columns, see vertical_linearization())
+  std::vector< double > vl;
+  vertical_linearization( vl );
   for( auto j : subset )
-   g.coeffRef( j ) = sign * v_A[ i ][ j ];
+   g.coeffRef( j ) = vl[ j ];
  }
 }  // end( InvestmentFunction::get_linearization_coefficients( sv, subset ) )
 
@@ -2149,9 +2144,10 @@ Function::FunctionValue InvestmentFunction::get_value( void )
 /*--------------------------------------------------------------------------*/
 
 double InvestmentFunction::compute_linear_constraint_value( Index i ) const {
+ // per-asset semantics: column j multiplies the variable of ASSET j
  double value = 0;
  for( Index j = 0 ; j < v_A[ i ].size() ; ++j )
-  value += v_A[ i ][ j ] * get_var_value( j , false );
+  value += v_A[ i ][ j ] * get_var_value( asset_var( j ) , false );
  return( value );
 }
 

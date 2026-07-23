@@ -8,16 +8,27 @@ defined in `UCBlock`, like generating units and transmission lines.
 > them, exposed separately to `BundleSolver` instead of one aggregated function.
 >
 > It can be built programmatically (`add_component`, `set_weight`,
-> `set_asset_variable_indices`, `set_implicit_constraints`) or from netCDF:
-> the (1:K) schema is "legacy × K" — one `Component_<k>` sub-group per component
-> (the presence of `Component_0` is what selects the disaggregated format), each
-> a self-contained legacy `InvestmentFunction` description carrying its own
-> `Weight` attribute and, for the multi-period case, its own `AssetVarIndex`
-> mapping; an optional `NumComponents` dimension, when present, is a round-trip
-> guardrail on the component count. Components may all share the same design
-> variables (multi-scenario), or each act on its own subset of them subject to
-> linking constraints such as inter-period monotonicity (multi-period). Solving
-> it with two or more components needs an OSiMP master, as the default
+> `set_asset_variable_indices`, `set_asset_baseline_variable_indices`,
+> `set_implicit_constraints`) or from netCDF: the (1:K) schema is
+> "legacy × K" — one `Component_<k>` sub-group per component (the presence of
+> `Component_0` is what selects the disaggregated format; the component count
+> is implicit in the suffixes), each a self-contained legacy
+> `InvestmentFunction` description carrying its own `Weight` attribute and,
+> for the multi-period case, its own `AssetVarIndex` and
+> `AssetBaselineVarIndex` mappings (the latter makes the transition cost of
+> an asset charge against another design variable — typically the same
+> asset's variable in the previous period — instead of the
+> `InstalledQuantity` datum). All variable indices in the file are GLOBAL
+> (positions in the design array of the root); on load each component is
+> automatically wired to the subset of design variables its mappings
+> reference, so a multi-period file yields the sparse (block-banded) bundle
+> master with no opt-in, and serialize re-translates back to global indices.
+> Components may all share the same design variables (multi-scenario), or
+> each own its period's block while reading the previous one as baseline
+> (multi-period). The implicit `Constraints_*` of a component are per-ASSET
+> (column j applies to the variable of asset j through the mapping);
+> inter-period constraints between the design variables belong at the root.
+> Solving with two or more components needs an OSiMP master, as the default
 > `QPPenaltyMP` does not handle a decomposed objective. The single-component
 > (legacy) path — netCDF format included — is read and written byte-for-byte
 > unchanged.

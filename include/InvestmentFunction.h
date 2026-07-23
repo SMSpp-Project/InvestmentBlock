@@ -1180,10 +1180,12 @@ class InvestmentFunction : public C05Function , public Block {
   *        "natural" ones. */
 
  void reformulated_bounds( bool reformulated ) {
-  if( reformulated && ( ! v_asset_var_index.empty() ) )
+  if( reformulated && ( ( ! v_asset_var_index.empty() ) ||
+                        ( ! v_asset_baseline_var_index.empty() ) ) )
    throw( std::logic_error( "InvestmentFunction::reformulated_bounds: bound "
                             "reformulation is not supported together with a "
-                            "non-identity asset-to-variable mapping" ) );
+                            "non-identity asset-to-variable mapping or a "
+                            "variable baseline" ) );
   f_reformulated_bounds = reformulated;
   }
 
@@ -1228,22 +1230,81 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
- /// sets the implicit linear constraints on the active variables
- /** Sets the linear constraints  lb <= A x <= ub  on the active variables x.
-  * These are the linking constraints (for instance inter-period monotonicity,
-  * caps or budgets) the InvestmentFunction enforces via its vertical
-  * linearizations.
+ /// sets the per-asset variable baseline (multi-period transition cost)
+ /** Sets, for each asset, which active variable provides its *baseline*, i.e.,
+  * "the amount there was before": the (dis)investment cost of asset i is then
+  * computed on  d = x - baseline  as  max( c+ d , -c- d )  -- a function of
+  * BOTH variables, so the subgradient gets a mirrored entry on the baseline
+  * variable. This realizes the multi-period transition cost: the component of
+  * period t declares the design variable of period t-1 as its baseline.
+  *
+  * If \p bvi is empty (the default) the baseline of each asset is the
+  * InstalledQuantity datum, as in the single-period (legacy) case.
+  *
+  * A variable baseline cannot be combined with the InstalledQuantity datum in
+  * the same InvestmentFunction (ambiguous: which "before"?), nor with
+  * reformulated bounds (get_var_value() would silently shift the read value
+  * by a per-asset datum indexed by variable); both combinations throw.
+  *
+  * @param bvi one entry per asset, each the index of its baseline variable
+  *        among the active ones. */
+
+ void set_asset_baseline_variable_indices( std::vector< Index > bvi ) {
+  if( ! bvi.empty() ) {
+   if( bvi.size() != v_asset_indices.size() )
+    throw( std::logic_error(
+     "InvestmentFunction::set_asset_baseline_variable_indices: the baseline "
+     "mapping has " + std::to_string( bvi.size() ) + " entries, but there are "
+     + std::to_string( v_asset_indices.size() ) + " assets" ) );
+   for( const auto j : bvi )
+    if( j >= v_x.size() )
+     throw( std::logic_error(
+      "InvestmentFunction::set_asset_baseline_variable_indices: variable "
+      "index " + std::to_string( j ) + " is out of range (there are " +
+      std::to_string( v_x.size() ) + " active variables)" ) );
+   if( ! v_installed_quantity.empty() )
+    throw( std::logic_error(
+     "InvestmentFunction::set_asset_baseline_variable_indices: a variable "
+     "baseline cannot be combined with InstalledQuantity" ) );
+   if( f_reformulated_bounds )
+    throw( std::logic_error(
+     "InvestmentFunction::set_asset_baseline_variable_indices: a variable "
+     "baseline is not supported when the bounds have been reformulated" ) );
+   }
+  v_asset_baseline_var_index = std::move( bvi );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the per-asset variable-baseline mapping (empty => legacy baseline)
+
+ const std::vector< Index > & get_asset_baseline_variable_indices() const {
+  return( v_asset_baseline_var_index );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the asset -> variable mapping (empty => identity)
+
+ const std::vector< Index > & get_asset_variable_indices() const {
+  return( v_asset_var_index );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the implicit linear constraints on the assets
+ /** Sets the linear constraints  lb <= A x <= ub  enforced by the
+  * InvestmentFunction via its vertical linearizations (for instance caps or
+  * budgets over the assets under investment).
   *
   * It is the programmatic counterpart of reading the Constraints_A,
-  * Constraints_LowerBound and Constraints_UpperBound netCDF fields: use it when
-  * the function is built in memory rather than read from a file.
+  * Constraints_LowerBound and Constraints_UpperBound netCDF fields: use it
+  * when the function is built in memory rather than read from a file.
   *
-  * Each row of \p A has one coefficient per active variable (not per asset);
-  * \p lb and \p ub have one entry per constraint (per row of \p A). The checks
-  * mirror those of the deserialization and stop silent out-of-bounds reads.
+  * PER-ASSET semantics, as the netCDF format declares
+  * (NumConstraints x NumAssets): each row of \p A has one coefficient per
+  * ASSET, and column j multiplies the variable of asset j (asset_var( j )),
+  * wherever the mapping puts it. \p lb and \p ub have one entry per
+  * constraint (per row of \p A).
   *
-  * @param A coefficient matrix: one row per constraint, one column per active
-  *        variable.
+  * @param A coefficient matrix: one row per constraint, one column per asset.
   * @param lb lower bounds, one per constraint.
   * @param ub upper bounds, one per constraint. */
 
@@ -1253,10 +1314,10 @@ class InvestmentFunction : public C05Function , public Block {
    throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
                             "A, lb and ub need one entry per constraint" ) );
   for( Index i = 0 ; i < A.size() ; ++i ) {
-   if( ( ! v_x.empty() ) && ( A[ i ].size() != v_x.size() ) )
+   if( A[ i ].size() != v_asset_indices.size() )
     throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
                              "each row of A needs one coefficient per "
-                             "active variable" ) );
+                             "asset" ) );
    if( lb[ i ] > ub[ i ] )
     throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
                              "lb[ i ] > ub[ i ]" ) );
@@ -1820,6 +1881,15 @@ class InvestmentFunction : public C05Function , public Block {
   * i-th active variable. When set, v_asset_var_index[ i ] is the index of
   * asset i's variable among the active ones, letting several InvestmentFunction
   * share the same active variables while each invests only in some of them. */
+
+ std::vector< Index > v_asset_baseline_var_index;
+ ///< maps each asset to the active variable providing its baseline
+ /**< When empty (the default) the baseline of each asset is the
+  * InstalledQuantity datum (single-period, legacy). When set,
+  * v_asset_baseline_var_index[ i ] is the index (among the active variables)
+  * of the variable whose value is asset i's baseline -- the multi-period
+  * transition: the component of period t reads the design of period t-1.
+  * See set_asset_baseline_variable_indices() and add_linear_term(). */
 
  std::vector< Index > v_greedy_solvers;
  ///< indices of the SDDPGreedySolver
@@ -2538,6 +2608,77 @@ class InvestmentFunction : public C05Function , public Block {
   f_value *= f_weight;
   for( auto & c : v_linearization )
    c *= f_weight;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// adds the (dis)investment linear term of every asset at the current point
+ /** The single home of the transition-cost math, shared by the three
+  * compute_*() paths (which only differ in the accumulators they pass in):
+  * for each asset i, with  d = x - baseline , adds to \p value the cost
+  * max( c+ d , -c- d )  and writes its subgradient into \p linearization.
+  * The baseline is the value of the baseline variable when one is declared
+  * (multi-period, see set_asset_baseline_variable_indices()), the
+  * InstalledQuantity datum otherwise (single-period, legacy).
+  *
+  * With a variable baseline the cost is a function of BOTH variables, so the
+  * subgradient has TWO entries: ( +c+ , -c+ ) for d > 0 and ( -c- , +c- )
+  * for d < 0, on (asset variable, baseline variable) respectively. Omitting
+  * the mirrored entry would be a SILENT bug: the cut looks valid but is not
+  * a subgradient. At the kink d == 0 the else branch yields ( -c- , +c- ),
+  * inside the subdifferential [ -c- , c+ ] since the costs are >= 0 (format
+  * precondition). */
+
+ void add_linear_term( double & value ,
+                       std::vector< double > & linearization ) const
+ {
+  const bool var_baseline = ! v_asset_baseline_var_index.empty();
+
+  for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
+
+   const auto var_index = asset_var( i );
+   const auto x = get_var_value( var_index , false );
+   const auto baseline = var_baseline ?
+    get_var_value( v_asset_baseline_var_index[ i ] , false ) :
+    get_installed_quantity( i );
+
+   if( x > baseline ) {
+    // an investment is being made in asset i
+    const auto cost = get_cost( i );
+    value += cost * ( x - baseline );
+    linearization[ var_index ] += cost;
+    if( var_baseline )
+     linearization[ v_asset_baseline_var_index[ i ] ] -= cost;
+    }
+   else {
+    // a disinvestment is being made in asset i (d == 0 falls here)
+    const auto disinvestment_cost = get_disinvestment_cost( i );
+    value += disinvestment_cost * ( baseline - x );
+    linearization[ var_index ] -= disinvestment_cost;
+    if( var_baseline )
+     linearization[ v_asset_baseline_var_index[ i ] ] += disinvestment_cost;
+    }
+   }
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// dense vertical linearization (gradient of the violated constraint)
+ /** The single home of the vertical (feasibility) cut, shared by
+  * has_linearization() and the four get_linearization_coefficients()
+  * flavours. Per-asset semantics of the implicit constraints: column j of
+  * v_A belongs to ASSET j (as the netCDF format declares,
+  * NumConstraints x NumAssets) and lands on that asset's variable
+  * asset_var( j ); every other entry is zero. Under the legacy identity
+  * mapping this is bit-identical to the historical per-variable reading --
+  * which additionally read out of the row's bounds when the actives
+  * outnumbered the assets. */
+
+ void vertical_linearization( std::vector< double > & vec ) const {
+  assert( f_violated_constraint.first < v_A.size() );
+  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
+  const auto & row = v_A[ f_violated_constraint.first ];
+  vec.assign( v_x.size() , 0.0 );
+  for( Index j = 0 ; j < row.size() ; ++j )
+   vec[ asset_var( j ) ] += sign * row[ j ];
   }
 
 /*--------------------------------------------------------------------------*/

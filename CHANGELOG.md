@@ -14,11 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disaggregated path); the single-component (legacy) path is unchanged.
 
 - netCDF (1:K) format for the disaggregated InvestmentBlock: the group may now
-  hold a `NumComponents` dimension plus one `Component_<k>` sub-group per
-  component, each a legacy InvestmentFunction description with its own
-  `Weight` attribute and, for the multi-period case, its own `AssetVarIndex`
-  variable; both deserialize and serialize support it, and the legacy
-  single-component format is read and written unchanged
+  hold one `Component_<k>` sub-group per component (the presence of
+  `Component_0` selects the disaggregated path; the component count is
+  implicit in the suffixes), each a legacy InvestmentFunction description
+  with its own `Weight` attribute and, for the multi-period case, its own
+  `AssetVarIndex` and `AssetBaselineVarIndex` variables; all variable indices
+  in the file are GLOBAL (positions in the design array of the root); both
+  deserialize and serialize support it, and the legacy single-component
+  format is read and written unchanged
+
+- `AssetBaselineVarIndex` (netCDF) and
+  `set_asset_baseline_variable_indices()`: per-asset *variable* baseline for
+  the multi-period case — the transition cost of asset i is charged against
+  the value of another design variable (typically the same asset's variable
+  in the previous period) instead of the `InstalledQuantity` datum, with the
+  mirrored subgradient entry on the baseline variable; cannot be combined
+  with `InstalledQuantity`
+
+- `add_component( f , weight , actives )` overload binding a component to a
+  SUBSET of the design variables (per-period binding; the component's
+  mappings are then local positions in that subset)
+
+- automatic active-subset derivation in deserialize: each component is wired
+  to the union of the design variables its mappings reference (sorted, so
+  the BundleSolver increasing-union-order rule holds), with the mappings
+  translated from global to local; identity/full components keep the dense
+  wiring byte-identically. Serialize performs the inverse local→global
+  re-translation, so files always speak global indices
+
+- `fix_design_variable()` on InvestmentBlock (fix/unfix one design variable,
+  with Modification)
 
 - `InvestmentBlockSolution` now carries one inner Solution per component,
   serialized as `InnerSolution_<k>` groups with a `NumInnerSolutions`
@@ -30,8 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design variable it invests in, so several components can share the same design
   variables while each one acts on its own subset of them (the multi-period case)
 
-- `set_implicit_constraints()` on InvestmentFunction, to set linking linear
-  constraints (such as inter-period monotonicity) on the design variables
+- `set_implicit_constraints()` on InvestmentFunction, to set the implicit
+  linear constraints (caps or budgets over the assets of the component)
+  programmatically; one coefficient per ASSET, as the netCDF format declares
 
 - `set_variable_bounds()` on InvestmentBlock, plus accessors for the
   programmatic construction path
@@ -49,8 +75,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active variables is now mapping-aware (a component with an `AssetVarIndex`
   may invest in a subset of the design variables)
 
+- the implicit constraints now follow the PER-ASSET semantics the netCDF
+  format declares (`Constraints_A` is NumConstraints × NumAssets): column j
+  applies to the variable of asset j through the mapping — in constraint
+  evaluation and in the vertical linearizations alike; under the legacy
+  identity mapping the behaviour is bit-identical
+
+- `Cost` and `DisinvestmentCost` must be >= 0 (convexity precondition of the
+  transition cost): enforced with an error at deserialize
+
+- `add_component()` wires the active variables itself when the component has
+  none (all the design variables, in natural order); `is_disaggregated()` is
+  now structural (`get_number_nested_Blocks() > 0`)
+
+### Removed
+
+- the optional `NumComponents` dimension (the component count is implicit in
+  the `Component_<k>` suffixes)
+
+- `get_variables_writable()` (superseded by `fix_design_variable()` and by
+  `add_component()` wiring the actives itself)
 
 ### Fixed 
+
+- latent out-of-bounds read in the vertical linearization when a component
+  had more active variables than assets
 
 
 ## [0.1.1] - 2025-12-12

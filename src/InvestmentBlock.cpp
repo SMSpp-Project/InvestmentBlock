@@ -30,6 +30,8 @@
 
 #include <iostream>
 
+#include <set>
+
 /*--------------------------------------------------------------------------*/
 /*------------------------- NAMESPACE AND USING ----------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -229,8 +231,74 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     break;
 
    auto f_k = new InvestmentFunction();
-   f_k->set_variables( master_var_pointers() );
-   f_k->deserialize( grp_k );    // reads Weight, AssetVarIndex, Constraints, ...
+   try {   // f_k (and its inner Block) must not leak on a rejected file:
+           // Block::new_Block swallows the exception and returns nullptr
+   f_k->deserialize( grp_k );   // no actives yet: the mappings stay GLOBAL,
+                                // as the file speaks (range-checked below)
+
+   // derive the component's active subset from the file's global mappings:
+   // U = sorted union of the asset variables (identity 0..NumAssets-1 when
+   // AssetVarIndex is absent) and the baseline variables. Sorted order =>
+   // the BundleSolver increasing-union-order rule holds for the per-period
+   // chain layout. A full-identity component degrades to the dense wiring,
+   // byte-identical to the historical behaviour.
+   Index na = 0;
+   deserialize_dim( grp_k , "NumAssets" , na );
+   const auto & gavi = f_k->get_asset_variable_indices();
+   const auto & gbvi = f_k->get_asset_baseline_variable_indices();
+   std::set< Index > U;
+   for( Index a = 0 ; a < na ; ++a )
+    U.insert( gavi.empty() ? a : gavi[ a ] );
+   U.insert( gbvi.begin() , gbvi.end() );
+   for( auto g : U )
+    if( g >= v_variables.size() )
+     throw( std::logic_error( "InvestmentBlock::deserialize: variable index "
+	    + std::to_string( g ) + " of Component_" + std::to_string( k ) +
+	    " is out of range (the root has " +
+	    std::to_string( v_variables.size() ) + " design variables)." ) );
+
+   if( ! U.empty() ) {
+    const std::vector< Index > sorted_U( U.begin() , U.end() );
+    std::vector< ColVariable * > p;
+    p.reserve( sorted_U.size() );
+    for( auto g : sorted_U )
+     p.push_back( & v_variables[ g ] );
+    auto local = [ & sorted_U ]( Index g ) {
+     return( Index( std::lower_bound( sorted_U.begin() , sorted_U.end() , g )
+		    - sorted_U.begin() ) );
+     };
+    // translate the mappings global -> local position in the subset; a
+    // mapping that reduces to the identity stays implicit (empty), keeping
+    // the dense/legacy serialize byte-identical. Note that an absent
+    // AssetVarIndex (global identity, asset a <-> variable a) always
+    // translates to the local identity: the identity block 0..na-1 sorts
+    // first in U, so local( a ) == a.
+    std::vector< Index > lavi , lbvi;
+    if( ! gavi.empty() ) {
+     lavi.reserve( na );
+     for( auto g : gavi )
+      lavi.push_back( local( g ) );
+     bool identity = true;
+     for( Index a = 0 ; a < lavi.size() ; ++a )
+      if( lavi[ a ] != a ) { identity = false; break; }
+     if( identity )
+      lavi.clear();
+     }
+    lbvi.reserve( gbvi.size() );
+    for( auto g : gbvi )
+     lbvi.push_back( local( g ) );
+    f_k->set_variables( std::move( p ) );
+    f_k->set_asset_variable_indices( std::move( lavi ) );
+    f_k->set_asset_baseline_variable_indices( std::move( lbvi ) );
+    }
+   // U empty (no assets): add_component below wires ALL the design
+   // variables, as the historical behaviour did
+   }
+   catch( ... ) {
+    delete f_k;
+    throw;
+    }
+
    add_component( f_k , f_k->get_weight() );  // wraps in a bare AbstractBlock
    if( f_k->get_weight() != 1.0 )
     all_unit_weights = false;
@@ -443,9 +511,68 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
    // reach the component's InvestmentFunction through the single navigation
    // helper (checked in debug), so serialize does not re-encode the component
    // structure sub-Block -> FRealObjective -> InvestmentFunction
-   const InvestmentFunction * f_k = component_function( this , k );
+   const auto f_k = component_function( this , k );
    auto grp_k = group.addGroup( "Component_" + std::to_string( k ) );
    f_k->serialize( grp_k );
+
+   // the file speaks GLOBAL indices: when the component's actives are a
+   // proper subset of the design variables (the per-period binding), its
+   // mappings -- which are LOCAL positions in that subset -- must be
+   // re-translated to global design indices before they hit the disk (the
+   // exact inverse of the derivation done in deserialize). Dense components
+   // have local == global and are left untouched (byte-identical legacy).
+   const Index nact = f_k->get_num_active_var();
+   bool dense_identity = ( nact == v_variables.size() );
+   if( dense_identity )   // same size is NOT enough: the wiring must really
+    for( Index l = 0 ; l < nact ; ++l )   // be the identity, or a full-size
+     if( f_k->get_active_var( l ) != & v_variables[ l ] ) {  // permutation
+      dense_identity = false;             // would silently corrupt the file
+      break;
+      }
+   if( dense_identity )
+    continue;
+   std::vector< Index > l2g( nact );
+   for( Index l = 0 ; l < nact ; ++l ) {
+    auto vp = static_cast< const ColVariable * >( f_k->get_active_var( l ) );
+    const auto g = Index( vp - v_variables.data() );
+    if( g >= v_variables.size() )
+     throw( std::logic_error( "InvestmentBlock::serialize: active variable "
+	    + std::to_string( l ) + " of component " + std::to_string( k ) +
+	    " is not a design variable of this InvestmentBlock" ) );
+    l2g[ l ] = g;
+    }
+   auto na_dim = grp_k.getDim( "NumAssets" );
+   const Index na = na_dim.isNull() ? 0 : Index( na_dim.getSize() );
+   auto put_global = [ & ]( const std::string & name ,
+			    const std::vector< Index > & localmap ,
+			    bool identity_when_empty ) {
+    if( localmap.empty() && ! identity_when_empty )
+     return;
+    std::vector< unsigned int > g( localmap.empty() ? na : localmap.size() );
+    for( Index i = 0 ; i < g.size() ; ++i )
+     g[ i ] = l2g[ localmap.empty() ? i : localmap[ i ] ];
+    // a GLOBAL identity needs no field (absent already means exactly that):
+    // keeps the round-trip stable when the subset is the prefix 0..na-1
+    bool identity = true;
+    for( Index i = 0 ; i < g.size() ; ++i )
+     if( g[ i ] != i ) {
+      identity = false;
+      break;
+      }
+    if( identity && grp_k.getVar( name ).isNull() )
+     return;
+    auto var = grp_k.getVar( name );
+    if( var.isNull() )
+     var = grp_k.addVar( name , netCDF::NcUint() , na_dim );
+    var.putVar( g.data() );
+    };
+   if( na ) {
+    // AssetVarIndex: an implicit local identity over a subset is a NON
+    // trivial global mapping (asset a -> l2g[ a ]) and must be written out
+    put_global( "AssetVarIndex" , f_k->get_asset_variable_indices() , true );
+    put_global( "AssetBaselineVarIndex" ,
+		f_k->get_asset_baseline_variable_indices() , false );
+    }
    }
   }
  }

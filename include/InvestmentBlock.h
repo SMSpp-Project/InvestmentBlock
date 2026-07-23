@@ -148,6 +148,72 @@ public:
  void add_component( InvestmentFunction * f , double weight );
 
 /*--------------------------------------------------------------------------*/
+ /// adds a component bound to a SUBSET of the design Variable
+ /** As add_component( f , weight ), but wires the active Variable of \p f to
+  * the given \p actives subset (by index, in the given order) of the design
+  * ColVariable of this InvestmentBlock. This is the per-period binding of
+  * the multi-period (1:K) scheme: the component of period t declares only
+  * its own design block plus the baseline variables of period t-1, and the
+  * bundle master goes from dense to block-banded.
+  *
+  * The component's AssetVarIndex / AssetBaselineVarIndex mappings must then
+  * use LOCAL positions, i.e., indices into \p actives. NOTE, BundleSolver rule
+  * for sparse active sets: each component must present its actives in
+  * increasing union order — with the per-period chain layout, passing
+  * \p actives sorted by increasing design index is sufficient.
+  *
+  * @param f       the InvestmentFunction of the component (ownership taken);
+  *                it must not have active Variable yet.
+  *
+  * @param weight  the component weight w ( > 0 ).
+  *
+  * @param actives the indices of the design Variable this component sees. */
+
+ void add_component( InvestmentFunction * f , double weight ,
+                     const std::vector< Index > & actives ) {
+  if( ! f )
+   throw( std::invalid_argument( "InvestmentBlock::add_component: "
+                                 "null component" ) );
+  if( f->get_num_active_var() ) {
+   delete f;
+   throw( std::logic_error( "InvestmentBlock::add_component: the component "
+                            "already has active Variable" ) );
+   }
+  if( actives.empty() ) {
+   delete f;
+   throw( std::invalid_argument( "InvestmentBlock::add_component: empty "
+                                 "active subset (use the two-parameter "
+                                 "overload for the dense wiring)" ) );
+   }
+  std::vector< ColVariable * > p;
+  p.reserve( actives.size() );
+  for( Index i = 0 ; i < actives.size() ; ++i ) {
+   if( actives[ i ] >= v_variables.size() ) {
+    delete f;
+    throw( std::invalid_argument( "InvestmentBlock::add_component: active "
+                                  "index " + std::to_string( actives[ i ] ) +
+                                  " out of range" ) );
+    }
+   if( i && ( actives[ i ] <= actives[ i - 1 ] ) ) {
+    delete f;
+    throw( std::invalid_argument( "InvestmentBlock::add_component: the "
+                                  "active subset must be strictly "
+                                  "increasing (BundleSolver union-order "
+                                  "rule, and no duplicates)" ) );
+    }
+   p.push_back( & v_variables[ actives[ i ] ] );
+   }
+  try {
+   f->set_variables( std::move( p ) );
+   }
+  catch( ... ) {
+   delete f;
+   throw;
+   }
+  add_component( f , weight );
+  }
+
+/*--------------------------------------------------------------------------*/
  /// destructor
 
  virtual ~InvestmentBlock();
