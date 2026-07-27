@@ -26,7 +26,15 @@
 
 #include "AbstractBlock.h"
 
+#include "StochasticBlock.h"
+
+#include "ScenarioGenerator.h"
+
 #include <algorithm>
+
+#include <cctype>
+
+#include <memory>
 
 #include <iostream>
 
@@ -100,6 +108,174 @@ SMSpp_insert_in_factory_cpp_0( InvestmentBlockSolution );
 
 /*--------------------------------------------------------------------------*/
 /*-------------- CONSTRUCTING AND DESTRUCTING InvestmentBlock --------------*/
+/*--------------------------------------------------------------------------*/
+
+void InvestmentBlock::wire_component_actives( InvestmentFunction * f , Index k )
+{
+ // derive the component's active subset from the file's global mappings:
+ // U = sorted union of the asset variables (identity 0..NumAssets-1 when
+ // AssetVarIndex is absent) and the baseline variables. Sorted order => the
+ // BundleSolver increasing-union-order rule holds for the per-period chain
+ // layout. A full-identity component degrades to the dense wiring,
+ // byte-identical to the historical behaviour.
+ const auto na = Index( f->get_asset_indices().size() );
+ const auto & gavi = f->get_asset_variable_indices();
+ const auto & gbvi = f->get_asset_baseline_variable_indices();
+
+ std::set< Index > U;
+ for( Index a = 0 ; a < na ; ++a )
+  U.insert( gavi.empty() ? a : gavi[ a ] );
+ U.insert( gbvi.begin() , gbvi.end() );
+
+ for( auto g : U )
+  if( g >= v_variables.size() )
+   throw( std::logic_error( "InvestmentBlock::deserialize: variable index " +
+	  std::to_string( g ) + " of Component_" + std::to_string( k ) +
+	  " is out of range (the root has " +
+	  std::to_string( v_variables.size() ) + " design variables)." ) );
+
+ if( U.empty() )
+  return;   // no assets: add_component() wires ALL the design variables
+
+ const std::vector< Index > sorted_U( U.begin() , U.end() );
+ std::vector< ColVariable * > p;
+ p.reserve( sorted_U.size() );
+ for( auto g : sorted_U )
+  p.push_back( & v_variables[ g ] );
+
+ auto local = [ & sorted_U ]( Index g ) {
+  return( Index( std::lower_bound( sorted_U.begin() , sorted_U.end() , g )
+		 - sorted_U.begin() ) );
+  };
+
+ // translate the mappings global -> local position in the subset; a mapping
+ // that reduces to the identity stays implicit (empty), keeping the
+ // dense/legacy serialize byte-identical. Note that an absent AssetVarIndex
+ // (global identity, asset a <-> variable a) always translates to the local
+ // identity: the identity block 0..na-1 sorts first in U, so local( a ) == a.
+ std::vector< Index > lavi , lbvi;
+ if( ! gavi.empty() ) {
+  lavi.reserve( na );
+  for( auto g : gavi )
+   lavi.push_back( local( g ) );
+  bool identity = true;
+  for( Index a = 0 ; a < lavi.size() ; ++a )
+   if( lavi[ a ] != a ) { identity = false; break; }
+  if( identity )
+   lavi.clear();
+  }
+ lbvi.reserve( gbvi.size() );
+ for( auto g : gbvi )
+  lbvi.push_back( local( g ) );
+
+ f->set_variables( std::move( p ) );
+ f->set_asset_variable_indices( std::move( lavi ) );
+ f->set_asset_baseline_variable_indices( std::move( lbvi ) );
+
+ }  // end( InvestmentBlock::wire_component_actives )
+
+/*--------------------------------------------------------------------------*/
+
+bool InvestmentBlock::expand_stochastic_template(
+                       const netCDF::NcGroup & grp ,
+                       const netCDF::NcGroup & root , Index k ,
+                       Index & num_components , bool & all_unit_weights )
+{
+ // a group whose "InnerBlock" is a StochasticBlock is a TEMPLATE: it expands
+ // into one component per scenario of its ScenarioGenerator (looked up in grp
+ // first, then at root), each carrying the inner materialized on that scenario
+ // and weighted by (probability) x (Weight). Shared by the Component_k loop and
+ // the legacy path, so a direct StochasticBlock inner expands like a Component_0.
+ const auto inner_grp = grp.getGroup( "InnerBlock" );
+ std::string inner_type;
+ if( ! inner_grp.isNull() ) {
+  auto att = inner_grp.getAtt( "type" );
+  if( ! att.isNull() )
+   att.getValues( inner_type );
+  }
+
+ if( inner_type != "StochasticBlock" )
+  return( false );   // not a template: let the caller handle grp its own way
+
+ auto gen_grp = grp.getGroup( "ScenarioGenerator" );
+ if( gen_grp.isNull() )
+  gen_grp = root.getGroup( "ScenarioGenerator" );
+ if( gen_grp.isNull() )
+  throw( std::logic_error( "InvestmentBlock::deserialize: Component_" +
+	 std::to_string( k ) + " has a StochasticBlock inner Block but no "
+	 "'ScenarioGenerator' group was found, neither in the component "
+	 "nor at the root of the InvestmentBlock." ) );
+
+ std::unique_ptr< ScenarioGenerator >
+  generator( ScenarioGenerator::new_ScenarioGenerator( gen_grp ) );
+ if( ! generator )
+  throw( std::logic_error( "InvestmentBlock::deserialize: it was not "
+	 "possible to create the ScenarioGenerator of Component_" +
+	 std::to_string( k ) + "." ) );
+
+ generator->init_representative_pool();
+
+ // Walk the pool with next_scenario(), as every other ScenarioGenerator
+ // consumer does (SDDPBlock, TwoStageStochasticBlock). NOT get_support_size():
+ // that is INFScenario for a continuous/multi-stage generator (not enumerable)
+ // -- an infinite-support generator must be reduced upstream to a finite pool.
+ Index added = 0;
+ do {
+  // a fresh StochasticBlock per scenario (set_data() rewrites the inner IN
+  // PLACE, so a shared one would leave every scenario with the last one's data)
+  std::unique_ptr< Block > sb_block( Block::new_Block( inner_grp , this ) );
+  auto sb = dynamic_cast< StochasticBlock * >( sb_block.get() );
+  if( ! sb )
+   throw( std::logic_error( "InvestmentBlock::deserialize: it was not "
+	  "possible to create the StochasticBlock of Component_" +
+	  std::to_string( k ) + "." ) );
+
+  const auto scenario = generator->get_current_scenario();
+  const auto probability = generator->get_current_scenario_probability();
+  const std::vector< double > data( scenario.begin() , scenario.end() );
+  sb->set_data( data );
+
+  auto inner_raw = sb->get_inner_block();
+  if( ! inner_raw )
+   throw( std::logic_error( "InvestmentBlock::deserialize: the "
+	  "StochasticBlock of Component_" + std::to_string( k ) +
+	  " has no inner Block." ) );
+  sb->set_inner_block( nullptr , false );   // detach, do not destroy
+
+  // once detached, inner is owned by nobody until f_s->deserialize() adopts it
+  // as its last act; hold it so a throw in between (bad Weight/AssetType/...)
+  // frees the subtree instead of leaking it. Release only after adoption.
+  std::unique_ptr< Block > inner( inner_raw );
+
+  auto f_s = std::make_unique< InvestmentFunction >();
+  f_s->deserialize( grp , inner.get() );  // the template's data + THIS inner
+  inner.release();                        // adopted by f_s
+  wire_component_actives( f_s.get() , k );
+
+  // weight = Weight (period discount) x scenario probability. add_component()
+  // adopts f_s on success and deletes it on failure (weight <= 0), so release
+  // BEFORE the call or the unique_ptr would double-free on the throw path.
+  const auto weight = f_s->get_weight() * probability;
+  add_component( f_s.release() , weight );
+  if( weight != 1.0 )
+   all_unit_weights = false;
+  ++num_components;
+  ++added;
+  }
+ while( generator->next_scenario() );
+
+ // an empty pool would leave 0 components (a degenerate InvestmentBlock with a
+ // null objective) -- fail loud, as SDDPBlock does on an empty scenario pool
+ if( added == 0 )
+  throw( std::logic_error( "InvestmentBlock::deserialize: the ScenarioGenerator"
+	 " of Component_" + std::to_string( k ) + " produced no scenarios "
+	 "(empty representative pool); the expansion requires a non-empty, "
+	 "finite scenario set." ) );
+
+ return( true );
+
+ }  // end( InvestmentBlock::expand_stochastic_template )
+
 /*--------------------------------------------------------------------------*/
 
 void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
@@ -223,76 +399,31 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   // access by numeric suffix => deterministic order; the count is implicit
   // (the loop stops at the first missing Component_<k> group)
   Index num_components = 0;
+  Index num_stochastic = 0;   // components expanded out of a StochasticBlock
   bool all_unit_weights = true;
 
-  for( Index k = 0 ; ; ++k ) {
+  Index k = 0;   // survives the loop: it is the count of consecutive
+                 // Component_<k> groups read, checked against the total below
+  for( ; ; ++k ) {
    auto grp_k = group.getGroup( "Component_" + std::to_string( k ) );
    if( grp_k.isNull() )
     break;
+
+   // a component whose inner is a StochasticBlock is a TEMPLATE: it expands
+   // into one component per scenario (shared helper, see below). The template
+   // itself is not a component, so on success skip to the next Component_k.
+   if( expand_stochastic_template( grp_k , group , k ,
+                                   num_components , all_unit_weights ) ) {
+    ++num_stochastic;
+    continue;
+    }
 
    auto f_k = new InvestmentFunction();
    try {   // f_k (and its inner Block) must not leak on a rejected file:
            // Block::new_Block swallows the exception and returns nullptr
    f_k->deserialize( grp_k );   // no actives yet: the mappings stay GLOBAL,
                                 // as the file speaks (range-checked below)
-
-   // derive the component's active subset from the file's global mappings:
-   // U = sorted union of the asset variables (identity 0..NumAssets-1 when
-   // AssetVarIndex is absent) and the baseline variables. Sorted order =>
-   // the BundleSolver increasing-union-order rule holds for the per-period
-   // chain layout. A full-identity component degrades to the dense wiring,
-   // byte-identical to the historical behaviour.
-   Index na = 0;
-   deserialize_dim( grp_k , "NumAssets" , na );
-   const auto & gavi = f_k->get_asset_variable_indices();
-   const auto & gbvi = f_k->get_asset_baseline_variable_indices();
-   std::set< Index > U;
-   for( Index a = 0 ; a < na ; ++a )
-    U.insert( gavi.empty() ? a : gavi[ a ] );
-   U.insert( gbvi.begin() , gbvi.end() );
-   for( auto g : U )
-    if( g >= v_variables.size() )
-     throw( std::logic_error( "InvestmentBlock::deserialize: variable index "
-	    + std::to_string( g ) + " of Component_" + std::to_string( k ) +
-	    " is out of range (the root has " +
-	    std::to_string( v_variables.size() ) + " design variables)." ) );
-
-   if( ! U.empty() ) {
-    const std::vector< Index > sorted_U( U.begin() , U.end() );
-    std::vector< ColVariable * > p;
-    p.reserve( sorted_U.size() );
-    for( auto g : sorted_U )
-     p.push_back( & v_variables[ g ] );
-    auto local = [ & sorted_U ]( Index g ) {
-     return( Index( std::lower_bound( sorted_U.begin() , sorted_U.end() , g )
-		    - sorted_U.begin() ) );
-     };
-    // translate the mappings global -> local position in the subset; a
-    // mapping that reduces to the identity stays implicit (empty), keeping
-    // the dense/legacy serialize byte-identical. Note that an absent
-    // AssetVarIndex (global identity, asset a <-> variable a) always
-    // translates to the local identity: the identity block 0..na-1 sorts
-    // first in U, so local( a ) == a.
-    std::vector< Index > lavi , lbvi;
-    if( ! gavi.empty() ) {
-     lavi.reserve( na );
-     for( auto g : gavi )
-      lavi.push_back( local( g ) );
-     bool identity = true;
-     for( Index a = 0 ; a < lavi.size() ; ++a )
-      if( lavi[ a ] != a ) { identity = false; break; }
-     if( identity )
-      lavi.clear();
-     }
-    lbvi.reserve( gbvi.size() );
-    for( auto g : gbvi )
-     lbvi.push_back( local( g ) );
-    f_k->set_variables( std::move( p ) );
-    f_k->set_asset_variable_indices( std::move( lavi ) );
-    f_k->set_asset_baseline_variable_indices( std::move( lbvi ) );
-    }
-   // U empty (no assets): add_component below wires ALL the design
-   // variables, as the historical behaviour did
+   wire_component_actives( f_k , k );
    }
    catch( ... ) {
     delete f_k;
@@ -304,6 +435,41 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     all_unit_weights = false;
    ++num_components;
    }
+
+  // the scan stopped at the first missing index k; a Component_<j> with j > k
+  // would be silently dropped. Order is irrelevant (chaining binds by global
+  // variable index, not by position), so this is a completeness check: count
+  // the Component_* groups and require they be exactly the k consecutive ones
+  // read -- fail loud on a gap, as every count-guarded deserializer does.
+  Index n_component_groups = 0;
+  for( const auto & named : group.getGroups() ) {
+   const std::string & nm = named.first;
+   if( ( nm.rfind( "Component_" , 0 ) == 0 ) &&
+       ( nm.size() > 10 ) && std::isdigit( (unsigned char) nm[ 10 ] ) )
+    ++n_component_groups;
+   }
+  if( n_component_groups != k ) {
+   // find the first orphan index to name it in the message
+   std::string orphan;
+   for( Index j = k + 1 ; orphan.empty() &&
+	  ( j <= k + n_component_groups ) ; ++j )
+    if( ! group.getGroup( "Component_" + std::to_string( j ) ).isNull() )
+     orphan = "Component_" + std::to_string( j );
+   throw( std::logic_error( "InvestmentBlock::deserialize: a gap in the "
+	  "Component_ numbering was found -- the scan loaded " +
+	  std::to_string( k ) + " consecutive components (Component_0.." +
+	  std::to_string( k ? k - 1 : 0 ) + ") but the group holds " +
+	  std::to_string( n_component_groups ) + " Component_* groups" +
+	  ( orphan.empty() ? "" : " (e.g. " + orphan + " is unreachable)" ) +
+	  ". Number the components consecutively from 0." ) );
+   }
+
+  // a ScenarioGenerator at the root with no StochasticBlock to feed is a
+  // misunderstanding of the format, not a harmless extra: fail loud
+  if( ( ! num_stochastic ) && ( ! group.getGroup( "ScenarioGenerator" ).isNull() ) )
+   throw( std::logic_error( "InvestmentBlock::deserialize: a "
+	  "'ScenarioGenerator' group is present, but no component has a "
+	  "StochasticBlock inner Block to expand with it." ) );
 
   // guardrail: K > 1 components all at the default weight 1.0 almost always
   // means the per-component weights were forgotten (a weighted expectation
@@ -317,6 +483,31 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   Block::deserialize( group );
   return;
   }
+
+ // ---- legacy single-inner path ----
+ // a StochasticBlock as the direct inner is a template too: expand it exactly
+ // as a Component_0 one, only without the wrapper.
+ {
+  Index num_components = 0;
+  bool all_unit_weights = true;
+  if( expand_stochastic_template( group , group , 0 ,
+                                  num_components , all_unit_weights ) ) {
+   if( ( num_components > 1 ) && all_unit_weights )
+    std::cerr << "InvestmentBlock::deserialize: WARNING - " << num_components
+              << " components all have weight 1.0; if these are "
+                 "scenarios/periods of a weighted expectation, set a "
+                 "per-component 'Weight' (probability x discount)." << std::endl;
+   Block::deserialize( group );
+   return;
+   }
+
+  // nothing was expanded: a root 'ScenarioGenerator' has nothing to feed --
+  // reject it, symmetrically with the disaggregated branch above.
+  if( ! group.getGroup( "ScenarioGenerator" ).isNull() )
+   throw( std::logic_error( "InvestmentBlock::deserialize: a "
+	  "'ScenarioGenerator' group is present, but the inner Block is not a "
+	  "StochasticBlock to expand with it." ) );
+ }
 
  // ---- legacy single-component path (unchanged behaviour) ----
  auto investment_function = new InvestmentFunction();

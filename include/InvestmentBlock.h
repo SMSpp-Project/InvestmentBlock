@@ -772,6 +772,48 @@ protected:
  private:
 
 /*--------------------------------------------------------------------------*/
+/*-------------------------- PRIVATE METHODS -------------------------------*/
+/*--------------------------------------------------------------------------*/
+
+ /// wires a just-deserialized component to its subset of design Variable
+ /** Derives the active set of \p f from its (still GLOBAL, as the file
+  * speaks) mappings -- U = sorted union of the asset variables and of the
+  * baseline variables -- wires the actives to v_variables[ U ] and
+  * translates the mappings to LOCAL positions in that subset. A component
+  * whose union is the whole design array keeps the dense wiring, and one
+  * with no assets is left alone (add_component() then wires all of them),
+  * both byte-identically to the historical behaviour.
+  *
+  * @param f the component, already deserialized;
+  * @param k its index, for the error messages. */
+
+ void wire_component_actives( InvestmentFunction * f , Index k );
+
+/*--------------------------------------------------------------------------*/
+
+ /// expands a StochasticBlock template group into one component per scenario
+ /** If the "InnerBlock" of \p grp is a StochasticBlock, treats \p grp as a
+  * TEMPLATE: builds its ScenarioGenerator (looked up in \p grp first, then at
+  * \p root), and for each scenario materializes the inner Block, wraps it in a
+  * fresh InvestmentFunction (deserialized from \p grp with that inner), wires
+  * its actives and adds it as a component weighted by
+  * (scenario probability) x (the template's own Weight). Returns true and
+  * increments \p num_components accordingly; returns false (adding nothing) if
+  * the inner is not a StochasticBlock, so the caller can fall through to the
+  * ordinary component / legacy handling.
+  *
+  * @param grp the component (or root) group that may hold the template;
+  * @param root the InvestmentBlock root group, for the generator fallback;
+  * @param k the template index, for the error messages and actives wiring;
+  * @param num_components incremented by the number of scenarios added;
+  * @param all_unit_weights cleared if any added weight differs from 1.0. */
+
+ bool expand_stochastic_template( const netCDF::NcGroup & grp ,
+                                  const netCDF::NcGroup & root , Index k ,
+                                  Index & num_components ,
+                                  bool & all_unit_weights );
+
+/*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE FIELDS --------------------------------*/
 /*--------------------------------------------------------------------------*/
 

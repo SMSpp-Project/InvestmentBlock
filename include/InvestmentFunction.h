@@ -418,6 +418,31 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
+ /// de-serialize taking the inner Block from outside
+ /** As deserialize( group , issueMod ), except that the inner Block is NOT
+  * created out of the 'Block' sub-group: the given \p inner is used instead
+  * (and must be a UCBlock or an SDDPBlock, as usual). Ownership of \p inner
+  * is taken, exactly as for an inner Block read from the file.
+  *
+  * This is what the StochasticBlock expansion of InvestmentBlock uses: the
+  * 'Block' sub-group there describes a StochasticBlock *template*, which the
+  * InvestmentBlock materializes one scenario at a time; each resulting inner
+  * Block is then handed to the component built out of this same group. */
+
+ void deserialize( const netCDF::NcGroup & group , Block * inner ,
+                   ModParam issueMod = eNoMod ) {
+  f_external_inner_block = inner;
+  try {
+   deserialize( group , issueMod );
+   }
+  catch( ... ) {
+   f_external_inner_block = nullptr;
+   throw;
+   }
+  f_external_inner_block = nullptr;
+  }
+
+/*--------------------------------------------------------------------------*/
  /// destructor of InvestmentFunction
  /** Destructor of InvestmentFunction. It destroys the inner Block (if any),
   * releasing its memory. If the inner Block should not be destroyed then,
@@ -1883,6 +1908,13 @@ class InvestmentFunction : public C05Function , public Block {
   * share the same active variables while each invests only in some of them. */
 
  std::vector< Index > v_asset_baseline_var_index;
+
+ /// inner Block provided from outside for the next deserialize(), if any
+ /** Set (and reset) by deserialize( group , inner , issueMod ) only: while
+  * it is non-null, deserialize() takes this as the inner Block instead of
+  * creating one out of the 'Block' sub-group. */
+
+ Block * f_external_inner_block = nullptr;
  ///< maps each asset to the active variable providing its baseline
  /**< When empty (the default) the baseline of each asset is the
   * InstalledQuantity datum (single-period, legacy). When set,

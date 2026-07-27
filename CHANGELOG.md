@@ -45,6 +45,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix_design_variable()` on InvestmentBlock (fix/unfix one design variable,
   with Modification)
 
+- StochasticBlock components: an `InnerBlock` group that is a `StochasticBlock`
+  is a template that deserialize expands into one component per scenario of its
+  ScenarioGenerator (looked up in the component first, then at the root), each
+  carrying its own inner Block materialized on that scenario and weighted by
+  (scenario probability) x (`Weight`). This works both inside a `Component_<k>`
+  and as the InvestmentBlock's direct inner (no `Component_0`) — the two speak
+  the same template format and expand identically. A StochasticBlock without a
+  ScenarioGenerator, and a ScenarioGenerator with no StochasticBlock to expand
+  (in either the disaggregated or the legacy branch), are both rejected
+
+- `InvestmentFunction::deserialize( group , inner )`, which takes the inner
+  Block from outside instead of creating it out of the `InnerBlock` group
+  (this is what the expansion above hands each scenario component)
+
 - `InvestmentBlockSolution` now carries one inner Solution per component,
   serialized as `InnerSolution_<k>` groups with a `NumInnerSolutions`
   round-trip guardrail; the legacy single-`InnerSolution` format is unchanged
@@ -100,6 +114,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - latent out-of-bounds read in the vertical linearization when a component
   had more active variables than assets
+
+- a gap in the `Component_<k>` numbering (e.g. `Component_0` + `Component_2`
+  with no `Component_1`) is now rejected instead of silently dropping every
+  component past the gap; the count of `Component_*` groups must equal the
+  consecutive indices actually read
+
+- the scenario expansion now walks the pool with `next_scenario()` instead of
+  sizing the loop with `get_support_size()`, which returns INFScenario (an
+  unbounded loop) for a continuous/multi-stage generator; an empty scenario
+  pool is rejected rather than producing a degenerate component-less block
+
+- memory leak of a scenario's inner Block when the per-scenario
+  InvestmentFunction deserialize threw after the inner had been detached from
+  its StochasticBlock shell but before being adopted
 
 
 ## [0.1.1] - 2025-12-12

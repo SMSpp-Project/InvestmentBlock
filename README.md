@@ -25,7 +25,14 @@ defined in `UCBlock`, like generating units and transmission lines.
 > master with no opt-in, and serialize re-translates back to global indices.
 > Components may all share the same design variables (multi-scenario), or
 > each own its period's block while reading the previous one as baseline
-> (multi-period). The implicit `Constraints_*` of a component are per-ASSET
+> (multi-period). An inner Block that is a `StochasticBlock` is a template:
+> deserialize expands it into one component per scenario of its
+> `ScenarioGenerator` (looked up in the component first, then at the root),
+> each with its own inner materialized on that scenario and weighted by
+> probability times the component's `Weight` — so a file of T such templates
+> is a T periods x K scenarios problem. This works both inside a `Component_<k>`
+> and as the InvestmentBlock's *direct* inner (no `Component_0`), which expands
+> identically. The implicit `Constraints_*` of a component are per-ASSET
 > (column j applies to the variable of asset j through the mapping);
 > inter-period constraints between the design variables belong at the root.
 > Solving with two or more components needs an OSiMP master, as the default

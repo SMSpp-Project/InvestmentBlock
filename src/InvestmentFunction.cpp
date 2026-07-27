@@ -415,7 +415,21 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
   throw( std::logic_error( "InvestmentFunction::deserialize: the '" +
                            BLOCK_NAME + "' group must be present." ) );
 
- if( f_num_sub_blocks <= 1 ) {
+ if( f_external_inner_block ) {
+
+  // The inner Block is provided from outside (StochasticBlock expansion, see
+  // deserialize( group , inner , issueMod )): the 'Block' sub-group, which
+  // there describes the scenario template, is NOT read.
+
+  if( ! ( dynamic_cast< SDDPBlock * >( f_external_inner_block ) ||
+          dynamic_cast< UCBlock * >( f_external_inner_block ) ) )
+   throw( std::invalid_argument( "InvestmentFunction::deserialize: the given "
+                                 "inner Block is neither an SDDPBlock nor a "
+                                 "UCBlock." ) );
+
+  set_inner_block( f_external_inner_block );
+  }
+ else if( f_num_sub_blocks <= 1 ) {
 
   // Single-Block path (legacy): create one inner Block, which may be either
   // an SDDPBlock or a UCBlock.
