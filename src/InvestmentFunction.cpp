@@ -394,14 +394,17 @@ void InvestmentFunction::set_default_inner_Block_BlockConfig() {
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
- for( auto inner_block : v_Block ) {
-  if( ! inner_block )
-   continue;
-  auto solver_config = new RBlockSolverConfig( inner_block );
-  solver_config->clear();
-  solver_config->apply( inner_block );
-  delete solver_config;
-  }
+ // a cleared BlockSolverConfig only removes the Solver it registered
+ // itself [see BlockSolverConfig::apply()]: resetting to "no Solver at
+ // all", whoever registered them, is done directly on the Block tree
+ std::function< void( Block * ) > wipe = [ & wipe ]( Block * b ) {
+  b->unregister_Solvers( true );
+  for( Block::Index i = 0 ; i < b->get_number_nested_Blocks() ; ++i )
+   wipe( b->get_nested_Block( i ) );
+  };
+ for( auto inner_block : v_Block )
+  if( inner_block )
+   wipe( inner_block );
 }
 
 /*--------------------------------------------------------------------------*/
