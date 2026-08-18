@@ -116,6 +116,10 @@ InvestmentFunction::InvestmentFunction
 /*--------------------------------------------------------------------------*/
 
 InvestmentFunction::~InvestmentFunction() {
+ // remove the Solver that this InvestmentFunction registered in the inner
+ // Blocks, then delete them
+ unconfigure_inner_Block_Solver();
+
  for( auto block : v_Block )
   delete block;
 }
@@ -394,14 +398,19 @@ void InvestmentFunction::set_default_inner_Block_BlockConfig() {
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
- for( auto inner_block : v_Block ) {
-  if( ! inner_block )
-   continue;
-  auto solver_config = new RBlockSolverConfig( inner_block );
-  solver_config->clear();
-  solver_config->apply( inner_block );
-  delete solver_config;
+ unconfigure_inner_Block_Solver();
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::unconfigure_inner_Block_Solver() {
+ for( Index i = 0 ; i < v_BSC.size() ; ++i ) {
+  if( v_BSC[ i ] && ( i < v_Block.size() ) && v_Block[ i ] )
+   v_BSC[ i ]->apply( v_Block[ i ] );
+  delete v_BSC[ i ];
   }
+
+ v_BSC.clear();
 }
 
 /*--------------------------------------------------------------------------*/
@@ -471,10 +480,20 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
      }
     else
      if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
-      // A BlockSolverConfig for the inner Block has been provided. Apply
-      // it to every (replica) inner Block.
-      for( auto inner_block : v_Block )
-       bsc->apply( inner_block );
+      // A BlockSolverConfig for the inner Block has been provided. Apply it
+      // to every (replica) inner Block through a private clone per Block,
+      // which then remains, clear()-ed, as the cleanup object of that Block:
+      // having done the apply() itself, it records the Solver registered
+      // there and its cleared apply() removes exactly them [see
+      // BlockSolverConfig::apply()]
+      unconfigure_inner_Block_Solver();   // clean up for the new arrival
+      v_BSC.reserve( v_Block.size() );
+      for( auto inner_block : v_Block ) {
+       auto cBSC = bsc->clone();
+       cBSC->apply( inner_block );
+       cBSC->clear();
+       v_BSC.push_back( cBSC );
+       }
       }
      else
       // An invalid Configuration has been provided.
