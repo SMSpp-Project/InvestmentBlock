@@ -47,6 +47,9 @@ namespace SMSpp_di_unipi_it
 
  class SDDPBlock;              // forward declaration of SDDPBlock
 
+ class TwoStageStochasticBlock;   // forward declaration of
+                                  // TwoStageStochasticBlock
+
  class SDDPSolver;             // forward declaration of SDDPSolver
 
  class UCBlock;                // forward declaration of UClock
@@ -2255,6 +2258,22 @@ class InvestmentFunction : public C05Function , public Block {
   *         return nullptr. */
 
  SDDPBlock * get_sddp_block( void ) const;
+
+/*--------------------------------------------------------------------------*/
+ /// the inner Block of this function, if it is a TwoStageStochasticBlock
+ /** If the inner Block of this function is a TwoStageStochasticBlock, it
+  * returns a pointer to it. Otherwise, it returns nullptr.
+  *
+  * A TwoStageStochasticBlock as the inner Block is the "Benders form" of a
+  * two-stage stochastic problem: the here-and-now Variable are the ones of
+  * this InvestmentFunction, hence they exist in a single copy and outside
+  * the scenarios, rather than being replicated in each of them and tied by
+  * the non-anticipativity Constraint of the extensive form.
+  *
+  * @return A pointer to the TwoStageStochasticBlock of this
+  *         InvestmentFunction, or nullptr if the inner Block is not one. */
+
+ TwoStageStochasticBlock * get_tssb_block( void ) const;
 
 /*--------------------------------------------------------------------------*/
  /// reset the BlockConfig of the inner Block to the default one

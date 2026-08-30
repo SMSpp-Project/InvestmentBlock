@@ -28,6 +28,7 @@
 #include "IntermittentUnitBlock.h"
 #include "InvestmentFunction.h"
 #include "SDDPBlock.h"
+#include "TwoStageStochasticBlock.h"
 // Solution-output utility lives under tools/sddp_solver/. It is purely
 // optional: when its header is on the include path (e.g. when the tool
 // makefile passes -I.../tools/sddp_solver) the f_output_solution path
@@ -348,9 +349,11 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                             BLOCK_NAME + "'." ) );
 
   if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
+          dynamic_cast< TwoStageStochasticBlock * >( inner_block ) ||
           dynamic_cast< UCBlock * >( inner_block ) ) )
    throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
-                            "Block is neither an SDDPBlock nor a UCBlock." ) );
+                            "Block is neither an SDDPBlock, nor a "
+                            "TwoStageStochasticBlock, nor a UCBlock." ) );
 
   set_inner_block( inner_block );
   }
@@ -1078,7 +1081,12 @@ int InvestmentFunction::compute( bool changedvars ) {
  int status;
  if( get_sddp_block() )
   status = compute_SDDPBlock( changedvars , owned );
- else if( get_ucblock() )
+ else if( get_ucblock() || get_tssb_block() )
+  // the same computation serves both: fix the investment in the inner
+  // Block, solve it and read value and linearization off its Solver. What a
+  // TwoStageStochasticBlock adds is only that the investment is written into
+  // each scenario, which update_blocks() takes care of, and that the value
+  // it returns is already the expected one over the scenarios
   status = compute_UCBlock( changedvars , owned );
  else {
   if( ! owned )
@@ -2182,6 +2190,12 @@ int InvestmentFunction::get_inner_block_objective_sense() const {
 UCBlock * InvestmentFunction::get_ucblock( Index stage , Index i ) const {
  if( auto ucblock = get_ucblock() )
   return( ucblock );
+ // in a TwoStageStochasticBlock the here-and-now Variable live in the Block
+ // the first-stage AbstractPath are resolved against, which for a plain one
+ // is the scenario sub-Block itself and for a nested one is the sub-Block
+ // the nesting descends to
+ if( const auto tssb = get_tssb_block() )
+  return( dynamic_cast< UCBlock * >( tssb->get_first_stage_block( i ) ) );
  if( v_Block.size() > 1 )
   assert( i < v_Block.size() );
  else
@@ -2207,6 +2221,13 @@ SDDPBlock * InvestmentFunction::get_sddp_block() const {
 
 /*--------------------------------------------------------------------------*/
 
+TwoStageStochasticBlock * InvestmentFunction::get_tssb_block() const {
+ assert( ! v_Block.empty() );
+ return( dynamic_cast< TwoStageStochasticBlock * >( v_Block.front() ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
 SDDPBlock * InvestmentFunction::get_sddp_block( Index i ) const {
  if( i >= v_Block.size() )
   return( nullptr );
@@ -2217,6 +2238,16 @@ SDDPBlock * InvestmentFunction::get_sddp_block( Index i ) const {
 
 CDASolver * InvestmentFunction::get_ucblock_solver( Index stage ,
                                                     Index i ) const {
+ // for a TwoStageStochasticBlock the Solver to drive is the one of the
+ // TwoStageStochasticBlock itself, which solves all the scenarios at once,
+ // not the one of any single scenario
+ if( const auto tssb = get_tssb_block() ) {
+  if( ! tssb->get_registered_solvers().empty() )
+   return( dynamic_cast< CDASolver * >
+           ( tssb->get_registered_solvers().front() ) );
+  return( nullptr );
+  }
+
  if( auto ucblock = get_ucblock( stage , i ) )
   if( ! ucblock->get_registered_solvers().empty() )
    return( dynamic_cast< CDASolver * >
@@ -3114,6 +3145,10 @@ void InvestmentFunction::update_blocks() {
  auto num_sub_blocks_per_stage = f_num_sub_blocks_per_stage;
  if( get_ucblock() )
   num_sub_blocks_per_stage = 1;
+ else if( const auto tssb = get_tssb_block() )
+  // the investment is the same in every scenario, being here-and-now: it is
+  // written into each of them
+  num_sub_blocks_per_stage = tssb->get_number_scenarios();
 
  for( Index i = 0 ; i < num_sub_blocks_per_stage ; ++i ) {
   update_unit_blocks( i , block_indices , block_investment );

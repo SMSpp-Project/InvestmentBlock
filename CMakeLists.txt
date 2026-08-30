@@ -55,6 +55,7 @@ include(BuildType)
 # look for the system-installed libraries.
 if (NOT hasParent)
     find_package(SDDPBlock REQUIRED)
+    find_package(TwoStageStochasticBlock REQUIRED)
     find_package(UCBlock REQUIRED)
 endif ()
 
@@ -105,6 +106,7 @@ target_include_directories(
 # on this library.
 target_link_libraries(${modName} PUBLIC
         ${modNamespace}::SDDPBlock
+        ${modNamespace}::TwoStageStochasticBlock
         ${modNamespace}::UCBlock)
 
 # This alias is defined so that executables in this same project can use
