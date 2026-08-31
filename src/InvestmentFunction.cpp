@@ -2889,13 +2889,15 @@ void InvestmentFunction::update_linearization( Index sub_block_index ) {
   }
  } // end( for each asset )
 
- CDASolver * solver = nullptr;
-
- if( get_sddp_block() )
-  solver = get_solver< CDASolver >( v_greedy_solvers[ sub_block_index ] );
- else
-  solver = dynamic_cast< CDASolver * >
-   ( get_ucblock()->get_registered_solvers().front() );
+ // which Solver produced the solution is already told by the state: the
+ // greedy ones are built only in the SDDPBlock branch of compute(), which
+ // has dispatched upstream, so an empty v_greedy_solvers *is* the answer.
+ // Asking the type again would leave out any other inner Block, a
+ // TwoStageStochasticBlock in particular, for which both casts are null
+ auto * solver = v_greedy_solvers.empty()
+                 ? get_ucblock_solver( 0 , sub_block_index )
+                 : get_solver< CDASolver >( v_greedy_solvers[
+						      sub_block_index ] );
 
  // Retrieve the dual solution
 
