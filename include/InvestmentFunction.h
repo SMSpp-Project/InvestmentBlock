@@ -41,6 +41,8 @@ namespace SMSpp_di_unipi_it
 
  class BendersBFunction;       // forward declaration of BendersBFunction
 
+ class BlockSolverConfig;      // forward declaration of BlockSolverConfig
+
  class IntermittentUnitBlock;  // forward declaration of IntermittentUnitBlock
 
  class SDDPBlock;              // forward declaration of SDDPBlock
@@ -613,6 +615,10 @@ class InvestmentFunction : public C05Function , public Block {
       ( ! destroy_previous_block ) )
    return; // the given Block is already here; silently return
 
+  // un-do the BlockSolverConfig-uration of the outgoing inner Blocks, i.e.,
+  // remove the Solver that this InvestmentFunction has registered there
+  unconfigure_inner_Block_Solver();
+
   if( destroy_previous_block )
    for( auto block : v_Block )
     delete block;
@@ -657,6 +663,10 @@ class InvestmentFunction : public C05Function , public Block {
    if( blocks_are_here )
     return; // the given Blocks are already here; silently return
    }
+
+  // un-do the BlockSolverConfig-uration of the outgoing inner Blocks, i.e.,
+  // remove the Solver that this InvestmentFunction has registered there
+  unconfigure_inner_Block_Solver();
 
   if( destroy_previous_blocks )
    for( auto block : v_Block )
@@ -1824,6 +1834,18 @@ class InvestmentFunction : public C05Function , public Block {
 
  VarVector v_x;  ///< the pointers to the active variables x
 
+ std::vector< BlockSolverConfig * > v_BSC;
+ ///< the clear()-ed BlockSolverConfig that configured each inner Block
+ /**< For each (replica) inner Block, the clone of the BlockSolverConfig that
+  * has actually been apply()-ed to it, kept clear()-ed: apply()-ing it
+  * removes all and only the Solver that it has registered there [see
+  * BlockSolverConfig::apply()], which is how the configuration is un-done
+  * when the inner Blocks are released, replaced or destroyed. A clone per
+  * Block is necessary because the same BlockSolverConfig is apply()-ed to
+  * every replica, while the record of the registered Solver that its cleared
+  * apply() uses is per-Block. Empty if the inner Blocks have not been
+  * BlockSolverConfig-ured. */
+
  bool f_blocks_are_updated = false;
  ///< indicates whether the sub-Blocks are updated
 
@@ -2445,6 +2467,17 @@ class InvestmentFunction : public C05Function , public Block {
  TwoStageStochasticBlock * get_tssb_block( void ) const;
 
 /*--------------------------------------------------------------------------*/
+ /// the number of sub-Blocks that carry the investment
+ /** The investment is here-and-now, hence the same in all the sub-Blocks
+  * that carry it: this is how many they are, one for a plain UCBlock, one
+  * per scenario for a TwoStageStochasticBlock, the configured number for an
+  * SDDPBlock. Writing the investment and reading the linearization back have
+  * to run over exactly the same set, or the value and its linearization stop
+  * describing the same function. */
+
+ Index get_number_investment_sub_blocks( void ) const;
+
+/*--------------------------------------------------------------------------*/
  /// reset the BlockConfig of the inner Block to the default one
 
  void set_default_inner_Block_BlockConfig();
@@ -2453,6 +2486,16 @@ class InvestmentFunction : public C05Function , public Block {
  /// reset the BlockSolverConfig of the inner Block to the default one
 
  void set_default_inner_Block_BlockSolverConfig();
+
+/*--------------------------------------------------------------------------*/
+ /// remove the Solver that this InvestmentFunction registered in the Blocks
+ /** Applies to each (replica) inner Block the clear()-ed BlockSolverConfig
+  * that configured it [see v_BSC], i.e., un-registers and deletes all and
+  * only the Solver that this InvestmentFunction has registered there,
+  * leaving any other one alone; does nothing if the inner Blocks have not
+  * been BlockSolverConfig-ured. */
+
+ void unconfigure_inner_Block_Solver();
 
 /*--------------------------------------------------------------------------*/
  /// reset the configuration of the inner Block to the default one

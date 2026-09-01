@@ -125,6 +125,10 @@ InvestmentFunction::InvestmentFunction
 /*--------------------------------------------------------------------------*/
 
 InvestmentFunction::~InvestmentFunction() {
+ // remove the Solver that this InvestmentFunction registered in the inner
+ // Blocks, then delete them
+ unconfigure_inner_Block_Solver();
+
  for( auto block : v_Block )
   delete block;
 }
@@ -495,14 +499,19 @@ void InvestmentFunction::set_default_inner_Block_BlockConfig() {
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
- for( auto inner_block : v_Block ) {
-  if( ! inner_block )
-   continue;
-  auto solver_config = new RBlockSolverConfig( inner_block );
-  solver_config->clear();
-  solver_config->apply( inner_block );
-  delete solver_config;
+ unconfigure_inner_Block_Solver();
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::unconfigure_inner_Block_Solver() {
+ for( Index i = 0 ; i < v_BSC.size() ; ++i ) {
+  if( v_BSC[ i ] && ( i < v_Block.size() ) && v_Block[ i ] )
+   v_BSC[ i ]->apply( v_Block[ i ] );
+  delete v_BSC[ i ];
   }
+
+ v_BSC.clear();
 }
 
 /*--------------------------------------------------------------------------*/
@@ -572,10 +581,20 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
      }
     else
      if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
-      // A BlockSolverConfig for the inner Block has been provided. Apply
-      // it to every (replica) inner Block.
-      for( auto inner_block : v_Block )
-       bsc->apply( inner_block );
+      // A BlockSolverConfig for the inner Block has been provided. Apply it
+      // to every (replica) inner Block through a private clone per Block,
+      // which then remains, clear()-ed, as the cleanup object of that Block:
+      // having done the apply() itself, it records the Solver registered
+      // there and its cleared apply() removes exactly them [see
+      // BlockSolverConfig::apply()]
+      unconfigure_inner_Block_Solver();   // clean up for the new arrival
+      v_BSC.reserve( v_Block.size() );
+      for( auto inner_block : v_Block ) {
+       auto cBSC = bsc->clone();
+       cBSC->apply( inner_block );
+       cBSC->clear();
+       v_BSC.push_back( cBSC );
+       }
       }
      else
       // An invalid Configuration has been provided.
@@ -1263,7 +1282,16 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  if( f_compute_linearization ) {
   reset_linearization();
   try {
-   update_linearization( 0 );
+   // the value function is the sum of the contributions of the sub-Blocks
+   // that carry the investment, and so is its linearization: they have to be
+   // read one by one, exactly as update_blocks() writes the investment into
+   // each of them. With a single UCBlock inside there is one of them and the
+   // loop is the previous single call; with a TwoStageStochasticBlock there
+   // is one per scenario, all solved at once by the same Solver but each
+   // holding its own duals, and reading only the first one would return the
+   // investment cost alone wherever the other scenarios are the binding ones
+   for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+    update_linearization( i );
   }
   catch( const std::exception & e ) {
    // An error occurred while updating the linearization.
@@ -2964,13 +2992,15 @@ void InvestmentFunction::update_linearization( Index sub_block_index ) {
   }
  } // end( for each asset )
 
- CDASolver * solver = nullptr;
-
- if( get_sddp_block() )
-  solver = get_solver< CDASolver >( v_greedy_solvers[ sub_block_index ] );
- else
-  solver = dynamic_cast< CDASolver * >
-   ( get_ucblock()->get_registered_solvers().front() );
+ // which Solver produced the solution is already told by the state: the
+ // greedy ones are built only in the SDDPBlock branch of compute(), which
+ // has dispatched upstream, so an empty v_greedy_solvers *is* the answer.
+ // Asking the type again would leave out any other inner Block, a
+ // TwoStageStochasticBlock in particular, for which both casts are null
+ auto * solver = v_greedy_solvers.empty()
+                 ? get_ucblock_solver( 0 , sub_block_index )
+                 : get_solver< CDASolver >( v_greedy_solvers[
+						      sub_block_index ] );
 
  // Retrieve the dual solution
 
@@ -3198,15 +3228,7 @@ void InvestmentFunction::update_blocks() {
   }
  } // end( for each asset )
 
- auto num_sub_blocks_per_stage = f_num_sub_blocks_per_stage;
- if( get_ucblock() )
-  num_sub_blocks_per_stage = 1;
- else if( const auto tssb = get_tssb_block() )
-  // the investment is the same in every scenario, being here-and-now: it is
-  // written into each of them
-  num_sub_blocks_per_stage = tssb->get_number_scenarios();
-
- for( Index i = 0 ; i < num_sub_blocks_per_stage ; ++i ) {
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
   update_unit_blocks( i , block_indices , block_investment );
   update_network_blocks( i , line_indices , line_investment );
  }
@@ -3214,6 +3236,17 @@ void InvestmentFunction::update_blocks() {
  f_ignore_modifications = saved_f_ignore_modifications;
  f_blocks_are_updated = true;
 }  // end( InvestmentFunction::update_blocks )
+
+/*--------------------------------------------------------------------------*/
+
+Index InvestmentFunction::get_number_investment_sub_blocks( void ) const {
+ if( get_ucblock() )
+  return( 1 );
+ if( const auto tssb = get_tssb_block() )
+  // the investment is the same in every scenario, being here-and-now
+  return( tssb->get_number_scenarios() );
+ return( f_num_sub_blocks_per_stage );
+}  // end( InvestmentFunction::get_number_investment_sub_blocks )
 
 /*--------------------------------------------------------------------------*/
 
