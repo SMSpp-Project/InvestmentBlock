@@ -601,6 +601,23 @@ class InvestmentFunction : public C05Function , public Block {
   *        which means that the previous inner Block (if any) is destroyed and
   *        its allocated memory is released. */
 
+ /// returns the \p i-th inner Block of this InvestmentFunction
+ /** The inner Block are where the investment is realised, and the value
+  * function this InvestmentFunction computes is theirs: reading it is what
+  * any check on the linearization has to start from, since the Block is not
+  * a sub-Block of the InvestmentBlock and there is no other way to reach it.
+  *
+  * @param i the index of the inner Block.
+  *
+  * @return a pointer to the \p i-th inner Block, or nullptr if there is
+  *         none. */
+
+ Block * get_inner_block( Index i = 0 ) const {
+  return( i < v_Block.size() ? v_Block[ i ] : nullptr );
+  }
+
+/*--------------------------------------------------------------------------*/
+
  void set_inner_block( Block * block , bool destroy_previous_block = true )
  {
   if( ( v_Block.size() == 1 ) && ( block == v_Block.front() ) &&
@@ -2274,6 +2291,17 @@ class InvestmentFunction : public C05Function , public Block {
   *         InvestmentFunction, or nullptr if the inner Block is not one. */
 
  TwoStageStochasticBlock * get_tssb_block( void ) const;
+
+/*--------------------------------------------------------------------------*/
+ /// the number of sub-Blocks that carry the investment
+ /** The investment is here-and-now, hence the same in all the sub-Blocks
+  * that carry it: this is how many they are, one for a plain UCBlock, one
+  * per scenario for a TwoStageStochasticBlock, the configured number for an
+  * SDDPBlock. Writing the investment and reading the linearization back have
+  * to run over exactly the same set, or the value and its linearization stop
+  * describing the same function. */
+
+ Index get_number_investment_sub_blocks( void ) const;
 
 /*--------------------------------------------------------------------------*/
  /// reset the BlockConfig of the inner Block to the default one

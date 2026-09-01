@@ -1162,7 +1162,16 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  if( f_compute_linearization ) {
   reset_linearization();
   try {
-   update_linearization( 0 );
+   // the value function is the sum of the contributions of the sub-Blocks
+   // that carry the investment, and so is its linearization: they have to be
+   // read one by one, exactly as update_blocks() writes the investment into
+   // each of them. With a single UCBlock inside there is one of them and the
+   // loop is the previous single call; with a TwoStageStochasticBlock there
+   // is one per scenario, all solved at once by the same Solver but each
+   // holding its own duals, and reading only the first one would return the
+   // investment cost alone wherever the other scenarios are the binding ones
+   for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+    update_linearization( i );
   }
   catch( const std::exception & e ) {
    // An error occurred while updating the linearization.
@@ -3144,15 +3153,7 @@ void InvestmentFunction::update_blocks() {
   }
  } // end( for each asset )
 
- auto num_sub_blocks_per_stage = f_num_sub_blocks_per_stage;
- if( get_ucblock() )
-  num_sub_blocks_per_stage = 1;
- else if( const auto tssb = get_tssb_block() )
-  // the investment is the same in every scenario, being here-and-now: it is
-  // written into each of them
-  num_sub_blocks_per_stage = tssb->get_number_scenarios();
-
- for( Index i = 0 ; i < num_sub_blocks_per_stage ; ++i ) {
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
   update_unit_blocks( i , block_indices , block_investment );
   update_network_blocks( i , line_indices , line_investment );
  }
@@ -3160,6 +3161,17 @@ void InvestmentFunction::update_blocks() {
  f_ignore_modifications = saved_f_ignore_modifications;
  f_blocks_are_updated = true;
 }  // end( InvestmentFunction::update_blocks )
+
+/*--------------------------------------------------------------------------*/
+
+Index InvestmentFunction::get_number_investment_sub_blocks( void ) const {
+ if( get_ucblock() )
+  return( 1 );
+ if( const auto tssb = get_tssb_block() )
+  // the investment is the same in every scenario, being here-and-now
+  return( tssb->get_number_scenarios() );
+ return( f_num_sub_blocks_per_stage );
+}  // end( InvestmentFunction::get_number_investment_sub_blocks )
 
 /*--------------------------------------------------------------------------*/
 
