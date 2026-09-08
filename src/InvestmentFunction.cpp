@@ -2279,7 +2279,9 @@ UCBlock * InvestmentFunction::get_ucblock( Index stage , Index i ) const {
  // is the scenario sub-Block itself and for a nested one is the sub-Block
  // the nesting descends to
  if( const auto tssb = get_tssb_block() )
-  return( dynamic_cast< UCBlock * >( tssb->get_first_stage_block( i ) ) );
+  // every leaf of the scenario structure carries its own copy of the units
+  // the investment scales, and a nested one has more leaves than scenarios
+  return( dynamic_cast< UCBlock * >( tssb->get_leaf_block( i ) ) );
  if( v_Block.size() > 1 )
   assert( i < v_Block.size() );
  else
@@ -3243,8 +3245,10 @@ Index InvestmentFunction::get_number_investment_sub_blocks( void ) const {
  if( get_ucblock() )
   return( 1 );
  if( const auto tssb = get_tssb_block() )
-  // the investment is the same in every scenario, being here-and-now
-  return( tssb->get_number_scenarios() );
+  // the investment is the same in every leaf, being here-and-now, but it has
+  // to be written into each of them, and their number is not the number of
+  // scenarios once a scenario carries a subtree of its own
+  return( tssb->get_number_leaves() );
  return( f_num_sub_blocks_per_stage );
 }  // end( InvestmentFunction::get_number_investment_sub_blocks )
 
