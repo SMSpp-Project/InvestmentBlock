@@ -41,6 +41,8 @@ namespace SMSpp_di_unipi_it
 
  class BendersBFunction;       // forward declaration of BendersBFunction
 
+ class BlockSolverConfig;      // forward declaration of BlockSolverConfig
+
  class IntermittentUnitBlock;  // forward declaration of IntermittentUnitBlock
 
  class SDDPBlock;              // forward declaration of SDDPBlock
@@ -613,6 +615,10 @@ class InvestmentFunction : public C05Function , public Block {
       ( ! destroy_previous_block ) )
    return; // the given Block is already here; silently return
 
+  // un-do the BlockSolverConfig-uration of the outgoing inner Blocks, i.e.,
+  // remove the Solver that this InvestmentFunction has registered there
+  unconfigure_inner_Block_Solver();
+
   if( destroy_previous_block )
    for( auto block : v_Block )
     delete block;
@@ -657,6 +663,10 @@ class InvestmentFunction : public C05Function , public Block {
    if( blocks_are_here )
     return; // the given Blocks are already here; silently return
    }
+
+  // un-do the BlockSolverConfig-uration of the outgoing inner Blocks, i.e.,
+  // remove the Solver that this InvestmentFunction has registered there
+  unconfigure_inner_Block_Solver();
 
   if( destroy_previous_blocks )
    for( auto block : v_Block )
@@ -1824,6 +1834,18 @@ class InvestmentFunction : public C05Function , public Block {
 
  VarVector v_x;  ///< the pointers to the active variables x
 
+ std::vector< BlockSolverConfig * > v_BSC;
+ ///< the clear()-ed BlockSolverConfig that configured each inner Block
+ /**< For each (replica) inner Block, the clone of the BlockSolverConfig that
+  * has actually been apply()-ed to it, kept clear()-ed: apply()-ing it
+  * removes all and only the Solver that it has registered there [see
+  * BlockSolverConfig::apply()], which is how the configuration is un-done
+  * when the inner Blocks are released, replaced or destroyed. A clone per
+  * Block is necessary because the same BlockSolverConfig is apply()-ed to
+  * every replica, while the record of the registered Solver that its cleared
+  * apply() uses is per-Block. Empty if the inner Blocks have not been
+  * BlockSolverConfig-ured. */
+
  bool f_blocks_are_updated = false;
  ///< indicates whether the sub-Blocks are updated
 
@@ -1869,6 +1891,24 @@ class InvestmentFunction : public C05Function , public Block {
 
  bool f_has_diagonal_linearization = false;
  ///< a diagonal linearization is available
+
+ bool f_has_farkas_linearization = false;
+ ///< a vertical linearization out of an infeasibility certificate is available
+ /**< Set when the inner Block is proved infeasible and its Solver hands out
+  * the Farkas certificate of it. The coefficients of the cut are read off the
+  * Block exactly as the diagonal ones are, the certificate being written in
+  * the very place the optimal duals are; what tells the two apart is only
+  * this, and the constant, which for a vertical linearization is not built
+  * out of the value of the Function (there is none, the point being outside
+  * the domain) but out of f_farkas_value below. */
+
+ FunctionValue f_farkas_value = 0;
+ ///< the value of the infeasibility certificate at the current point
+ /**< The certificate reads F( x ) = w d + sum_j r_j b_j( x ), with w the dual
+  * ray, r the Farkas-consistent reduced costs and b the bounds; the inner
+  * Block is infeasible at x exactly when F( x ) > 0, and F( x ) <= 0 is the
+  * cut. F is affine in the design, so the cut is written as usual as
+  * alpha + g x <= 0 with g the coefficients and alpha = F( x ) - g x. */
 
  Index f_num_sub_blocks_per_stage = 1;
  ///< number of sub-Blocks per stage in SDDPBlock (single-Block mode)
@@ -2445,6 +2485,17 @@ class InvestmentFunction : public C05Function , public Block {
  TwoStageStochasticBlock * get_tssb_block( void ) const;
 
 /*--------------------------------------------------------------------------*/
+ /// the number of sub-Blocks that carry the investment
+ /** The investment is here-and-now, hence the same in all the sub-Blocks
+  * that carry it: this is how many they are, one for a plain UCBlock, one
+  * per scenario for a TwoStageStochasticBlock, the configured number for an
+  * SDDPBlock. Writing the investment and reading the linearization back have
+  * to run over exactly the same set, or the value and its linearization stop
+  * describing the same function. */
+
+ Index get_number_investment_sub_blocks( void ) const;
+
+/*--------------------------------------------------------------------------*/
  /// reset the BlockConfig of the inner Block to the default one
 
  void set_default_inner_Block_BlockConfig();
@@ -2453,6 +2504,16 @@ class InvestmentFunction : public C05Function , public Block {
  /// reset the BlockSolverConfig of the inner Block to the default one
 
  void set_default_inner_Block_BlockSolverConfig();
+
+/*--------------------------------------------------------------------------*/
+ /// remove the Solver that this InvestmentFunction registered in the Blocks
+ /** Applies to each (replica) inner Block the clear()-ed BlockSolverConfig
+  * that configured it [see v_BSC], i.e., un-registers and deletes all and
+  * only the Solver that this InvestmentFunction has registered there,
+  * leaving any other one alone; does nothing if the inner Blocks have not
+  * been BlockSolverConfig-ured. */
+
+ void unconfigure_inner_Block_Solver();
 
 /*--------------------------------------------------------------------------*/
  /// reset the configuration of the inner Block to the default one
@@ -2474,6 +2535,22 @@ class InvestmentFunction : public C05Function , public Block {
  void reset_linearization();
 
 /*--------------------------------------------------------------------------*/
+ /// the value of the infeasibility certificate at the current point
+ /** Sums the certificate over the whole inner Block, rows and bounds alike,
+  * reading each multiplier where the Solver has just written it and each
+  * right-hand side and bound where it stands. Nothing here has to know which
+  * of them carry the design: the design-dependent terms make the coefficients
+  * of the cut, which are read separately, and what is wanted here is the
+  * value of the whole, out of which the constant follows.
+  *
+  * It is the number the solvers already compute, FARKASPROOF in Gurobi and
+  * the second output of CPXdualfarkas in CPLEX, and throw away; recomputing
+  * it costs a sweep of the model, and is what keeps the cut available on the
+  * solvers that do not hand it out. */
+
+ FunctionValue compute_farkas_value( Index stage , Index sub_block_index );
+
+/*--------------------------------------------------------------------------*/
 
  double compute_scale_linearization( Index block_index , Index stage ,
                                      Index sub_block_index );
@@ -2485,15 +2562,23 @@ class InvestmentFunction : public C05Function , public Block {
   * the sub-Block whose index is \p sub_block_index.
   *
   * @param sub_block_index The index of the sub-Block which will be used to
-  *        update the linearization. */
+  *        update the linearization.
+  *
+  * @param direction If true, what the sub-Block holds is an unbounded dual
+  *        direction rather than an optimal dual solution: it is already in
+  *        place, so it is not asked for again, and no primal solution is
+  *        asked for either, there being none. Only the coefficients that are
+  *        read out of the duals alone are then available, so an asset whose
+  *        coefficient needs the primal makes this throw. */
 
- void update_linearization( Index sub_block_index );
+ void update_linearization( Index sub_block_index , bool direction = false );
 
 /*--------------------------------------------------------------------------*/
  /// updates the linearization with respect to the set of UnitBlock
 
  void update_linearization_unit_blocks( Index stage , Index sub_block_index ,
-	   const std::vector< std::pair< Index , Index > > & block_indices );
+	   const std::vector< std::pair< Index , Index > > & block_indices ,
+	   bool direction = false );
 
 /*--------------------------------------------------------------------------*/
  /// updates the linearization with respect to the set of NetworkBlock
