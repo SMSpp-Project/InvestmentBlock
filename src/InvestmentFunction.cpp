@@ -47,6 +47,7 @@
 #include <cmath>
 #include <chrono>
 #include <functional>
+#include <fstream>
 #include <queue>
 
 #ifdef _OPENMP
@@ -1049,6 +1050,7 @@ int InvestmentFunction::compute( bool changedvars ) {
  output_variable_values();
 
  f_has_diagonal_linearization = false;
+ f_has_farkas_linearization = false;
  f_has_value = false;
 
  f_violated_constraint = { Inf< Index >() , eLHS };
@@ -1132,6 +1134,7 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
              << "while updating the Blocks: '" << e.what() << "'" << std::endl;
    f_value = worst_value();
    output_function_value();
+   f_ignore_modifications = saved_f_ignore_modifications;
    solver->set_id( solver_id );
    return( kError );
   }
@@ -1144,14 +1147,66 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  if( ! solver->has_var_solution() ) {
   f_value = worst_value();
   output_function_value();
-  solver->set_id( solver_id );
+
   // A *provably* infeasible inner subproblem is a kOK-type answer at the
   // worst value (+Inf for a minimization), not an unrecoverable error: report
   // it as such so the caller (e.g. the bundle) treats this point as infeasible
   // and proceeds, exactly as done above for violated linear constraints. Only
   // a genuine failure with no proof of infeasibility is a kError.
-  if( f_solver_status == Solver::kInfeasible )
+  if( f_solver_status == Solver::kInfeasible ) {
+   // the point is outside the domain, and saying only that leaves whoever
+   // asked with nothing to cut it away with: the master would propose the
+   // same direction again. The infeasibility certificate is the vertical
+   // linearization, and it is read exactly as the diagonal one is, the
+   // Solver writing the dual ray where the optimal duals go
+   if( f_compute_linearization )
+    if( auto cda = dynamic_cast< CDASolver * >( solver ) )
+     if( cda->has_dual_direction() ) {
+      cda->get_dual_direction();
+
+      /* The value of the certificate is one number over the whole inner
+       * Block, and it is summed out of the Block itself. The Solver has a
+       * number of its own [CDASolver::get_dual_direction_value()] and it is
+       * NOT this one: what a :MILPSolver hands over there is the violation
+       * of the aggregated constraint at the point its algorithm stopped at,
+       * while what the cut needs is the value of the certificate, each bound
+       * taken on the side its multiplier points at. On these instances the
+       * two differ, 6000 against 106000, and the difference is nine of the
+       * twelve columns of the certificate taken on the opposite side. */
+
+      reset_linearization();
+      try {
+       FunctionValue farkas = 0;
+       for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
+        update_linearization( i , true );
+        farkas += compute_farkas_value( 0 , i );
+        }
+
+       /* A certificate is a certificate only if it is positive here: the
+        * inner Block is proved infeasible at this point by F( x ) > 0, and
+        * F( x ) <= 0 is what cuts the point away. A non-positive value is no
+        * usable proof, the degenerate ray of an empty variable domain in
+        * particular, whose multipliers are all zero; claiming a cut out of it
+        * would hand the master the empty statement 0 <= 0. */
+       if( farkas > 0 ) {
+        f_farkas_value = farkas;
+        f_has_farkas_linearization = true;
+        }
+       }
+      catch( const std::exception & e ) {
+       std::cout << "InvestmentFunction::compute(): an error occurred while "
+                 << "updating the certificate: '" << e.what() << "'"
+                 << std::endl;
+       }
+      }
+
+   f_ignore_modifications = saved_f_ignore_modifications;
+   solver->set_id( solver_id );
    return( Solver::kInfeasible );
+   }
+
+  f_ignore_modifications = saved_f_ignore_modifications;
+  solver->set_id( solver_id );
   return( kError );
  }
 
@@ -1847,6 +1902,11 @@ bool InvestmentFunction::has_linearization( bool diagonal )
   }
  f_diagonal_linearization_required = false;
 
+ // the certificate is already in v_linearization, put there by the same
+ // chain that writes the diagonal one
+ if( f_has_farkas_linearization )
+  return( true );
+
  if( f_violated_constraint.first < Inf< Index >() ) {
   // A constraint has been violated. Compute the vertical linearization
   // (gradient of the violated constraint, with sign according to which
@@ -1870,6 +1930,8 @@ bool InvestmentFunction::compute_new_linearization( bool diagonal )
 {
  if( diagonal )
   return( false );
+ if( f_has_farkas_linearization )
+  return( true );
  return( ! constraints_are_satisfied() );
  }
 
@@ -1967,8 +2029,13 @@ void InvestmentFunction::get_linearization_coefficients
   for( Index i = range.first ; i < range.second ; ++i )
    g[ i - range.first ] = v_linearization[ i ];
  }
+ else if( f_has_farkas_linearization ) {
+  // Vertical linearization out of the infeasibility certificate
+  for( Index j = range.first ; j < range.second ; ++j )
+   g[ j - range.first ] = v_linearization[ j ];
+ }
  else {
-  // Vertical linearization
+  // Vertical linearization out of a violated implicit constraint
   assert( f_violated_constraint.first < v_A.size() );
   const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
   const auto i = f_violated_constraint.first;
@@ -1997,8 +2064,13 @@ void InvestmentFunction::get_linearization_coefficients
   for( Index i = range.first ; i < range.second ; ++i )
    g.coeffRef( i ) = v_linearization[ i ];
  }
+ else if( f_has_farkas_linearization ) {
+  // Vertical linearization out of the infeasibility certificate
+  for( Index j = range.first ; j < range.second ; ++j )
+   g.coeffRef( j ) = v_linearization[ j ];
+ }
  else {
-  // Vertical linearization
+  // Vertical linearization out of a violated implicit constraint
   assert( f_violated_constraint.first < v_A.size() );
   const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
   const auto i = f_violated_constraint.first;
@@ -2024,8 +2096,14 @@ void InvestmentFunction::get_linearization_coefficients
   for( auto i : subset )
    g[ k++ ] = v_linearization[ i ];
  }
+ else if( f_has_farkas_linearization ) {
+  // Vertical linearization out of the infeasibility certificate
+  Index k = 0;
+  for( auto j : subset )
+   g[ k++ ] = v_linearization[ j ];
+ }
  else {
-  // Vertical linearization
+  // Vertical linearization out of a violated implicit constraint
   assert( f_violated_constraint.first < v_A.size() );
   const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
   const auto i = f_violated_constraint.first;
@@ -2051,8 +2129,13 @@ void InvestmentFunction::get_linearization_coefficients
   for( auto i : subset )
    g.coeffRef( i ) = v_linearization[ i ];
  }
+ else if( f_has_farkas_linearization ) {
+  // Vertical linearization out of the infeasibility certificate
+  for( auto j : subset )
+   g.coeffRef( j ) = v_linearization[ j ];
+ }
  else {
-  // Vertical linearization
+  // Vertical linearization out of a violated implicit constraint
   assert( f_violated_constraint.first < v_A.size() );
   const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
   const auto i = f_violated_constraint.first;
@@ -2078,8 +2161,20 @@ InvestmentFunction::get_linearization_constant( Index name ) {
 
    return( alpha );
   }
+  else if( f_has_farkas_linearization ) {
+   // Vertical linearization out of the infeasibility certificate. F is
+   // affine in the design and the cut is F <= 0, so the constant follows
+   // from its value exactly as the diagonal one follows from that of the
+   // Function; the values read here are the ones the coefficients are
+   // relative to, so a reformulated bound needs no undoing
+   auto alpha = f_farkas_value;
+   for( Index i = 0 ; i < v_linearization.size() ; ++i )
+    alpha -= v_linearization[ i ] * get_var_value( i );
+
+   return( alpha );
+  }
   else {
-   // Vertical linearization
+   // Vertical linearization out of a violated implicit constraint
    assert( f_violated_constraint.first < v_A.size() );
    const auto i = f_violated_constraint.first;
    double alpha = 0;
@@ -2311,6 +2406,83 @@ InvestmentFunction::get_benders_function( Index stage ,
 void InvestmentFunction::reset_linearization() {
  v_linearization.assign( v_x.size() , 0 );
 }
+
+/*--------------------------------------------------------------------------*/
+
+Function::FunctionValue
+InvestmentFunction::compute_farkas_value( Index stage ,
+                                          Index sub_block_index ) {
+ auto block = get_ucblock( stage , sub_block_index );
+ if( ! block )
+  return( 0 );
+
+ FunctionValue value = 0;
+
+ const auto obj_sign =
+  ( block->get_objective_sense() == Objective::eMin ) ? -1 : 1;
+
+ // the multiplier of a two-sided row or bound belongs to the side its sign
+ // points at, which is the same rule the linearization of a UnitBlock reads
+ // its duals by
+ auto add = [ & value , obj_sign ]( const auto & c ) {
+  const auto dual = c.get_dual();
+  if( dual == 0 )
+   return;
+
+  const auto lhs = c.get_lhs();
+  const auto rhs = c.get_rhs();
+
+  RowConstraint::RHSValue b;
+  if( lhs == rhs )
+   b = lhs;
+  else if( ( lhs > -Inf< RowConstraint::RHSValue >() ) &&
+           ( rhs < Inf< RowConstraint::RHSValue >() ) )
+   b = ( obj_sign * dual >= 0 ) ? lhs : rhs;
+  else
+   b = ( rhs < Inf< RowConstraint::RHSValue >() ) ? rhs : lhs;
+
+
+  // an infinite side carries no information: the multiplier of a row that
+  // does not constrain anything is zero, and a stray infinity here would
+  // poison the whole sum
+  if( ( b <= -Inf< RowConstraint::RHSValue >() ) ||
+      ( b >= Inf< RowConstraint::RHSValue >() ) )
+   return;
+
+  value -= dual * b;
+  };
+
+ std::queue< Block * > Q;
+ Q.push( block );
+ while( ! Q.empty() ) {
+  auto b = Q.front();
+  Q.pop();
+  for( auto * sub : b->get_nested_Blocks() )
+   Q.push( sub );
+
+  for( const auto & i : b->get_static_constraints() )
+   un_any_const_static( i , add , un_any_type< FRowConstraint >() )
+    || un_any_const_static( i , add , un_any_type< BoxConstraint >() )
+    || un_any_const_static( i , add , un_any_type< LB0Constraint >() )
+    || un_any_const_static( i , add , un_any_type< UB0Constraint >() )
+    || un_any_const_static( i , add , un_any_type< LBConstraint >() )
+    || un_any_const_static( i , add , un_any_type< UBConstraint >() )
+    || un_any_const_static( i , add , un_any_type< NNConstraint >() )
+    || un_any_const_static( i , add , un_any_type< NPConstraint >() );
+
+  for( const auto & i : b->get_dynamic_constraints() )
+   un_any_const_dynamic( i , add , un_any_type< FRowConstraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< BoxConstraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< LB0Constraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< UB0Constraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< LBConstraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< UBConstraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< NNConstraint >() )
+    || un_any_const_dynamic( i , add , un_any_type< NPConstraint >() );
+  }
+
+ return( value );
+ }  // end( InvestmentFunction::compute_farkas_value )
 
 /*--------------------------------------------------------------------------*/
 
@@ -2657,7 +2829,8 @@ double InvestmentFunction::compute_scale_linearization
 
 void InvestmentFunction::update_linearization_unit_blocks
 ( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & block_indices ) {
+  const std::vector< std::pair< Index , Index > > & block_indices ,
+  bool direction ) {
 
  /* The UnitBlocks that are subject to investment can be divided into two
   * groups, depending on how the investment is represented.
@@ -2681,21 +2854,32 @@ void InvestmentFunction::update_linearization_unit_blocks
 
   auto block = ucblock->get_unit_block( block_index );
 
+  /* The coefficient of a scaled UnitBlock is read off the primal solution of
+   * the sub-Block, that of a UnitBlock carrying a kappa off its duals alone.
+   * An unbounded dual direction comes with no primal solution, so only the
+   * latter can be had out of it. */
+  const auto scaled = [ & ]() {
+   if( direction )
+    throw( std::logic_error( "InvestmentFunction::update_linearization: the "
+			     "coefficient of the scaled UnitBlock " +
+			     std::to_string( block_index ) + " cannot be read "
+			     "out of an unbounded dual direction." ) );
+   return( compute_scale_linearization( block_index , stage ,
+					sub_block_index ) );
+   };
+
   if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
-   v_linearization[ var_index ] +=
-    compute_scale_linearization( block_index , stage , sub_block_index );
+   v_linearization[ var_index ] += scaled();
   }
   else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
    if( f_replicate_battery )
-    v_linearization[ var_index ] +=
-     compute_scale_linearization( block_index , stage , sub_block_index );
+    v_linearization[ var_index ] += scaled();
    else
     v_linearization[ var_index ] += unit->get_kappa_linearization();
   }
   else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
    if( f_replicate_intermittent )
-    v_linearization[ var_index ] +=
-     compute_scale_linearization( block_index , stage , sub_block_index );
+    v_linearization[ var_index ] += scaled();
    else
     v_linearization[ var_index ] += unit->get_kappa_linearization();
   }
@@ -2890,7 +3074,8 @@ void InvestmentFunction::update_linearization_network_blocks
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::update_linearization( Index sub_block_index ) {
+void InvestmentFunction::update_linearization( Index sub_block_index ,
+					       bool direction ) {
 
  const auto num_stages = get_number_stages();
 
@@ -2929,28 +3114,33 @@ void InvestmentFunction::update_linearization( Index sub_block_index ) {
                  : get_solver< CDASolver >( v_greedy_solvers[
 						      sub_block_index ] );
 
- // Retrieve the dual solution
+ // Retrieve the dual solution. A dual direction is written where the dual
+ // solution goes and is already in place, the caller having asked for it;
+ // there is no primal solution to go with it.
 
- if( solver && solver->has_dual_solution() )
-  solver->get_dual_solution(); // TODO pass Configuration
- else
-  throw( std::logic_error( "InvestmentFunction::update_linearization: "
-                           "dual solution not available." ) );
-
- // Retrieve the primal solution.
-
- if( ! block_indices.empty() ) {
-  // The primal solution may only be necessary if there are UnitBlocks
-  // subject to investment.
-  if( solver && solver->has_var_solution() )
-   solver->get_var_solution(); // TODO pass Configuration
+ if( ! direction ) {
+  if( solver && solver->has_dual_solution() )
+   solver->get_dual_solution(); // TODO pass Configuration
   else
    throw( std::logic_error( "InvestmentFunction::update_linearization: "
-                            "primal solution not available." ) );
+                            "dual solution not available." ) );
+
+  // Retrieve the primal solution.
+
+  if( ! block_indices.empty() ) {
+   // The primal solution may only be necessary if there are UnitBlocks
+   // subject to investment.
+   if( solver && solver->has_var_solution() )
+    solver->get_var_solution(); // TODO pass Configuration
+   else
+    throw( std::logic_error( "InvestmentFunction::update_linearization: "
+                             "primal solution not available." ) );
+  }
  }
 
  for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  update_linearization_unit_blocks( stage , sub_block_index , block_indices );
+  update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
+				    direction );
   update_linearization_network_blocks( stage , sub_block_index , line_indices );
  } // end( for each stage )
 
