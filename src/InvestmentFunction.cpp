@@ -2989,11 +2989,17 @@ void InvestmentFunction::update_linearization_network_blocks
    const auto obj_sign =
     ( dc_network->get_objective_sense() == Objective::eMin ) ? - 1 : 1;
 
+   /* The bounds read kappa C^v P, with C^v the factor the DCNetworkBlock
+    * scales its flow limits by, so the derivative of a bound with respect to
+    * the design is C^v P: leaving the factor out is right only while it is 1,
+    * which is its default but not its only value. */
+   const auto scale = dc_network->get_C_v_scal();
+
    for( const auto & [ line , var_index ] : line_indices ) {
 
     const auto dual = constraints[ line ].get_dual();
-    const auto min_flow = dc_network->get_min_power_flow( line );
-    const auto max_flow = dc_network->get_max_power_flow( line );
+    const auto min_flow = scale * dc_network->get_min_power_flow( line );
+    const auto max_flow = scale * dc_network->get_max_power_flow( line );
 
     auto bound = max_flow;
     if( obj_sign * dual > 0 )
@@ -3051,11 +3057,15 @@ void InvestmentFunction::update_linearization_network_blocks
    const auto obj_sign =
     ( dc_network->get_objective_sense() == Objective::eMin ) ? - 1 : 1;
 
+   // the flow limits carry the scaling factor, and so does their derivative
+   // [see the other overload]
+   const auto scale = dc_network->get_C_v_scal();
+
    for( const auto & [ line , var_index ] : line_indices ) {
 
     const auto dual = constraints[ line ].get_dual();
-    const auto min_flow = dc_network->get_min_power_flow( line );
-    const auto max_flow = dc_network->get_max_power_flow( line );
+    const auto min_flow = scale * dc_network->get_min_power_flow( line );
+    const auto max_flow = scale * dc_network->get_max_power_flow( line );
 
     auto bound = max_flow;
     if( obj_sign * dual > 0 )
