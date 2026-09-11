@@ -44,6 +44,10 @@ include $(UCBckDIR)/lib/makefile
 SDDPBkSDR = $(InvsBkSDR)/../SDDPBlock
 include $(SDDPBkSDR)/makefile-s
 
+# define input macros for TwoStageStochasticBlock makefile, then include it
+TSSBkSDR = $(InvsBkSDR)/../TwoStageStochasticBlock
+include $(TSSBkSDR)/makefile-c
+
 # include the makefile requiring all external modules in input
 include $(InvsBkSDR)/makefile
 
@@ -51,11 +55,11 @@ include $(InvsBkSDR)/makefile
 
 # append external -I directives to InvsBkINC, InvsBkOBJ and InvsBkH as
 # defined by the makefile, thus the := assignment has to be used (use GNU make)
-InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkOBJ) $(UCBckOBJ) $(SMS++OBJ)
-InvsBkH := $(InvsBkH) $(SDDPBkH) $(UCBckH) $(SMS++H)
-InvsBkINC := $(SMS++INC) $(UCBckINC) $(SDDPBkINC) $(InvsBkINC)
+InvsBkOBJ := $(InvsBkOBJ) $(SDDPBkOBJ) $(TSSBkOBJ) $(UCBckOBJ) $(SMS++OBJ)
+InvsBkH := $(InvsBkH) $(SDDPBkH) $(TSSBkH) $(UCBckH) $(SMS++H)
+InvsBkINC := $(SMS++INC) $(UCBckINC) $(SDDPBkINC) $(TSSBkINC) $(InvsBkINC)
 
 # external libraries for InvsBlock
-InvsBkLIB = $(SMS++LIB) $(SDDPBkLIB) $(UCBckLIB)
+InvsBkLIB = $(SMS++LIB) $(SDDPBkLIB) $(TSSBkLIB) $(UCBckLIB)
 
 ########################### End of makefile-c ################################

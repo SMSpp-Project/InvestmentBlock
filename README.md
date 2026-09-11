@@ -5,7 +5,7 @@ defined in `UCBlock`, like generating units and transmission lines.
 
 The `InvestmentBlock` class, which derives from `Block`, has a vector of
 `ColVariable`, each of which represents the investment in a particular asset.
-The number of `ColVariable `is thus the number of assets that are subject to
+The number of `ColVariable` is thus the number of assets that are subject to
 investment. The `Objective` of the `InvestmentBlock` is an `FRealObjective`
 whose `Function` is a `InvestmentFunction`. The active `Variable` of this
 `InvestmentFunction` are the ones defined in this `InvestmentBlock`.
@@ -37,14 +37,14 @@ the following:
   * Investing an amount x in a transmission line means that its minimum and
     maximum power flow are scaled by x using `set_kappa()`.
 
-- The value of the InvestmentFunction is given by a fixed investment cost
+- The value of the `InvestmentFunction` is given by a fixed investment cost
   (CAPEX) and an [expected] operational cost (OPEX). The fixed investment cost
   is a linear function of the `ColVariable` of the `InvestmentFunction`. The
   [expected] operational cost is given by the solution value of the inner
   `Block` (which depends on the investment being made, i.e., the values of
-  the variables of the `InvestmentFunction`.
+  the variables of the `InvestmentFunction`).
 
-- The InvestmentFunction has an inner `Block` which contains the assets to
+- The `InvestmentFunction` has an inner `Block` which contains the assets to
   invest in. This inner `Block` can be either a `UCBlock` or an `SDDPBlock`.
   In the former case the OPEX is deterministic. In the latter case it is the
   expected cost of the sub-`Block` of the `SDDPBlock`, some of which (the ones
@@ -106,11 +106,11 @@ a new module, as opposed to the compile-and-forget usage envisioned by CMake.
 
 Each executable using `InvestmentBlock` has to include a "main makefile" of
 the module, which typically is either [makefile-c](makefile-c) including all
-necessary libraries comprised the "core SMS++" one, or
+necessary libraries comprising the "core SMS++" one, or
 [makefile-s](makefile-s) including all necessary libraries but not the "core
 SMS++" one (for the common case in which this is used together with other
 modules that already include them). One relevant case is the
-[InvestmentBlock main in the tools/ repo](https://gitlab.com/smspp/tools/-/blob/develop/investment_solver/investment_solver.cpp?ref_type=heads). The makefiles
+[InvestmentBlock main in the tools/ repo](https://gitlab.com/smspp/tools/-/blob/develop/investmentblock_solver/investmentblock_solver.cpp?ref_type=heads). The makefiles
 in turn recursively include all the required other makefiles, hence one should
 only need to edit the "main makefile" for compilation type (C++ compiler and
 its options) and it all should be good to go. In case some of the external
@@ -121,6 +121,24 @@ create the `../extlib/makefile-paths` out of the
 
 Check the [SMS++ installation wiki](https://gitlab.com/smspp/smspp-project/-/wikis/Customize-the-configuration#location-of-required-libraries)
 for further details.
+
+
+## Data
+
+We provide some data sets that are used, among other things, by some of the
+testers of the [test repo](https://gitlab.com/smspp/tests). Since they are
+large they are not included in the repo. They are automatically downloaded by
+CMake if the test repo is included, but if you are not using CMake to build
+the system you need to do it by hand, via
+
+```sh
+cd data
+wget https://gitlab.com/api/v4/projects/45125867/packages/generic/nc4/latest/nc4.tgz
+tar xzvf nc4.tgz
+```
+
+This builds the [data/nc4](data/nc4) folder with the `InvestmentBlock`
+instances (such as the `resilient-data` set) used by the tests.
 
 
 ## Getting help
@@ -143,11 +161,11 @@ conduct, and the process for submitting merge requests to us.
   Dipartimento di Informatica  
   Università di Pisa
 
-### Contributors 
+### Contributors
 
 - **Antonio Frangioni**  
   Dipartimento di Informatica  
-  Universit� di Pisa
+  Università di Pisa
 
 
 ## License

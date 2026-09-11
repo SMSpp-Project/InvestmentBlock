@@ -15,6 +15,10 @@
 #           $(SMS++OBJ)    = the libSMS++ library itself                     #
 #           $(SDDPBkH)     = the .h files to include for SDDPBlock           #
 #           $(SDDPBkINC)   = the -I$( source directory ) for SDDPBlock       #
+#           $(TSSBkH)      = the .h files to include for                     #
+#                            TwoStageStochasticBlock                         #
+#           $(TSSBkINC)    = the -I$( source directory ) for                 #
+#                            TwoStageStochasticBlock                         #
 #           $(UCBckH)      = the .h files to include for UCBlock             #
 #           $(UCBckINC)    = the -I$( source directory ) for UCBlock         #
 #           $(InvsBkSDR)   = the directory where the source is               #
@@ -47,15 +51,16 @@ clean::
 # dependencies: every .o from its .cpp + every recursively included .h- - - -
 
 $(InvsBkSDR)/obj/InvestmentBlock.o: $(InvsBkSDR)/src/InvestmentBlock.cpp \
-	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(UCBckH) \
+	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(TSSBkH) $(UCBckH) \
 	$(SMS++OBJ)
 	$(CC) -c $(InvsBkSDR)/src/InvestmentBlock.cpp -o $@ $(InvsBkINC) \
-	$(SDDPBkINC) $(UCBckINC) $(SMS++INC) $(SW)
+	$(SDDPBkINC) $(TSSBkINC) $(UCBckINC) $(SMS++INC) $(SW)
 
 $(InvsBkSDR)/obj/InvestmentFunction.o: $(InvsBkSDR)/src/InvestmentFunction.cpp \
 	$(InvsBkSDR)/include/InvestmentFunction.h \
-	$(InvsBkSDR)/include/InvestmentBlock.h $(SDDPBkH) $(UCBckH) $(SMS++OBJ)
+	$(InvsBkSDR)/include/InvestmentBlock.h $(SDDPBkH) $(TSSBkH) \
+	$(UCBckH) $(SMS++OBJ)
 	$(CC) -c $(InvsBkSDR)/src/InvestmentFunction.cpp -o $@ $(InvsBkINC) \
-	$(SDDPBkINC) $(UCBckINC) $(SMS++INC) $(SW)
+	$(SDDPBkINC) $(TSSBkINC) $(UCBckINC) $(SMS++INC) $(SW)
 
 ########################## End of makefile ###################################

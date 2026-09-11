@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+cd ../..
+bash upload-to-package-registry InvestmentBlock/data/nc4.tgz
