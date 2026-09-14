@@ -2870,10 +2870,20 @@ void InvestmentFunction::update_linearization_unit_blocks
 
   auto block = ucblock->get_unit_block( block_index );
 
-  /* The coefficient of a scaled UnitBlock is read off the primal solution of
-   * the sub-Block, that of a UnitBlock carrying a kappa off its duals alone.
-   * An unbounded dual direction comes with no primal solution, so only the
-   * latter can be had out of it. */
+  /* A kappa enters the constraints it appears in through their right-hand
+   * side alone, so the set of designs that a certificate of infeasibility
+   * proves infeasible is a half-space, and the certificate is a cut as it
+   * stands. A scale factor instead multiplies the Variable of its UnitBlock
+   * wherever the UCBlock uses them [see UnitBlock::scale()], hence it
+   * multiplies the COLUMNS of that unit: a certificate then holds only over
+   * the scales on which it stays dual feasible, and that interval ends at the
+   * current scale. Measured on a replicated IntermittentUnitBlock: the one
+   * column the ray charges carries - 1 / scale against the linking constraint
+   * and 1 against its own bound, at scale 1200 and again at scale 20000, so
+   * the sharpest cut the certificate supports is x >= x_bar and it cuts
+   * nothing away. There is therefore nothing to read here, rather than
+   * something hard to read: an investment that can make the inner Block
+   * infeasible has to be represented by a kappa. */
   const auto scaled = [ & ]() {
    if( direction )
     throw( std::logic_error( "InvestmentFunction::update_linearization: the "
