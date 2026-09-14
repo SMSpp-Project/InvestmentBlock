@@ -83,6 +83,8 @@ the whole framework. What follows is about building it yourself.
 
 - [SMS++ UCBlock](https://gitlab.com/smspp/ucblock)
 
+- [SMS++ TwoStageStochasticBlock](https://gitlab.com/smspp/twostagestochasticblock)
+
 ### Build and install with CMake
 
 Configure and build the library with:
