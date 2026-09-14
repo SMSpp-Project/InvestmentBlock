@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- makefile-c takes TwoStageStochasticBlock from its makefile-s, so that the
+  core SMS++ objects are not listed twice
+
 ## [0.2.0] - 2026-09-12
 
 ### Added
