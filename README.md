@@ -157,7 +157,7 @@ tar xzvf nc4.tgz
 ```
 
 This builds the [data/nc4](data/nc4) folder with the `InvestmentBlock`
-instances (such as the `resilient-data` set) used by the tests.
+instances (such as the `pypsa-data` set) used by the tests.
 
 
 ## Getting help
