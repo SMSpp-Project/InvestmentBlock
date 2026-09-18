@@ -2476,13 +2476,10 @@ InvestmentFunction::compute_farkas_value( Index stage ,
   for( auto * sub : b->get_nested_Blocks() )
    Q.push( sub );
 
-  for( auto groups : { & b->get_static_constraint_groups() ,
-		       & b->get_dynamic_constraint_groups() } )
-   for( const auto & group : *groups )
-    if( group )
-     for_each_as_any_of< FRowConstraint , BoxConstraint , LB0Constraint ,
-			 UB0Constraint , LBConstraint , UBConstraint ,
-			 NNConstraint , NPConstraint >( *group , add );
+  b->for_each_constraint_group( [ & add ]( const BaseGroup & group ) {
+    for_each_as_any_of< FRowConstraint , BoxConstraint , LB0Constraint ,
+			UB0Constraint , LBConstraint , UBConstraint ,
+			NNConstraint , NPConstraint >( group , add ); } );
   }
 
  return( value );
