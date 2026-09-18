@@ -94,6 +94,23 @@ the following:
 
 These instructions will let you build `InvestmentBlock` on your system.
 
+The module also comes ready-made, in any of
+
+```sh
+sudo add-apt-repository ppa:smspp-project/smspp   # Ubuntu
+sudo apt install libsmspp-investment-dev          # and smspp-investment for the tool
+
+conda install -c conda-forge smspp-project        # Linux, macOS, Windows
+
+brew tap SMSpp-Project/smspp                      # macOS, Linux
+brew install smspp
+
+vcpkg install "smspp[core,investment]"            # from the sources
+```
+
+where apt and the port give the module alone, while conda and the tap carry
+the whole framework. What follows is about building it yourself.
+
 ### Requirements
 
 - The [SMS++ core library](https://gitlab.com/smspp/smspp) and its
@@ -102,6 +119,8 @@ These instructions will let you build `InvestmentBlock` on your system.
 - [SMS++ SDDPBlock](https://gitlab.com/smspp/sddpblock)
 
 - [SMS++ UCBlock](https://gitlab.com/smspp/ucblock)
+
+- [SMS++ TwoStageStochasticBlock](https://gitlab.com/smspp/twostagestochasticblock)
 
 ### Build and install with CMake
 
@@ -175,7 +194,7 @@ tar xzvf nc4.tgz
 ```
 
 This builds the [data/nc4](data/nc4) folder with the `InvestmentBlock`
-instances (such as the `resilient-data` set) used by the tests.
+instances (such as the `pypsa-data` set) used by the tests.
 
 
 ## Getting help
@@ -195,6 +214,10 @@ conduct, and the process for submitting merge requests to us.
 ### Current Lead Authors
 
 - **Rafael Durbano Lobato**  
+  Dipartimento di Informatica  
+  Università di Pisa
+
+- **Donato Meoli**  
   Dipartimento di Informatica  
   Università di Pisa
 

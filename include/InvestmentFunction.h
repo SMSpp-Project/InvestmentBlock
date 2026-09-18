@@ -131,6 +131,21 @@ class InvestmentFunction : public C05Function , public Block {
 
  enum AssetType { eUnitBlock = 0 , eLine = 1 };
 
+/*--------------------------------------------------------------------------*/
+ /// public enum representing the ways of sizing an asset
+ /** The two ways in which the Block carrying an asset can be sized [see
+  * Design and scaling of this Block in Block.h], and therefore the two
+  * methods that this InvestmentFunction may call on it through the methods
+  * factory. Which one an asset uses is read from the instance; which one a
+  * :Block offers is said by the names it registers, so an asset asking for a
+  * way that its Block does not offer is caught when the names are resolved
+  * rather than during a solve.
+  *
+  * - eReplicate: the Block stands for k identical copies of itself;
+  * - eResize: the Block stands for one of k times the size it was given. */
+
+ enum AssetMethod { eReplicate = 0 , eResize = 1 };
+
  /// public enum representing the sides of the linear constraints
  /** Public enum representing the sides of the linear constraints. */
 
@@ -1892,6 +1907,24 @@ class InvestmentFunction : public C05Function , public Block {
  bool f_has_diagonal_linearization = false;
  ///< a diagonal linearization is available
 
+ bool f_has_farkas_linearization = false;
+ ///< a vertical linearization out of an infeasibility certificate is available
+ /**< Set when the inner Block is proved infeasible and its Solver hands out
+  * the Farkas certificate of it. The coefficients of the cut are read off the
+  * Block exactly as the diagonal ones are, the certificate being written in
+  * the very place the optimal duals are; what tells the two apart is only
+  * this, and the constant, which for a vertical linearization is not built
+  * out of the value of the Function (there is none, the point being outside
+  * the domain) but out of f_farkas_value below. */
+
+ FunctionValue f_farkas_value = 0;
+ ///< the value of the infeasibility certificate at the current point
+ /**< The certificate reads F( x ) = w d + sum_j r_j b_j( x ), with w the dual
+  * ray, r the Farkas-consistent reduced costs and b the bounds; the inner
+  * Block is infeasible at x exactly when F( x ) > 0, and F( x ) <= 0 is the
+  * cut. F is affine in the design, so the cut is written as usual as
+  * alpha + g x <= 0 with g the coefficients and alpha = F( x ) - g x. */
+
  Index f_num_sub_blocks_per_stage = 1;
  ///< number of sub-Blocks per stage in SDDPBlock (single-Block mode)
 
@@ -1956,6 +1989,34 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< AssetType > v_asset_type;
  ///< the type of each asset that is subject to investment
+
+ std::vector< int > v_asset_method;
+ /**< how each asset is sized, as an AssetMethod. Empty if the instance does
+  * not say, in which case the way is deduced from the names the Block of
+  * that asset registers: eResize if it offers it, eReplicate otherwise. */
+
+ std::vector< Block::FunctionType< Block::MF_dbl_it , Block::Range > * >
+  v_asset_setter;
+ /**< the method writing the size parameter into the Block of each asset,
+  * resolved once out of the methods factory and held here, so that nothing
+  * during a solve depends on the class of that Block. nullptr means that the
+  * name did not resolve, and that the asset falls back on the road that
+  * chooses by class. */
+
+ std::vector< Block::QueryType< Block::MF_dbl_msp , Block::Range > * >
+  v_asset_query;
+ /**< the getter reading the sensitivity back, resolved the same way. For an
+  * asset sized by eResize it is called on the Block of the asset, the
+  * parameter living in its own rows; for one sized by eReplicate it is
+  * called on the Block that *holds* the asset, the factor appearing in the
+  * rows of the container and not in those of the asset. Which of the two it
+  * is, is said by v_asset_sizing. */
+
+ std::vector< int > v_asset_sizing;
+ ///< how each asset is sized, as an AssetMethod, once resolved
+
+ bool f_methods_resolved = false;
+ ///< whether the two vectors above have been filled
 
  std::vector< double > v_linearization;
  ///< linearization associated with the most recent call to compute()
@@ -2347,7 +2408,26 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param investment The investment to be made in the given UnitBlock. */
 
- void update_unit_block( UnitBlock * block , double investment );
+ void update_unit_block( UnitBlock * block , double investment ,
+                         Index asset );
+
+/*--------------------------------------------------------------------------*/
+ /// resolves, for each asset, the methods that size its Block
+ /** For each asset, works out which of the two ways of sizing its Block is
+  * used and resolves, out of the methods factory, the method that writes the
+  * size parameter and the one that reads the sensitivity back. Both are kept
+  * so that nothing during a solve has to know the class of a Block.
+  *
+  * The way comes from the instance when it says, and otherwise from the names
+  * the Block registers: eResize where it offers it, eReplicate otherwise. An
+  * asset whose Block registers neither keeps the road that chooses by class,
+  * which is also what happens when one of the two global Replicate* flags is
+  * set, those naming a class and so saying something the names cannot.
+  *
+  * Called once, the first time the Blocks are updated: the inner Block does
+  * not exist while this InvestmentFunction is being deserialized. */
+
+ void resolve_asset_methods( void );
 
 /*--------------------------------------------------------------------------*/
  /// Update a set of UnitBlock according to the given \p investment
@@ -2363,7 +2443,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  void update_unit_blocks( Index sub_block_index ,
                           const std::vector< Index > & block_indices ,
-                          const std::vector< double > & investment );
+                          const std::vector< double > & investment ,
+                          const std::vector< Index > & assets );
 
 /*--------------------------------------------------------------------------*/
  /// Update a set of line according to the given \p investment
@@ -2380,7 +2461,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  void update_network_blocks( Index sub_block_index ,
                              const std::vector< Index > & line_indices ,
-                             const std::vector< double > & investment );
+                             const std::vector< double > & investment ,
+                             const std::vector< Index > & assets );
 
 /*--------------------------------------------------------------------------*/
  /// update the sub-Block of the UCBlock
@@ -2517,6 +2599,22 @@ class InvestmentFunction : public C05Function , public Block {
  void reset_linearization();
 
 /*--------------------------------------------------------------------------*/
+ /// the value of the infeasibility certificate at the current point
+ /** Sums the certificate over the whole inner Block, rows and bounds alike,
+  * reading each multiplier where the Solver has just written it and each
+  * right-hand side and bound where it stands. Nothing here has to know which
+  * of them carry the design: the design-dependent terms make the coefficients
+  * of the cut, which are read separately, and what is wanted here is the
+  * value of the whole, out of which the constant follows.
+  *
+  * It is the number the solvers already compute, FARKASPROOF in Gurobi and
+  * the second output of CPXdualfarkas in CPLEX, and throw away; recomputing
+  * it costs a sweep of the model, and is what keeps the cut available on the
+  * solvers that do not hand it out. */
+
+ FunctionValue compute_farkas_value( Index stage , Index sub_block_index );
+
+/*--------------------------------------------------------------------------*/
 
  double compute_scale_linearization( Index block_index , Index stage ,
                                      Index sub_block_index );
@@ -2528,15 +2626,23 @@ class InvestmentFunction : public C05Function , public Block {
   * the sub-Block whose index is \p sub_block_index.
   *
   * @param sub_block_index The index of the sub-Block which will be used to
-  *        update the linearization. */
+  *        update the linearization.
+  *
+  * @param direction If true, what the sub-Block holds is an unbounded dual
+  *        direction rather than an optimal dual solution: it is already in
+  *        place, so it is not asked for again, and no primal solution is
+  *        asked for either, there being none. Only the coefficients that are
+  *        read out of the duals alone are then available, so an asset whose
+  *        coefficient needs the primal makes this throw. */
 
- void update_linearization( Index sub_block_index );
+ void update_linearization( Index sub_block_index , bool direction = false );
 
 /*--------------------------------------------------------------------------*/
  /// updates the linearization with respect to the set of UnitBlock
 
  void update_linearization_unit_blocks( Index stage , Index sub_block_index ,
-	   const std::vector< std::pair< Index , Index > > & block_indices );
+	   const std::vector< std::pair< Index , Index > > & block_indices ,
+	   bool direction = false );
 
 /*--------------------------------------------------------------------------*/
  /// updates the linearization with respect to the set of NetworkBlock
@@ -2795,7 +2901,7 @@ class InvestmentFunction : public C05Function , public Block {
  void update_linearization_unit_blocks(
    Index stage , Index sub_block_index ,
    const std::vector< std::pair< Index , Index > > & block_indices ,
-   std::vector< double > & linearization );
+   std::vector< double > & linearization , bool direction = false );
 
 /*--------------------------------------------------------------------------*/
 

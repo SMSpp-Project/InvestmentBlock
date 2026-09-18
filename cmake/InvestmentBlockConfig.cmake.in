@@ -17,11 +17,13 @@ get_filename_component(@modName@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 include(CMakeFindDependencyMacro)
 
 # ----- Settings ------------------------------------------------------------ #
-set(StOpt_ROOT @Eigen3_ROOT@)
+set(StOpt_ROOT @StOpt_ROOT@)
 set(InvestmentBlock_USE_MPI @InvestmentBlock_USE_MPI@)
 
 # ----- Requirements -------------------------------------------------------- #
-find_dependency(StochasticBlock)
+find_dependency(UCBlock)
+find_dependency(TwoStageStochasticBlock)
+find_dependency(SDDPBlock)
 
 # This is needed to find the custom modules we provide
 list(APPEND CMAKE_MODULE_PATH ${InvestmentBlock_CMAKE_DIR})
