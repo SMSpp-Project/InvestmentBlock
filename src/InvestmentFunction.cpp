@@ -3618,9 +3618,8 @@ void InvestmentFunction::GlobalPool::store_combination_of_linearizations
   if( coefficients.empty() )
    coefficients.resize
     ( linearization_coefficients[ linearization_name ].size() , 0 );
-  else
-   combine( coefficients , linearization_coefficients[ linearization_name ] ,
-            coeff );
+  combine( coefficients , linearization_coefficients[ linearization_name ] ,
+           coeff );
 
   constant += coeff * linearization_constants[ linearization_name ];
 
