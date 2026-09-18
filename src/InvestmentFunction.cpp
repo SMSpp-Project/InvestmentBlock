@@ -1548,10 +1548,7 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
    switch( status ) {
     case( SDDPSolver::kStopIter ):
-     // the iteration limit is an answer, not a failure: without the break
-     // it fell through to the default and was reported as an error
      f_solver_status = SDDPSolver::kStopIter;
-     break;
     case( SDDPSolver::kCurveCross ):
     case( SDDPSolver::kError ):
     default:
@@ -1857,13 +1854,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    #pragma omp critical( InvestmentFunction )
    {
     interrupt_loop = true;
-    /* Distinguish a provable infeasibility from a genuine failure. The Solver
-     * here is an SDDPGreedySolver, which says kInfeasible only of the first
-     * stage and kSubproblemInfeasible -- a value of its own, kInfeasible + 1
-     * [see SDDPGreedySolver.h] -- of any later one: reading only the first
-     * reported every infeasible subproblem past stage 0 as an error. */
-    if( ( status == Solver::kInfeasible ) ||
-        ( status == SDDPGreedySolver::kSubproblemInfeasible ) )
+    // distinguish a provable infeasibility from a genuine failure
+    if( status == Solver::kInfeasible )
      local_infeasible = 1;
     else
      local_error = 1;
