@@ -2476,25 +2476,13 @@ InvestmentFunction::compute_farkas_value( Index stage ,
   for( auto * sub : b->get_nested_Blocks() )
    Q.push( sub );
 
-  for( const auto & i : b->get_static_constraints() )
-   un_any_const_static( i , add , un_any_type< FRowConstraint >() )
-    || un_any_const_static( i , add , un_any_type< BoxConstraint >() )
-    || un_any_const_static( i , add , un_any_type< LB0Constraint >() )
-    || un_any_const_static( i , add , un_any_type< UB0Constraint >() )
-    || un_any_const_static( i , add , un_any_type< LBConstraint >() )
-    || un_any_const_static( i , add , un_any_type< UBConstraint >() )
-    || un_any_const_static( i , add , un_any_type< NNConstraint >() )
-    || un_any_const_static( i , add , un_any_type< NPConstraint >() );
-
-  for( const auto & i : b->get_dynamic_constraints() )
-   un_any_const_dynamic( i , add , un_any_type< FRowConstraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< BoxConstraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< LB0Constraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< UB0Constraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< LBConstraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< UBConstraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< NNConstraint >() )
-    || un_any_const_dynamic( i , add , un_any_type< NPConstraint >() );
+  for( auto groups : { & b->get_static_constraint_groups() ,
+		       & b->get_dynamic_constraint_groups() } )
+   for( const auto & group : *groups )
+    if( group )
+     for_each_as_any_of< FRowConstraint , BoxConstraint , LB0Constraint ,
+			 UB0Constraint , LBConstraint , UBConstraint ,
+			 NNConstraint , NPConstraint >( *group , add );
   }
 
  return( value );
