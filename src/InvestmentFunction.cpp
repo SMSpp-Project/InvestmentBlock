@@ -2851,7 +2851,12 @@ void InvestmentFunction::update_linearization_unit_blocks
 
  const auto ucblock = get_ucblock( stage , sub_block_index );
 
- for( const auto & [ block_index , var_index ] : block_indices ) {
+ // the two indices are named here, and not by a structured binding of the
+ // loop, because a lambda below captures them and a structured binding
+ // cannot be captured when OpenMP is on
+ for( const auto & el : block_indices ) {
+  const auto block_index = el.first;
+  const auto var_index = el.second;
 
   auto block = ucblock->get_unit_block( block_index );
 
