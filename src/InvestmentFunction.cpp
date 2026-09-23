@@ -3060,7 +3060,9 @@ void InvestmentFunction::update_linearization_unit_blocks
                 Block::MF_dbl_msp( & answer , 1 ) ,
                 on_container
                 ? Block::Range( block_index , block_index + 1 )
-                : Block::Range( 0 , Inf< Block::Index >() ) );
+                // the Block of the asset has one size parameter, and the
+                // buffer above is one element: ask for exactly that
+                : Block::Range( 0 , 1 ) );
    linearization[ var_index ] += answer;
   }
   else if( ( asset < v_asset_setter.size() ) && v_asset_setter[ asset ] ) {
