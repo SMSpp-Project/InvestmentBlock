@@ -15,19 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supports no cut against a scaled design, a kappa entering the constraints
   it appears in through their right-hand side alone, with the numbers of the
   instance where it was measured
+
 - the two indices of a unit under investment are named inside the loop and
   not by a structured binding of it, a structured binding being what a lambda
   cannot capture when OpenMP is on
+
 - the walk over what a Block holds asks the Block for its groups of
   Constraint, one run at a time, rather than the vectors of `boost::any` that
   are not there any more: the constant of a cut is summed over them, and a
   combination of linearizations keeps the coefficients of its constituents
   whatever their number
+
 - whoever links the module keeps it: the classes of a module register
   themselves in the factory from a static initialiser, and a linker that
   drops what looks unused takes the registration away with it, so the target
   now tells whoever links it to keep the symbol that forces the module in,
   and on ELF, where naming the symbol is not enough, the library as a whole
+
 ### Fixed
 
 - makefile-c takes TwoStageStochasticBlock from its makefile-s, so that the
@@ -73,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.1] - 2025-12-12
 
-### Added 
+### Added
 
 - added Configuration for output Solution
 
@@ -82,17 +86,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - InvestmentBlockSolution and its handling
 
-### Changed 
+### Changed
 
 - adapted to new standard organization of makefiles
 
-### Fixed 
+### Fixed
 
 - properly translated investment variable values in
   InvestmentBlockSolution when f\_reformulate\_bounds
   == true
 
 ## [0.1.0] - 2024-02-29
+
+### Added
 
 - First test release
 
