@@ -1221,6 +1221,13 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
    return( Solver::kInfeasible );
    }
 
+  // the Solver of the inner Block gave no solution and no proof that there
+  // is none: which of the two it was is said, the kError that reaches the
+  // caller telling neither the status nor which Solver returned it
+  std::cout << "InvestmentFunction::compute(): " << solver->classname()
+            << " on the inner Block returned status " << f_solver_status
+            << " with no solution and no proof of infeasibility" << std::endl;
+
   f_ignore_modifications = saved_f_ignore_modifications;
   solver->set_id( solver_id );
   return( kError );

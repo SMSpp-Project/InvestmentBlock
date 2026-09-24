@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `InvestmentFunction::compute()` says which Solver of the inner Block
+  returned which status when that Solver gives no solution and no proof that
+  there is none: the caller reads `kError` and nothing else, so a run that
+  stopped there told neither what answered nor what it answered
+
+
 - the comment of the feasibility cut says why a certificate of infeasibility
   supports no cut against a scaled design, a kappa entering the constraints
   it appears in through their right-hand side alone, with the numbers of the
