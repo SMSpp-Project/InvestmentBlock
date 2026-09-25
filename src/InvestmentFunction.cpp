@@ -67,6 +67,33 @@
 using namespace SMSpp_di_unipi_it;
 
 /*--------------------------------------------------------------------------*/
+/*------------------------------ LOCAL HELPERS -----------------------------*/
+/*--------------------------------------------------------------------------*/
+
+namespace {
+
+/* Sets a flag for as long as it lives, and puts back the value it found on
+ * every way out of the scope, a return or an exception alike. restore() puts
+ * it back earlier, where the flag must be down before the scope ends; the
+ * destructor then writes the same value again. */
+
+class FlagGuard {
+ public:
+  FlagGuard( bool & flag , bool value ) : f_flag( flag ) , f_saved( flag ) {
+   f_flag = value;
+   }
+  FlagGuard( const FlagGuard & ) = delete;
+  FlagGuard & operator=( const FlagGuard & ) = delete;
+  ~FlagGuard() { restore(); }
+  void restore( void ) { f_flag = f_saved; }
+ private:
+  bool & f_flag;
+  const bool f_saved;
+ };
+
+}  // namespace
+
+/*--------------------------------------------------------------------------*/
 /*----------------------------- STATIC MEMBERS -----------------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -1116,8 +1143,8 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  void * solver_id = solver->id();
  solver->set_id( f_id );
 
- const auto saved_f_ignore_modifications = f_ignore_modifications;
- f_ignore_modifications = true;
+ // up until the linearization is read, on every way out
+ FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  if( generator_node_map.empty() )
   build_generator_node_map();
@@ -1134,7 +1161,6 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
              << "while updating the Blocks: '" << e.what() << "'" << std::endl;
    f_value = worst_value();
    output_function_value();
-   f_ignore_modifications = saved_f_ignore_modifications;
    solver->set_id( solver_id );
    return( kError );
   }
@@ -1216,7 +1242,6 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
        }
       }
 
-   f_ignore_modifications = saved_f_ignore_modifications;
    solver->set_id( solver_id );
    return( Solver::kInfeasible );
    }
@@ -1228,7 +1253,6 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
             << " on the inner Block returned status " << f_solver_status
             << " with no solution and no proof of infeasibility" << std::endl;
 
-  f_ignore_modifications = saved_f_ignore_modifications;
   solver->set_id( solver_id );
   return( kError );
  }
@@ -1268,7 +1292,7 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
   // TODO
  }
 
- f_ignore_modifications = saved_f_ignore_modifications;
+ ignore_modifications.restore();
 
  // Consider the linear term of the objective
 
@@ -1355,8 +1379,8 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    f_sddp_solver->set_id( solver_ids.back() );
  };
 
- const auto saved_f_ignore_modifications = f_ignore_modifications;
- f_ignore_modifications = true;
+ // up until the simulation is over, on every way out
+ FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  if( generator_node_map.empty() )
   build_generator_node_map();
@@ -1513,7 +1537,7 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  f_value = simulation_value;
 
- f_ignore_modifications = saved_f_ignore_modifications;
+ ignore_modifications.restore();
 
  // Compute the expectation of the operational costs
 
@@ -1650,8 +1674,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  const auto num_scenarios = get_number_scenarios();
  f_value = 0.0;
 
- const auto saved_f_ignore_modifications = f_ignore_modifications;
- f_ignore_modifications = true;
+ // up until the simulation is over, on every way out
+ FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  f_solver_status = kUnEval;
 
@@ -1808,7 +1832,7 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
 
  auto local_value = simulation_value;
 
- f_ignore_modifications = saved_f_ignore_modifications;
+ ignore_modifications.restore();
 
  // Compute the expectation of the operational costs
  local_value /= num_scenarios;
@@ -3340,9 +3364,9 @@ void InvestmentFunction::update_network_blocks
 
 void InvestmentFunction::update_blocks() {
 
- const auto saved_f_ignore_modifications = f_ignore_modifications;
-
- f_ignore_modifications = true;
+ // the Modification of writing the investment are this Function's own: they
+ // are ignored until the end, whichever way the end comes
+ FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  // The indices of the UnitBlocks
  std::vector< Index > block_indices;
@@ -3385,7 +3409,6 @@ void InvestmentFunction::update_blocks() {
   update_network_blocks( i , line_indices , line_investment );
  }
 
- f_ignore_modifications = saved_f_ignore_modifications;
  f_blocks_are_updated = true;
 }  // end( InvestmentFunction::update_blocks )
 
