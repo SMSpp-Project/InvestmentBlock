@@ -2628,7 +2628,9 @@ double InvestmentFunction::compute_scale_linearization
     if( auto u = block->get_commitment( g ) ) {
      const auto commitment = u[ t ].get_value();
      const auto fixed_consumption = fc[ t ];
-     linearization += dual * fixed_consumption * ( 1.0 - commitment );
+     // the unit gives the node k * ( p - fc * ( 1 - u ) ): the fixed
+     // consumption of a unit that is off is subtracted
+     linearization -= dual * fixed_consumption * ( 1.0 - commitment );
 
      assert( u[ t ].is_active( &constraint ) );
      assert( function->is_active( &u[ t ] ) );

@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- the derivative with respect to the scale factor of a unit subtracts its
+  fixed consumption when it is off
+
 - the step that fetches the data archive of this module says what went wrong
   when it goes wrong: the download is checked, an archive that did not arrive
   is removed instead of being left on disk for the build to take for the real
