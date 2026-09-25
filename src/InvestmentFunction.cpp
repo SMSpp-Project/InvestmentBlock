@@ -79,17 +79,17 @@ namespace {
 
 class FlagGuard {
  public:
-  FlagGuard( bool & flag , bool value ) : f_flag( flag ) , f_saved( flag ) {
-   f_flag = value;
-   }
-  FlagGuard( const FlagGuard & ) = delete;
-  FlagGuard & operator=( const FlagGuard & ) = delete;
-  ~FlagGuard() { restore(); }
-  void restore( void ) { f_flag = f_saved; }
+ FlagGuard( bool & flag , bool value ) : f_flag( flag ) , f_saved( flag ) {
+  f_flag = value;
+  }
+ FlagGuard( const FlagGuard & ) = delete;
+ FlagGuard & operator=( const FlagGuard & ) = delete;
+ ~FlagGuard() { restore(); }
+ void restore( void ) { f_flag = f_saved; }
  private:
-  bool & f_flag;
-  const bool f_saved;
- };
+ bool & f_flag;
+ const bool f_saved;
+};
 
 }  // namespace
 
@@ -1143,7 +1143,8 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  void * solver_id = solver->id();
  solver->set_id( f_id );
 
- // up until the linearization is read, on every way out
+ // the Modification of the inner Block are ignored until the linearization
+ // is read, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  if( generator_node_map.empty() )
@@ -1379,7 +1380,8 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    f_sddp_solver->set_id( solver_ids.back() );
  };
 
- // up until the simulation is over, on every way out
+ // the Modification of the inner Blocks are ignored until the simulation is
+ // over, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  if( generator_node_map.empty() )
@@ -1674,7 +1676,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  const auto num_scenarios = get_number_scenarios();
  f_value = 0.0;
 
- // up until the simulation is over, on every way out
+ // the Modification of the inner Blocks are ignored until the simulation is
+ // over, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  f_solver_status = kUnEval;
@@ -2820,8 +2823,8 @@ double InvestmentFunction::compute_scale_linearization
  /* Add the contribution associated with the pollutant budget constraints.
   * In the constraint of zone z of pollutant p the factor multiplies rho * p
   * for each generator of the UnitBlock in that zone and sigma * v for each
-  * of its storages, which are at the node of its first generator [see
-  * UCBlock::for_each_pollutant_term()]. */
+  * of its storages, which are at the node of its first generator (see
+  * UCBlock::for_each_pollutant_term()). */
 
  const auto & pollutant_constraints =
   ucblock->get_const_pollutant_constraints();
@@ -2835,7 +2838,7 @@ double InvestmentFunction::compute_scale_linearization
   // an empty table means one zone per pollutant, with all the nodes in it
   const auto zone_of_node = [ & ]( Index p , Index node ) -> Index {
    return( pollutant_zone.empty() ? 0 : pollutant_zone[ p ][ node ] );
-   };
+  };
 
   // the generators and the storages of the UCBlock are numbered unit after
   // unit: the index of the first ones of this UnitBlock
@@ -2845,7 +2848,7 @@ double InvestmentFunction::compute_scale_linearization
    const auto unit = ucblock->get_unit_block( u );
    first_generator += unit->get_number_generators();
    first_storage += unit->get_number_storages();
-   }
+  }
 
   for( Index p = 0 ; p < pollutant_constraints.size() ; ++p ) {
 
@@ -2861,7 +2864,7 @@ double InvestmentFunction::compute_scale_linearization
      linearization += dual *
       ucblock->get_pollutant_rho( t , p , first_generator + g ) *
       active_power[ t ].get_value();
-    }
+   } // end( for each generator )
 
    if( ! has_storage_rho )
     continue;
@@ -2878,9 +2881,9 @@ double InvestmentFunction::compute_scale_linearization
       linearization += dual *
        ucblock->get_pollutant_storage_rho( t , p , first_storage + s ) *
        level[ t ].get_value();
-   }
+  } // end( for each pollutant )
 
-  } // end( non-empty pollutant budget constraints )
+ } // end( non-empty pollutant budget constraints )
 
  /* Finally, add the contribution associated with the objective function (if
   * any) of the UnitBlock.
@@ -3429,8 +3432,8 @@ void InvestmentFunction::update_network_blocks
 
 void InvestmentFunction::update_blocks() {
 
- // the Modification of writing the investment are this Function's own: they
- // are ignored until the end, whichever way the end comes
+ // the Modification issued while writing the investment are this Function's
+ // own: they are ignored up to the end, whichever way the end comes
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  // The indices of the UnitBlocks
