@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- the derivative with respect to the scale factor of a unit takes in the
+  rows of the pollutant budget, the storage levels of the unit included
+
 - after a compute that fails, the Function hears again the Modification of
   its inner Block
 
