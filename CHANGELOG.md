@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linker for the symbol that forces the module in (`-u`), which ld64,
   unlike the ELF linker, counts as a use of the library
 
+- with more than one MPI process, every process of an InvestmentFunction over
+  an SDDPBlock gets the value and the linearization that process 0 simulates:
+  the others used to come back with neither, so that their Solver stopped at
+  the first point and left process 0 waiting in the next training
+
 - the derivative with respect to the scale factor of a unit takes in the
   rows of the pollutant budget, the storage levels of the unit included
 

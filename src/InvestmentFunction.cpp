@@ -1108,8 +1108,22 @@ int InvestmentFunction::compute( bool changedvars ) {
   return( kError ); // If this does not work, this is clearly an error.
 
  int status;
- if( get_sddp_block() )
+ if( get_sddp_block() ) {
   status = compute_SDDPBlock( changedvars , owned );
+#ifdef USE_MPI
+  // only rank 0 simulates [see compute_SDDPBlock()], and every other rank
+  // takes what it found: the Solver of this Function runs on every rank, and
+  // only with the same answers does it ask for the same points on each, as
+  // the training of the SDDPBlock, collective, requires
+  boost::mpi::communicator world;
+  boost::mpi::broadcast( world , status , 0 );
+  boost::mpi::broadcast( world , f_solver_status , 0 );
+  boost::mpi::broadcast( world , f_value , 0 );
+  boost::mpi::broadcast( world , f_has_value , 0 );
+  boost::mpi::broadcast( world , f_has_diagonal_linearization , 0 );
+  boost::mpi::broadcast( world , v_linearization , 0 );
+#endif
+ }
  else if( get_ucblock() || get_tssb_block() )
   // the same computation serves both: fix the investment in the inner
   // Block, solve it and read value and linearization off its Solver. What a
@@ -1431,9 +1445,15 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
 #ifdef USE_MPI
  {
+  // only rank 0 simulates: the cuts reach the SDDPBlock of a rank through the
+  // subproblems that rank solves in the training, and rank 0 is the only one
+  // sure to solve some at every stage. compute() hands its outcome to the
+  // other ranks, which have nothing to do here but give the identity back
   boost::mpi::communicator communicator;
-  if( communicator.rank() )
-   return( kOK ); // Abort the computation of positive rank processes
+  if( communicator.rank() ) {
+   unlend_identity();
+   return( kOK );
+  }
  }
 #endif
 
