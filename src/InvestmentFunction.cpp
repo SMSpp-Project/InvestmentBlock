@@ -78,17 +78,17 @@ namespace {
 
 class FlagGuard {
  public:
-  FlagGuard( bool & flag , bool value ) : f_flag( flag ) , f_saved( flag ) {
-   f_flag = value;
-   }
-  FlagGuard( const FlagGuard & ) = delete;
-  FlagGuard & operator=( const FlagGuard & ) = delete;
-  ~FlagGuard() { restore(); }
-  void restore( void ) { f_flag = f_saved; }
+ FlagGuard( bool & flag , bool value ) : f_flag( flag ) , f_saved( flag ) {
+  f_flag = value;
+  }
+ FlagGuard( const FlagGuard & ) = delete;
+ FlagGuard & operator=( const FlagGuard & ) = delete;
+ ~FlagGuard() { restore(); }
+ void restore( void ) { f_flag = f_saved; }
  private:
-  bool & f_flag;
-  const bool f_saved;
- };
+ bool & f_flag;
+ const bool f_saved;
+};
 
 }  // namespace
 
@@ -1287,8 +1287,22 @@ int InvestmentFunction::compute( bool changedvars ) {
   return( kError ); // If this does not work, this is clearly an error.
 
  int status;
- if( get_sddp_block() )
+ if( get_sddp_block() ) {
   status = compute_SDDPBlock( changedvars , owned );
+#ifdef USE_MPI
+  // only rank 0 simulates [see compute_SDDPBlock()], and every other rank
+  // takes what it found: the Solver of this Function runs on every rank, and
+  // only with the same answers does it ask for the same points on each, as
+  // the training of the SDDPBlock, collective, requires
+  boost::mpi::communicator world;
+  boost::mpi::broadcast( world , status , 0 );
+  boost::mpi::broadcast( world , f_solver_status , 0 );
+  boost::mpi::broadcast( world , f_value , 0 );
+  boost::mpi::broadcast( world , f_has_value , 0 );
+  boost::mpi::broadcast( world , f_has_diagonal_linearization , 0 );
+  boost::mpi::broadcast( world , v_linearization , 0 );
+#endif
+ }
  else if( get_ucblock() || get_tssb_block() )
   // the same computation serves both: fix the investment in the inner
   // Block, solve it and read value and linearization off its Solver. What a
@@ -1322,7 +1336,8 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  void * solver_id = solver->id();
  solver->set_id( f_id );
 
- // up until the linearization is read, on every way out
+ // the Modification of the inner Block are ignored until the linearization
+ // is read, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  if( generator_node_map.empty() )
@@ -1424,6 +1439,13 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
    solver->set_id( solver_id );
    return( Solver::kInfeasible );
    }
+
+  // the Solver of the inner Block gave no solution and no proof that there
+  // is none: which of the two it was is said, the kError that reaches the
+  // caller telling neither the status nor which Solver returned it
+  std::cout << "InvestmentFunction::compute(): " << solver->classname()
+            << " on the inner Block returned status " << f_solver_status
+            << " with no solution and no proof of infeasibility" << std::endl;
 
   solver->set_id( solver_id );
   return( kError );
@@ -1536,7 +1558,8 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    f_sddp_solver->set_id( solver_ids.back() );
  };
 
- // up until the simulation is over, on every way out
+ // the Modification of the inner Blocks are ignored until the simulation is
+ // over, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  if( generator_node_map.empty() )
@@ -1586,9 +1609,15 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
 #ifdef USE_MPI
  {
+  // only rank 0 simulates: the cuts reach the SDDPBlock of a rank through the
+  // subproblems that rank solves in the training, and rank 0 is the only one
+  // sure to solve some at every stage. compute() hands its outcome to the
+  // other ranks, which have nothing to do here but give the identity back
   boost::mpi::communicator communicator;
-  if( communicator.rank() )
-   return( kOK ); // Abort the computation of positive rank processes
+  if( communicator.rank() ) {
+   unlend_identity();
+   return( kOK );
+  }
  }
 #endif
 
@@ -1816,7 +1845,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  const auto num_scenarios = get_number_scenarios();
  f_value = 0.0;
 
- // up until the simulation is over, on every way out
+ // the Modification of the inner Blocks are ignored until the simulation is
+ // over, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  f_solver_status = kUnEval;
@@ -2739,9 +2769,9 @@ void InvestmentFunction::build_generator_node_map() {
 double InvestmentFunction::compute_scale_linearization
 ( Index block_index , Index stage , Index sub_block_index ) {
 
- /* TODO The following code does not take into account the pollutant budget
-  * constraints and the heat constraints. When these constraints are correctly
-  * implemented, this function must be updated. */
+ /* TODO The following code does not take into account the reactive node
+  * injection constraints and the heat constraints. When these constraints are
+  * correctly implemented, this function must be updated. */
 
  const auto ucblock = get_ucblock( stage , sub_block_index );
  const auto network_data = ucblock->get_NetworkData();
@@ -2779,7 +2809,9 @@ double InvestmentFunction::compute_scale_linearization
     if( auto u = block->get_commitment( g ) ) {
      const auto commitment = u[ t ].get_value();
      const auto fixed_consumption = fc[ t ];
-     linearization += dual * fixed_consumption * ( 1.0 - commitment );
+     // the unit gives the node k * ( p - fc * ( 1 - u ) ): the fixed
+     // consumption of a unit that is off is subtracted
+     linearization -= dual * fixed_consumption * ( 1.0 - commitment );
 
      assert( u[ t ].is_active( &constraint ) );
      assert( function->is_active( &u[ t ] ) );
@@ -2941,6 +2973,71 @@ double InvestmentFunction::compute_scale_linearization
   } // end( for each time instant )
 
  } // end( non-empty inertia demand constraints )
+
+ /* Add the contribution associated with the pollutant budget constraints.
+  * In the constraint of zone z of pollutant p the factor multiplies rho * p
+  * for each generator of the UnitBlock in that zone and sigma * v for each
+  * of its storages, which are at the node of its first generator (see
+  * UCBlock::for_each_pollutant_term()). */
+
+ const auto & pollutant_constraints =
+  ucblock->get_const_pollutant_constraints();
+
+ if( ! pollutant_constraints.empty() ) {
+
+  const auto & pollutant_zone = ucblock->get_pollutant_zone();
+  const auto & number_pollutant_zones = ucblock->get_number_pollutant_zones();
+  const bool has_storage_rho = ! ucblock->get_pollutant_storage_rho().empty();
+
+  // an empty table means one zone per pollutant, with all the nodes in it
+  const auto zone_of_node = [ & ]( Index p , Index node ) -> Index {
+   return( pollutant_zone.empty() ? 0 : pollutant_zone[ p ][ node ] );
+  };
+
+  // the generators and the storages of the UCBlock are numbered unit after
+  // unit: the index of the first ones of this UnitBlock
+  Index first_generator = 0;
+  Index first_storage = 0;
+  for( Index u = 0 ; u < block_index ; ++u ) {
+   const auto unit = ucblock->get_unit_block( u );
+   first_generator += unit->get_number_generators();
+   first_storage += unit->get_number_storages();
+  }
+
+  for( Index p = 0 ; p < pollutant_constraints.size() ; ++p ) {
+
+   for( Index g = 0 ; g < block->get_number_generators() ; ++g ) {
+    const auto zone = zone_of_node( p , get_node( stage , block_index , g ) );
+    if( zone >= number_pollutant_zones[ p ] )
+     continue;  // the generator belongs to no zone of pollutant p
+    const auto active_power = block->get_active_power( g );
+    if( ! active_power )
+     continue;
+    const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
+    for( Index t = 0 ; t < time_horizon ; ++t )
+     linearization += dual *
+      ucblock->get_pollutant_rho( t , p , first_generator + g ) *
+      active_power[ t ].get_value();
+   } // end( for each generator )
+
+   if( ! has_storage_rho )
+    continue;
+
+   const auto zone = zone_of_node( p , block->get_number_generators() ?
+                                       get_node( stage , block_index , 0 ) :
+                                       0 );
+   if( zone >= number_pollutant_zones[ p ] )
+    continue;  // the storages belong to no zone of pollutant p
+   const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
+   for( Index s = 0 ; s < block->get_number_storages() ; ++s )
+    if( const auto level = block->get_storage_level( s ) )
+     for( Index t = 0 ; t < time_horizon ; ++t )
+      linearization += dual *
+       ucblock->get_pollutant_storage_rho( t , p , first_storage + s ) *
+       level[ t ].get_value();
+  } // end( for each pollutant )
+
+ } // end( non-empty pollutant budget constraints )
 
  /* Finally, add the contribution associated with the objective function (if
   * any) of the UnitBlock.
@@ -3640,8 +3737,8 @@ void InvestmentFunction::update_network_blocks
 
 void InvestmentFunction::update_blocks() {
 
- // the Modification of writing the investment are this Function's own: they
- // are ignored until the end, whichever way the end comes
+ // the Modification issued while writing the investment are this Function's
+ // own: they are ignored up to the end, whichever way the end comes
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
  // The indices of the UnitBlocks

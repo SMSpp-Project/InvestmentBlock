@@ -76,7 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `set_variable_bounds()` on InvestmentBlock, plus accessors for the
   programmatic construction path
 
-### Changed 
+- the data archive 2026-09-26, which adds to `pypsa-data` one scenario of
+  the modular family of pypsa2smspp with the design in an InvestmentBlock
+  over the UCBlock (`smspp_mod_t48_s1_b2c_det_investment.nc`), the same
+  network the archive of UCBlock has with the design in the units
+
+### Changed
 
 - `generate_objective()` now builds a disaggregated sum when there are multiple
   components; the single-component (legacy) path is unchanged
@@ -102,6 +107,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   none (all the design variables, in natural order); `is_disaggregated()` is
   now structural (`get_number_nested_Blocks() > 0`)
 
+- the data archive is downloaded by version: `DATA_VERSION` in CMakeLists.txt
+  names the version of the Package Registry to read, and the archive and the
+  marker of its extraction carry it in their name, so that a tree holding
+  an older extraction (the cache of the CI, or a clone extracted before)
+  downloads and extracts again instead of running on the old data;
+  data/upload-nc4 publishes the archive under that version
+
+- `InvestmentFunction::compute()` says which Solver of the inner Block
+  returned which status when that Solver gives no solution and no proof that
+  there is none: the caller reads `kError` and nothing else, so a run that
+  stopped there told neither what answered nor what it answered
+
+- the comment of the feasibility cut says why a certificate of infeasibility
+  supports no cut against a scaled design, a kappa entering the constraints
+  it appears in through their right-hand side alone, with the numbers of the
+  instance where it was measured
+
+- the two indices of a unit under investment are named inside the loop and
+  not by a structured binding of it, a structured binding being what a lambda
+  cannot capture when OpenMP is on
+
+- the walk over what a Block holds asks the Block for its groups of
+  Constraint, one run at a time, rather than the vectors of `boost::any` that
+  are not there any more: the constant of a cut is summed over them, and a
+  combination of linearizations keeps the coefficients of its constituents
+  whatever their number
+
+- whoever links the module keeps it: the classes of a module register
+  themselves in the factory from a static initialiser, and a linker that
+  drops what looks unused takes the registration away with it, so the target
+  now tells whoever links it to keep the symbol that forces the module in,
+  and on ELF, where naming the symbol is not enough, the library as a whole
+
 ### Removed
 
 - the optional `NumComponents` dimension (the component count is implicit in
@@ -110,7 +148,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_variables_writable()` (superseded by `fix_design_variable()` and by
   `add_component()` wiring the actives itself)
 
-### Fixed 
+### Fixed
+
+- on macOS a program linking the module lost the classes the module
+  registers in the factories when the linker dropped the library, as it
+  does under `-dead_strip_dylibs`, which conda sets: the target now asks the
+  linker for the symbol that forces the module in (`-u`), which ld64,
+  unlike the ELF linker, counts as a use of the library
+
+- with more than one MPI process, every process of an InvestmentFunction over
+  an SDDPBlock gets the value and the linearization that process 0 simulates:
+  the others used to come back with neither, so that their Solver stopped at
+  the first point and left process 0 waiting in the next training
+
+- the derivative with respect to the scale factor of a unit takes in the
+  rows of the pollutant budget, the storage levels of the unit included
+
+- after a compute that fails, the Function hears again the Modification of
+  its inner Block
+
+- the derivative with respect to the scale factor of a unit subtracts its
+  fixed consumption when it is off
+
+- the step that fetches the data archive of this module says what went wrong
+  when it goes wrong: the download is checked, an archive that did not arrive
+  is removed instead of being left on disk for the build to take for the real
+  one, and the message names the URL. A server that answers with an error page
+  used to leave a file of a few bytes there, which made the next build fail
+  while extracting it, with the message of `tar` and no mention of the
+  download
 
 - makefile-c takes TwoStageStochasticBlock from its makefile-s, so that the
   core SMS++ objects are not listed twice
@@ -172,7 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.1] - 2025-12-12
 
-### Added 
+### Added
 
 - added Configuration for output Solution
 
@@ -181,18 +247,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - InvestmentBlockSolution and its handling
 
-### Changed 
+### Changed
 
 - adapted to new standard organization of makefiles
 
-### Fixed 
+### Fixed
 
 - properly translated investment variable values in
   InvestmentBlockSolution when f\_reformulate\_bounds
   == true
 
-
 ## [0.1.0] - 2024-02-29
+
+### Added
 
 - First test release
 
