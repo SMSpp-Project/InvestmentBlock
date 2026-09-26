@@ -1123,7 +1123,7 @@ int InvestmentFunction::compute( bool changedvars ) {
   boost::mpi::broadcast( world , f_has_diagonal_linearization , 0 );
   boost::mpi::broadcast( world , v_linearization , 0 );
 #endif
- }
+  }
  else if( get_ucblock() || get_tssb_block() )
   // the same computation serves both: fix the investment in the inner
   // Block, solve it and read value and linearization off its Solver. What a
@@ -1453,7 +1453,7 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   if( communicator.rank() ) {
    unlend_identity();
    return( kOK );
-  }
+   }
  }
 #endif
 
