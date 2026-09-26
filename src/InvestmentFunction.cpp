@@ -1476,6 +1476,10 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
              << e.what() << "'" << std::endl;
    solver->set_id( solver_id );
    output_function_value();
+   // without a linearization the caller can do nothing with this point, and
+   // the status of the solve would tell it all went well; it is also what a
+   // call with nothing changed returns, so it is the status that is set
+   f_solver_status = kError;
    return( f_solver_status );
   }
  }

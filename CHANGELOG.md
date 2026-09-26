@@ -150,6 +150,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `InvestmentFunction::compute()` returns `kError` when the inner Block is
+  solved but its linearization cannot be read, e.g. because its Solver gives
+  no dual solution, and a call with nothing changed returns it again: it
+  used to return the status of the solve, with no value and no
+  linearization, and a bundle above it went on and could declare an optimum
+  of 0
+
 - on macOS a program linking the module lost the classes the module
   registers in the factories when the linker dropped the library, as it
   does under `-dead_strip_dylibs`, which conda sets: the target now asks the
