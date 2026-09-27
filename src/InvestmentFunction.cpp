@@ -165,21 +165,18 @@ InvestmentFunction::~InvestmentFunction() {
 void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                                       ModParam issueMod ) {
 
- // Deserialize the attributes
+ // The two attributes that sized by replication every battery, or every
+ // intermittent unit, have left the format: each asset says how it is sized
+ // in "AssetMethod". A file that still carries one is refused, rather than
+ // read as a different model than the one it was written for
 
- auto replicate_battery = group.getAtt( "ReplicateBatteryUnits" );
- if( ( ! replicate_battery.isNull() ) ) {
-  int replicate;
-  replicate_battery.getValues( & replicate );
-  f_replicate_battery = replicate;
- }
-
- auto replicate_intermittent = group.getAtt( "ReplicateIntermittentUnits" );
- if( ! replicate_intermittent.isNull() ) {
-  int replicate;
-  replicate_intermittent.getValues( & replicate );
-  f_replicate_intermittent = replicate;
- }
+ for( const char * name : { "ReplicateBatteryUnits" ,
+                            "ReplicateIntermittentUnits" } )
+  if( ! group.getAtt( name ).isNull() )
+   throw( std::logic_error( std::string( "InvestmentFunction::deserialize: "
+                            "the attribute '" ) + name + "' is no longer "
+                            "supported: say how each asset is sized with "
+                            "'AssetMethod'." ) );
 
  // Deserialize the dimensions
 
@@ -1154,14 +1151,6 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
 void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
 
  Block::serialize( group );
-
- if( f_replicate_battery )
-  group.putAtt( "ReplicateBatteryUnits" , netCDF::NcInt() ,
-                int( f_replicate_battery ) );
-
- if( f_replicate_intermittent )
-  group.putAtt( "ReplicateIntermittentUnits" , netCDF::NcInt() ,
-                int( f_replicate_intermittent ) );
 
  // per-component weight: written only if != 1.0, so legacy single-component
  // files stay byte-identical (the default is restored on deserialize)
@@ -3142,8 +3131,8 @@ void InvestmentFunction::update_linearization_unit_blocks
   *
   * Which of the two an asset is, is now said by how it is sized -- eReplicate
   * is the scale factor, eResize the kappa -- and no longer by its class; the
-  * road that chooses by class asks this of the same two flags it asks
-  * everything else. */
+  * road that chooses by class takes the scale factor for a ThermalUnitBlock
+  * and the kappa for the other two classes it knows. */
 
  const auto no_cut_out_of_a_scale = [ & direction ]( Index block_index ) {
   if( direction )
@@ -3199,31 +3188,17 @@ void InvestmentFunction::update_linearization_unit_blocks
   }
 
   // ... and the road that chooses by class, for the assets whose Block
-  // registers no name and for the two global Replicate* flags
+  // registers no name
 
   else if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
    no_cut_out_of_a_scale( block_index );
    linearization[ var_index ] +=
     compute_scale_linearization( block_index , stage , sub_block_index );
   }
-  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
-   if( f_replicate_battery ) {
-    no_cut_out_of_a_scale( block_index );
-    linearization[ var_index ] +=
-     compute_scale_linearization( block_index , stage , sub_block_index );
-    }
-   else
-    linearization[ var_index ] += unit->get_kappa_linearization();
-  }
-  else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
-   if( f_replicate_intermittent ) {
-    no_cut_out_of_a_scale( block_index );
-    linearization[ var_index ] +=
-     compute_scale_linearization( block_index , stage , sub_block_index );
-    }
-   else
-    linearization[ var_index ] += unit->get_kappa_linearization();
-  }
+  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) )
+   linearization[ var_index ] += unit->get_kappa_linearization();
+  else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) )
+   linearization[ var_index ] += unit->get_kappa_linearization();
   else {
    // Unrecognized Block
    auto error_message = "InvestmentFunction::update_linearization: "
@@ -3502,14 +3477,6 @@ void InvestmentFunction::resolve_asset_methods( void ) {
  v_asset_query.assign( num_assets , nullptr );
  v_asset_sizing.assign( num_assets , eReplicate );
 
- /* The two global flags name a class each, so they say something that the
-  * names cannot: "every battery replicates". An asset whose way would have
-  * to come from one of them keeps the road that chooses by class, which is
-  * what the fallback in update_unit_block() is for. They are false in every
-  * instance we know of, so this is the road not taken. */
-
- const bool flagged = f_replicate_battery || f_replicate_intermittent;
-
  const auto ucblock = get_ucblock( 0 , 0 );
 
  if( ! ucblock )
@@ -3519,11 +3486,8 @@ void InvestmentFunction::resolve_asset_methods( void ) {
 
   const Block * block = nullptr;
 
-  if( v_asset_type[ i ] == eUnitBlock ) {
-   if( flagged )
-    continue;
+  if( v_asset_type[ i ] == eUnitBlock )
    block = ucblock->get_unit_block( v_asset_indices[ i ] );
-   }
   else
    // every NetworkBlock of the horizon is of the same class, so any of them
    // answers for all of them
@@ -3621,23 +3585,15 @@ void InvestmentFunction::update_unit_block( UnitBlock * block ,
    }
 
  // ... and the road that chooses by class, kept for the assets whose Block
- // registers neither name and for the two global Replicate* flags.
+ // registers neither name.
 
  if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
   block->scale( investment );
  }
- else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
-  if( f_replicate_battery )
-   unit->scale( investment );
-  else
-   unit->set_kappa( investment );
- }
- else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
-  if( f_replicate_intermittent )
-   unit->scale( investment );
-  else
-   unit->set_kappa( investment );
- }
+ else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) )
+  unit->set_kappa( investment );
+ else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) )
+  unit->set_kappa( investment );
  else {
   // Unrecognized UnitBlock
   auto error_message = "InvestmentFunction::update_unit_block: "

@@ -1422,19 +1422,11 @@ class InvestmentFunction : public C05Function , public Block {
   * managed by the serialize() method of the base Block class, plus the
   * InvestmentFunction-specific data with the following format:
   *
-  * - The attribute "ReplicateBatteryUnits", of type netCDF::Int(), which
-  *   indicates that investment in a battery unit is made by replicating the
-  *   unit, i.e., by considering multiple identical units of that unit. This
-  *   attribute is optional. If it is not provided or its value is zero, then
-  *   investing in a battery unit means scaling its minimum and maximum power
-  *   and storage levels. Otherwise, the battery units are replicated.
-  *
-  * - The attribute "ReplicateIntermittentUnits", of type netCDF::Int(), which
-  *   indicates that investment in an intermittent unit is made by replicating
-  *   the unit, i.e., by considering multiple identical units of that
-  *   unit. This attribute is optional. If it is not provided or its value is
-  *   zero, then investing in an intermittent unit means scaling its minimum
-  *   and maximum power. Otherwise, the intermittent units are replicated.
+  * - The attributes "ReplicateBatteryUnits" and "ReplicateIntermittentUnits"
+  *   of earlier versions, which sized by replication every battery or every
+  *   intermittent unit, are no longer part of the format: deserialize()
+  *   refuses a group that carries either, and how each asset is sized is
+  *   said by "AssetMethod".
   *
   * - The dimension "NumAssets" containing the number of assets that are
   *   subject to investment. This dimension is optional. If it is not
@@ -1896,10 +1888,6 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * if the lower bound l is finite. This bool variable thus indicates whether
   * the natural bounds on the active variables have been reformulated. */
-
- bool f_replicate_battery = false;       ///< replicate battery units
-
- bool f_replicate_intermittent = false;  ///< replicate intermittent units
 
  bool f_has_value = false;
  ///< the value of the Function was successfully computed
@@ -2420,9 +2408,7 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * The way comes from the instance when it says, and otherwise from the names
   * the Block registers: eResize where it offers it, eReplicate otherwise. An
-  * asset whose Block registers neither keeps the road that chooses by class,
-  * which is also what happens when one of the two global Replicate* flags is
-  * set, those naming a class and so saying something the names cannot.
+  * asset whose Block registers neither keeps the road that chooses by class.
   *
   * Called once, the first time the Blocks are updated: the inner Block does
   * not exist while this InvestmentFunction is being deserialized. */

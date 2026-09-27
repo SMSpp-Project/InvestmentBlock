@@ -148,6 +148,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_variables_writable()` (superseded by `fix_design_variable()` and by
   `add_component()` wiring the actives itself)
 
+- the `ReplicateBatteryUnits` and `ReplicateIntermittentUnits` attributes of
+  InvestmentFunction, which sized by replication every battery or every
+  intermittent unit: how each asset is sized is said by `AssetMethod`, and
+  a group that still carries either attribute is now refused at deserialize
+
 ### Fixed
 
 - `InvestmentFunction::compute()` returns `kError` when the inner Block is
