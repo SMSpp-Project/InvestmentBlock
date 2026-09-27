@@ -39,8 +39,9 @@ defined in `UCBlock`, like generating units and transmission lines.
 > state from one period to the next, written as one `Component_<k>` per
 > period, is solved as if the periods were independent, and no check
 > rejects it.
-> Solving with two or more components needs an OSiMP master, as the default
-> `QPPenaltyMP` does not handle a decomposed objective. The single-component
+> With BundleSolver 2.0 the number of components does not change how the
+> master problem is solved: it is the `:MILPSolver` of the BlockSolverConfig
+> named by the `strMPBSolverCfg` parameter. The single-component
 > (legacy) path — netCDF format included — is read and written byte-for-byte
 > unchanged.
 

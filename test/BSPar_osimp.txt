@@ -1,10 +1,12 @@
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - BSPar_osimp.txt - - - - - - - - - - - - - - - -
 #
-# Same as BSPar.txt but with the OSiMP master (intMPName 15 = 7 OSiMP + 8
-# duplicate-linearization check) instead of QPPenaltyMP (8). QPPenaltyMP
-# rejects a decomposable Fi (K >= 2 components), so the external QP master is
-# required to actually solve the disaggregated problem.
+# The BundleSolver parameters read by the local test suite, in the
+# configuration dialect of BundleSolver 2.0: the master problem is solved by
+# the :MILPSolver of the BlockSolverConfig named by strMPBSolverCfg, whatever
+# the number of components. The name of the file is historical: with
+# BundleSolver 1.x two or more components needed the OSiMP master, the default
+# QPPenaltyMP rejecting a decomposable objective.
 #
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
