@@ -81,6 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the UCBlock (`smspp_mod_t48_s1_b2c_det_investment.nc`), the same
   network the archive of UCBlock has with the design in the units
 
+- the `test/` folder, which holds `test/BSPar_osimp.txt`, the parameters of
+  BundleSolver 2.0 that the test suite of the module reads, `test/README.md`,
+  which says that the developers keep that suite locally and not in this
+  repository, and `test/.gitignore`; the build enables CTest and adds the
+  folder only where a `test/CMakeLists.txt` is present
+
 ### Changed
 
 - `generate_objective()` now builds a disaggregated sum when there are multiple
