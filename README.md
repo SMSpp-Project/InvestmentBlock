@@ -35,6 +35,10 @@ defined in `UCBlock`, like generating units and transmission lines.
 > identically. The implicit `Constraints_*` of a component are per-ASSET
 > (column j applies to the variable of asset j through the mapping);
 > inter-period constraints between the design variables belong at the root.
+> Components are independent by construction: an inner Block that carries
+> state from one period to the next, written as one `Component_<k>` per
+> period, is solved as if the periods were independent, and no check
+> rejects it.
 > Solving with two or more components needs an OSiMP master, as the default
 > `QPPenaltyMP` does not handle a decomposed objective. The single-component
 > (legacy) path — netCDF format included — is read and written byte-for-byte
