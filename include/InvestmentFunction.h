@@ -1966,13 +1966,6 @@ class InvestmentFunction : public C05Function , public Block {
   * share the same active variables while each invests only in some of them. */
 
  std::vector< Index > v_asset_baseline_var_index;
-
- /// inner Block provided from outside for the next deserialize(), if any
- /** Set (and reset) by deserialize( group , inner , issueMod ) only: while
-  * it is non-null, deserialize() takes this as the inner Block instead of
-  * creating one out of the 'Block' sub-group. */
-
- Block * f_external_inner_block = nullptr;
  ///< maps each asset to the active variable providing its baseline
  /**< When empty (the default) the baseline of each asset is the
   * InstalledQuantity datum (single-period, legacy). When set,
@@ -1980,6 +1973,13 @@ class InvestmentFunction : public C05Function , public Block {
   * of the variable whose value is asset i's baseline -- the multi-period
   * transition: the component of period t reads the design of period t-1.
   * See set_asset_baseline_variable_indices() and add_linear_term(). */
+
+ /// inner Block provided from outside for the next deserialize(), if any
+ /** Set (and reset) by deserialize( group , inner , issueMod ) only: while
+  * it is non-null, deserialize() takes this as the inner Block instead of
+  * creating one out of the 'Block' sub-group. */
+
+ Block * f_external_inner_block = nullptr;
 
  std::vector< Index > v_greedy_solvers;
  ///< indices of the SDDPGreedySolver
