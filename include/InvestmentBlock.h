@@ -889,6 +889,15 @@ class InvestmentBlockSolution : public Solution
    delete s;
   }
 
+/*--------------------------------------------------------------------------*/
+ /// tells whether the dual values held here are feasible for the Block
+ /** Asks the Solution of each inner Block held here, one per component, with
+  * that Block; false if there is none, or if one is missing, the design
+  * holding no dual value [see Solution::is_dual_feasible()]. */
+
+ bool is_dual_feasible( Block * block ,
+			Configuration * fsbc = nullptr ) override;
+
 /*------- METHODS DESCRIBING THE BEHAVIOR OF A InvestmentBlockSolution -----*/
 
  void read( const Block * block ) override final;

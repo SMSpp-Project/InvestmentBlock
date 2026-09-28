@@ -966,6 +966,41 @@ void InvestmentBlockSolution::write( Block * block )
 
 /*--------------------------------------------------------------------------*/
 
+bool InvestmentBlockSolution::is_dual_feasible( Block * block ,
+						Configuration * fsbc )
+{
+ auto IB = dynamic_cast< InvestmentBlock * >( block );
+ if( ! IB )
+  throw( std::invalid_argument( "InvestmentBlockSolution::is_dual_feasible: "
+				"block is not a InvestmentBlock" ) );
+
+ if( v_inner_Solutions.empty() )
+  return( false );
+
+ // 1 InvestmentFunction in the legacy path, K in the disaggregated one, as in
+ // write(): the root holds no Function in the latter
+ auto funcs = component_functions( IB );
+
+ if( v_inner_Solutions.size() != funcs.size() )
+  throw( std::invalid_argument( "InvestmentBlockSolution::is_dual_feasible: "
+				"inconsistent inner Solution count" ) );
+
+ for( Index k = 0 ; k < funcs.size() ; ++k ) {
+  if( funcs[ k ]->get_nested_Blocks().empty() )
+   throw( std::logic_error( "InvestmentBlockSolution::is_dual_feasible: "
+			    "the InvestmentBlock has no inner Block" ) );
+  if( ( ! v_inner_Solutions[ k ] ) ||
+      ( ! v_inner_Solutions[ k ]->is_dual_feasible(
+			     funcs[ k ]->get_nested_Blocks().front() , fsbc ) ) )
+   return( false );
+  }
+
+ return( true );
+
+ }  // end( InvestmentBlockSolution::is_dual_feasible )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentBlockSolution::serialize( netCDF::NcGroup & group ) const
 {
  Solution::serialize( group );
