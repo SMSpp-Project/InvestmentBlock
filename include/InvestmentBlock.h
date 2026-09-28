@@ -298,6 +298,29 @@ public:
 
  void deserialize( const netCDF::NcGroup & group ) override;
 
+/*--------------------------------------------------------------------------*/
+ /// tells whether the scenarios of a stochastic Block can be solved one by one
+ /** Tells whether the scenarios of \p block, a TwoStageStochasticBlock or a
+  * MultiStageStochasticBlock, can become independent components of an
+  * InvestmentBlock, which writes one investment into all of them. They can
+  * if every Variable that \p block makes first-stage, following its
+  * StaticAbstractPath, is the design Variable of an asset, which the
+  * investment replaces, and if every inner TwoStageStochasticBlock with more
+  * than one scenario shares among them exactly these Variable: any other
+  * that it shares is a decision of a later stage, a state or a design, which
+  * one investment for all the scenarios cannot be, and one that it does not
+  * share is free in its scenarios. A design Variable is told by the name of
+  * its group, which the classes of the assets give it. The paths are
+  * resolved by AbstractPath itself, as \p block resolves them, whose
+  * abstract Variable are generated if they are not yet.
+  *
+  * @param block the stochastic Block; any other Block is not separable.
+  *
+  * @param why if not nullptr, the cause is written there when the answer is
+  *        false. */
+
+ static bool is_separable( Block * block , std::string * why = nullptr );
+
 /**@} ----------------------------------------------------------------------*/
 /*-------------------------- OTHER INITIALIZATIONS -------------------------*/
 /*--------------------------------------------------------------------------*/

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `is_separable()` tells whether the scenarios of a TwoStageStochasticBlock
+  or MultiStageStochasticBlock can be solved one by one under a single
+  investment, and why not: every first-stage Variable has to be the design of
+  an asset, and every inner stochastic Block has to share exactly those among
+  its scenarios
+
 - `add_component()` to build an InvestmentBlock as a weighted sum of several
   InvestmentFunction components, each exposed separately to BundleSolver (the
   disaggregated path); the single-component (legacy) path is unchanged.

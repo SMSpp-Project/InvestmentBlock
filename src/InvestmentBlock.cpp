@@ -30,6 +30,12 @@
 
 #include "ScenarioGenerator.h"
 
+#include "AbstractPath.h"
+
+#include "Group.h"
+
+#include "TwoStageStochasticBlock.h"
+
 #include <algorithm>
 
 #include <cctype>
@@ -92,6 +98,133 @@ static std::vector< InvestmentFunction * > component_functions( const Block * IB
   for( Block::Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
    funcs.push_back( component_function( IB , k ) );          // disaggregated: K
  return( funcs );
+ }
+
+/*--------------------------------------------------------------------------*/
+/*------------------ FILE-LOCAL: THE DESIGN OF THE ASSETS ------------------*/
+/*--------------------------------------------------------------------------*/
+
+// whether v is the design Variable of an asset. The classes of the assets
+// register it in a group with one of these names, which the classes deriving
+// from them inherit (a NuclearUnitBlock has the x_thermal of the
+// ThermalUnitBlock it derives from): the name of the group, not the class of
+// the Block, tells a design
+
+static bool is_design( const ColVariable * v )
+{
+ static const std::set< std::string > designs = {
+  "x_intermittent" , "x_thermal" , "x_battery" , "x_converter" ,
+  "x_network" };
+
+ const auto group = v->get_Group();
+ return( group && designs.count( group->get_name() ) );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// v as a cause names it: its group and the class of the Block of the group
+
+static std::string name_of( const ColVariable * v )
+{
+ const auto group = v->get_Group();
+ if( ! group )
+  return( "a Variable in no group" );
+ return( "'" + group->get_name() + "' of the " +
+         group->get_Block()->classname() );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// the ColVariable that paths reach in block, each with the index of its path;
+// a path that reaches none gives a nullptr
+
+static std::vector< std::pair< const ColVariable * , Block::Index > >
+ reached( const std::vector< std::unique_ptr< AbstractPath > > & paths ,
+          Block * block )
+{
+ std::vector< std::pair< const ColVariable * , Block::Index > > vars;
+ for( Block::Index k = 0 ; k < paths.size() ; ++k ) {
+  const auto n = paths[ k ]->get_number_elements< ColVariable >( block );
+  for( Block::Index j = 0 ; j < n ; ++j ) {
+   const auto v = paths[ k ]->get_element< ColVariable >( block , j );
+   vars.emplace_back( v , k );
+   if( ! v )  // an empty path has an infinite number of elements
+    break;
+   }
+  }
+ return( vars );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// why the scenarios below node, root or a TwoStageStochasticBlock inside it,
+// cannot be separated, the empty string if they can. What root makes
+// first-stage is the investment, one in every leaf: it has to be made of
+// designs, and every node with more than one scenario has to share among
+// them exactly the investment, read in the Block its paths are resolved
+// against; any other Variable it shares is a decision of a later stage, and
+// an investment it does not share is free in all its scenarios but the
+// first one
+
+static std::string first_stage_obstacle( const TwoStageStochasticBlock * root ,
+                                         const TwoStageStochasticBlock * node ,
+                                         const std::string & where )
+{
+ // the deserialize of a TwoStageStochasticBlock refuses them for now; the
+ // day it reads them, they must not pass unread
+ if( ! node->get_paths_to_dynamic_here_and_now_vars().empty() )
+  return( where + " has dynamic first-stage Variable, which are not read" );
+
+ const auto & paths = root->get_paths_to_static_here_and_now_vars();
+ if( ( node == root ) ? ( ! paths.empty() )
+                      : ( node->get_number_scenarios() > 1 ) ) {
+  const auto leaf = node->get_first_stage_block( 0 );
+  const auto investment = reached( paths , leaf );
+  std::set< const ColVariable * > in_investment;
+  for( const auto & [ v , k ] : investment ) {
+   const auto at = where + ", first-stage path " + std::to_string( k ) +
+                   ( node == root ? ": " : " of the root: " );
+   if( ! v )
+    return( at + "it does not reach a ColVariable" );
+   if( ( node == root ) && ( ! is_design( v ) ) )
+    return( at + name_of( v ) + " is not the design of an asset, so the "
+            "scenarios share an operational decision" );
+   in_investment.insert( v );
+   }
+
+  if( node != root ) {
+   std::set< const ColVariable * > shared;
+   for( const auto & [ v , k ] :
+          reached( node->get_paths_to_static_here_and_now_vars() , leaf ) ) {
+    const auto at = where + ", first-stage path " + std::to_string( k ) +
+                    ": ";
+    if( ! v )
+     return( at + "it does not reach a ColVariable" );
+    if( ! is_design( v ) )
+     return( at + name_of( v ) + " is shared by the scenarios below it, a "
+             "state between the stages" );
+    if( ! in_investment.count( v ) )
+     return( at + name_of( v ) + " is shared only by the scenarios below "
+             "it, the design of a later stage, which the investment is not" );
+    shared.insert( v );
+    }
+   for( const auto & p : investment )
+    if( ! shared.count( p.first ) )
+     return( where + ": " + name_of( p.first ) + " is first-stage, but the "
+             "scenarios below it do not share it" );
+   }
+  }
+
+ for( Block::Index l = 0 ; l < node->get_number_nested_Blocks() ; ++l )
+  if( const auto sub = dynamic_cast< const TwoStageStochasticBlock * >(
+                                            node->get_nested_Block( l ) ) ) {
+   auto cause = first_stage_obstacle( root , sub , where + ", sub-Block " +
+                                      std::to_string( l ) );
+   if( ! cause.empty() )
+    return( cause );
+   }
+
+ return( "" );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -522,6 +655,24 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  investment_function->set_f_Block( this );
 
  Block::deserialize( group );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+bool InvestmentBlock::is_separable( Block * block , std::string * why )
+{
+ std::string cause;
+ if( const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( block ) ) {
+  tssb->generate_abstract_variables();
+  cause = first_stage_obstacle( tssb , tssb , tssb->classname() );
+  }
+ else
+  cause = ( block ? "a " + block->classname() : std::string( "no Block" ) ) +
+          " is not a TwoStageStochasticBlock";
+
+ if( why )
+  *why = cause;
+ return( cause.empty() );
  }
 
 /*--------------------------------------------------------------------------*/
