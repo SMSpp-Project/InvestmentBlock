@@ -2004,7 +2004,7 @@ class InvestmentFunction : public C05Function , public Block {
  ///< how each asset is sized, as an AssetMethod, once resolved
 
  bool f_methods_resolved = false;
- ///< whether the two vectors above have been filled
+ ///< whether the vectors above have been filled
 
  std::vector< double > v_linearization;
  ///< linearization associated with the most recent call to compute()
@@ -2394,7 +2394,9 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param block A pointer to a UnitBlock.
   *
-  * @param investment The investment to be made in the given UnitBlock. */
+  * @param investment The investment to be made in the given UnitBlock.
+  *
+  * @param asset The asset the UnitBlock is. */
 
  void update_unit_block( UnitBlock * block , double investment ,
                          Index asset );
@@ -2425,7 +2427,9 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param block_indices Indices of the UnitBlock which must be updated.
   *
-  * @param investment The investment to be made in each UnitBlock. */
+  * @param investment The investment to be made in each UnitBlock.
+  *
+  * @param assets The asset each UnitBlock is. */
 
  void update_unit_blocks( Index sub_block_index ,
                           const std::vector< Index > & block_indices ,
@@ -2443,7 +2447,9 @@ class InvestmentFunction : public C05Function , public Block {
   * @param line_indices Indices of the transmission lines which must be
   *        updated.
   *
-  * @param investment The investment to be made in each line. */
+  * @param investment The investment to be made in each line.
+  *
+  * @param assets The asset each line is. */
 
  void update_network_blocks( Index sub_block_index ,
                              const std::vector< Index > & line_indices ,
@@ -2625,6 +2631,8 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// updates the linearization with respect to the set of UnitBlock
+ /** @param direction Whether the duals are those of an unbounded dual
+  *        direction [see update_linearization()]. */
 
  void update_linearization_unit_blocks( Index stage , Index sub_block_index ,
 	   const std::vector< std::pair< Index , Index > > & block_indices ,
@@ -2883,6 +2891,7 @@ class InvestmentFunction : public C05Function , public Block {
                             std::vector< double > & linearization );
 
 /*--------------------------------------------------------------------------*/
+ /// as the one above, writing into \p linearization
 
  void update_linearization_unit_blocks(
    Index stage , Index sub_block_index ,
@@ -2890,6 +2899,7 @@ class InvestmentFunction : public C05Function , public Block {
    std::vector< double > & linearization , bool direction = false );
 
 /*--------------------------------------------------------------------------*/
+ /// as the one above, writing into \p linearization
 
  void update_linearization_network_blocks(
    Index stage , Index sub_block_index ,

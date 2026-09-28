@@ -3096,17 +3096,17 @@ void InvestmentFunction::update_linearization_unit_blocks
   const std::vector< std::pair< Index , Index > > & block_indices ,
   std::vector< double > & linearization , bool direction ) {
 
- /* The UnitBlocks that are subject to investment can be divided into two
+ /* The UnitBlocks that are subject to investment can be divided into
   * groups, depending on how the investment is represented.
   *
   * The first group is formed by the UnitBlocks whose scale factors represent
-  * the investment. These are the ThermalUnitBlock and the
-  * BatteryUnitBlock. For these UnitBlocks, the linearization is impacted by
+  * the investment. These are the assets sized by eReplicate. For these
+  * UnitBlocks, the linearization is impacted by
   * their objective function (as they are scaled) and the linking constraints
   * in the UCBlock.
   *
   * The second group is formed by the UnitBlocks whose kappa constants
-  * represent the investment. These are the IntermittentUnitBlocks. For these
+  * represent the investment. These are the assets sized by eResize. For these
   * UnitBlocks, the linearization is impacted only by the constraints in which
   * the kappa constants appear, which are the constraints defined by
   * themselves.
@@ -3134,11 +3134,11 @@ void InvestmentFunction::update_linearization_unit_blocks
   * road that chooses by class takes the scale factor for a ThermalUnitBlock
   * and the kappa for the other two classes it knows. */
 
- const auto no_cut_out_of_a_scale = [ & direction ]( Index block_index ) {
+ const auto no_cut_out_of_a_scale = [ & direction ]( Index asset ) {
   if( direction )
    throw( std::logic_error( "InvestmentFunction::update_linearization: the "
-			    "coefficient of the scaled UnitBlock " +
-			    std::to_string( block_index ) + " cannot be read "
+			    "coefficient of the scaled asset " +
+			    std::to_string( asset ) + " cannot be read "
 			    "out of an unbounded dual direction." ) );
   };
 
@@ -3166,7 +3166,7 @@ void InvestmentFunction::update_linearization_unit_blocks
     * its Objective [see UCBlock::get_replicate_linearization()], so it wants
     * the primal solution exactly as the road below does. */
    if( on_container )
-    no_cut_out_of_a_scale( block_index );
+    no_cut_out_of_a_scale( asset );
 
    double answer = 0;
    std::invoke( *v_asset_query[ asset ] ,
@@ -3182,7 +3182,7 @@ void InvestmentFunction::update_linearization_unit_blocks
   else if( ( asset < v_asset_setter.size() ) && v_asset_setter[ asset ] ) {
    // sized by eReplicate, and the container does not publish the derivative:
    // it is computed from outside, reading the rows of the UCBlock
-   no_cut_out_of_a_scale( block_index );
+   no_cut_out_of_a_scale( asset );
    linearization[ var_index ] +=
     compute_scale_linearization( block_index , stage , sub_block_index );
   }
@@ -3191,7 +3191,7 @@ void InvestmentFunction::update_linearization_unit_blocks
   // registers no name
 
   else if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
-   no_cut_out_of_a_scale( block_index );
+   no_cut_out_of_a_scale( asset );
    linearization[ var_index ] +=
     compute_scale_linearization( block_index , stage , sub_block_index );
   }
@@ -3248,8 +3248,7 @@ void InvestmentFunction::update_linearization_network_blocks
  Block::QueryType< Block::MF_dbl_msp , Block::c_Subset & , bool > * query
   = nullptr;
 
- if( ( ! line_indices.empty() ) &&
-     ( line_indices[ 0 ].second < v_asset_setter.size() ) &&
+ if( ( line_indices[ 0 ].second < v_asset_setter.size() ) &&
      v_asset_setter[ line_indices[ 0 ].second ] )
   if( const auto nb = ucblock->get_network_block( 0 ) )
    query = Block::get_query_fs< Block::MF_dbl_msp , Block::c_Subset & ,
@@ -3654,7 +3653,7 @@ void InvestmentFunction::update_network_blocks
  Block::FunctionType< Block::MF_dbl_it , Block::Subset && , bool > * setter
   = nullptr;
 
- if( ( ! assets.empty() ) && ( assets[ 0 ] < v_asset_setter.size() ) &&
+ if( ( assets[ 0 ] < v_asset_setter.size() ) &&
      v_asset_setter[ assets[ 0 ] ] )
   if( const auto ucb = get_ucblock( 0 , sub_block_index ) )
    if( const auto nb = ucb->get_network_block( 0 ) )
