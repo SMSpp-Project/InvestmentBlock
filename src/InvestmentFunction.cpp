@@ -16,16 +16,13 @@
 /*------------------------------ INCLUDES ----------------------------------*/
 /*--------------------------------------------------------------------------*/
 
-#include "BatteryUnitBlock.h"
 #include "BendersBFunction.h"
 #include "BendersBlock.h"
 #include "BlockSolverConfig.h"
-#include "DCNetworkBlock.h"
 #include "FRealObjective.h"
 #include "Observer.h"
 #include "OneVarConstraint.h"
 #include "RBlockConfig.h"
-#include "IntermittentUnitBlock.h"
 #include "InvestmentFunction.h"
 #include "SDDPBlock.h"
 #include "TwoStageStochasticBlock.h"
@@ -40,7 +37,6 @@
 #include "SDDPGreedySolver.h"
 #include "SDDPSolver.h"
 #include "SMSTypedefs.h"
-#include "ThermalUnitBlock.h"
 #include "UCBlock.h"
 
 #include <cmath>
@@ -176,7 +172,7 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    throw( std::logic_error( std::string( "InvestmentFunction::deserialize: "
                             "the attribute '" ) + name + "' is no longer "
                             "supported: say how each asset is sized with "
-                            "'AssetMethod'." ) );
+                            "'AssetSetter', or with 'AssetMethod'." ) );
 
  // Deserialize the dimensions
 
@@ -295,6 +291,55 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                               "AssetMethod: " + std::to_string( method ) +
                               "." ) );
    }
+
+  // The names of the methods that write each asset and read it back. They
+  // go together, and they leave no room for AssetMethod, which says the same
+  // thing for an instance without them [see resolve_asset_methods()].
+
+  ::deserialize( group , "AssetSetter" , num_assets , v_asset_setter_name ,
+                 true );
+  ::deserialize( group , "AssetLinearization" , num_assets ,
+                 v_asset_linearization_name , true );
+
+  if( v_asset_setter_name.empty() != v_asset_linearization_name.empty() )
+   throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetSetter' "
+                            "and 'AssetLinearization' go together, and only "
+                            "one of them is there." ) );
+
+  if( ( ! v_asset_setter_name.empty() ) && ( ! v_asset_method.empty() ) )
+   throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetMethod' "
+                            "is for an instance without 'AssetSetter', and "
+                            "this one has both." ) );
+
+  // one value for all the assets, as a scalar, or one each. The length is
+  // checked on the variable, before reading: ::deserialize() reads as many
+  // values as asked, and would drop the ones past them without a word
+  const auto one_each = [ & group , num_assets ]( const char * name ,
+                                                  std::vector< int > & v ) {
+   v.clear();
+   const auto var = group.getVar( name );
+   if( ( ! var.isNull() ) && ( var.getDimCount() == 1 ) &&
+       ( var.getDim( 0 ).getSize() != num_assets ) )
+    throw( std::logic_error( std::string( "InvestmentFunction::deserialize: "
+                             "the '" ) + name + "' netCDF variable, if "
+                             "provided, must be a scalar or have size "
+                             "'NumAssets'." ) );
+   ::deserialize( group , name , num_assets , v , true , true );
+   };
+
+  one_each( "AssetSignature" , v_asset_signature );
+  for( const auto signature : v_asset_signature )
+   if( signature )
+    throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
+                             "AssetSignature: " + std::to_string( signature )
+                             + "; 0 is the only one there is." ) );
+
+  one_each( "AssetFeasibilityCut" , v_asset_feasibility_cut );
+  for( const auto cut : v_asset_feasibility_cut )
+   if( ( cut != 0 ) && ( cut != 1 ) )
+    throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
+                             "AssetFeasibilityCut: " + std::to_string( cut ) +
+                             "." ) );
 
   if( ! v_asset_type.empty() ) {
    if( v_asset_type.size() == 1 )
@@ -910,18 +955,21 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
  v_asset_indices.erase( v_asset_indices.begin() + i );
  v_asset_type.erase( v_asset_type.begin() + i );
 
- if( ! v_asset_method.empty() )
-  v_asset_method.erase( v_asset_method.begin() + i );
+ for( auto v : { & v_asset_method , & v_asset_signature ,
+                  & v_asset_feasibility_cut } )
+  if( ! v->empty() )
+   v->erase( v->begin() + i );
 
- // the resolved methods are indexed by asset, so they no longer are: drop
+ for( auto v : { & v_asset_setter_name , & v_asset_linearization_name } )
+  if( ! v->empty() )
+   v->erase( v->begin() + i );
+
+ // the groups of assets are indexed by asset, so they no longer are: drop
  // them and let them be resolved again the next time the Blocks are updated
- v_asset_setter.clear();
- v_asset_query.clear();
- v_asset_sizing.clear();
+ v_asset_groups.clear();
  f_methods_resolved = false;
 
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
 
  if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
   return;
@@ -945,7 +993,6 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
   return;
 
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
 
  if( ( range.first == 0 ) && ( range.second == Index( v_x.size() ) ) ) {
   // removing *all* Variables
@@ -959,6 +1006,13 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
   v_asset_type.clear();
   v_cost.clear();
   v_disinvestment_cost.clear();
+  for( auto v : { & v_asset_method , & v_asset_signature ,
+                   & v_asset_feasibility_cut } )
+   v->clear();
+  v_asset_setter_name.clear();
+  v_asset_linearization_name.clear();
+  v_asset_groups.clear();
+  f_methods_resolved = false;
 
   // Now issue the Modification.
   // An InvestmentFunction is strongly quasi-additive.
@@ -1004,14 +1058,17 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
   v_disinvestment_cost.erase( v_disinvestment_cost_it.first ,
                               v_disinvestment_cost_it.second );
 
-  if( ! v_asset_method.empty() )
-   v_asset_method.erase( v_asset_method.begin() + range.first ,
-                         v_asset_method.begin() + range.second );
+  for( auto v : { & v_asset_method , & v_asset_signature ,
+                   & v_asset_feasibility_cut } )
+   if( ! v->empty() )
+    v->erase( v->begin() + range.first , v->begin() + range.second );
+
+  for( auto v : { & v_asset_setter_name , & v_asset_linearization_name } )
+   if( ! v->empty() )
+    v->erase( v->begin() + range.first , v->begin() + range.second );
 
   // the resolved methods are indexed by asset, so they no longer are
-  v_asset_setter.clear();
-  v_asset_query.clear();
-  v_asset_sizing.clear();
+  v_asset_groups.clear();
   f_methods_resolved = false;
  };
 
@@ -1078,9 +1135,15 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
   v_asset_type.clear();
   v_cost.clear();
   v_disinvestment_cost.clear();
+  for( auto v : { & v_asset_method , & v_asset_signature ,
+                   & v_asset_feasibility_cut } )
+   v->clear();
+  v_asset_setter_name.clear();
+  v_asset_linearization_name.clear();
+  v_asset_groups.clear();
+  f_methods_resolved = false;
 
   f_blocks_are_updated = false;
-  generator_node_map.clear(); // the generator map must be rebuilt
 
   // Now issue the Modification: note that the subset is empty.
   // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
@@ -1102,7 +1165,6 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
                                 "Variable index in the Subset indices." ) );
 
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
 
  const auto erase = [ this , &indices ]() {
   compact( v_asset_indices , indices );
@@ -1111,13 +1173,17 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
   compact( v_disinvestment_cost , indices );
   compact( v_x , indices );
 
-  if( ! v_asset_method.empty() )
-   compact( v_asset_method , indices );
+  for( auto v : { & v_asset_method , & v_asset_signature ,
+                   & v_asset_feasibility_cut } )
+   if( ! v->empty() )
+    compact( *v , indices );
+
+  for( auto v : { & v_asset_setter_name , & v_asset_linearization_name } )
+   if( ! v->empty() )
+    compact( *v , indices );
 
   // the resolved methods are indexed by asset, so they no longer are
-  v_asset_setter.clear();
-  v_asset_query.clear();
-  v_asset_sizing.clear();
+  v_asset_groups.clear();
   f_methods_resolved = false;
  };
 
@@ -1166,11 +1232,23 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
  ::serialize( group , "AssetType" , netCDF::NcUint() , NumAssets ,
               v_asset_type );
 
- // how each asset is sized: written only if the instance said it, so the
- // files that do not carry it stay byte-identical
+ // how each asset is sized, and by what: written only if the instance said
+ // it, so the files that do not carry it stay byte-identical
  if( ! v_asset_method.empty() )
   ::serialize( group , "AssetMethod" , netCDF::NcUint() , NumAssets ,
                v_asset_method );
+
+ ::serialize( group , "AssetSetter" , NumAssets , v_asset_setter_name );
+ ::serialize( group , "AssetLinearization" , NumAssets ,
+              v_asset_linearization_name );
+
+ if( ! v_asset_signature.empty() )
+  ::serialize( group , "AssetSignature" , netCDF::NcUint() , NumAssets ,
+               v_asset_signature );
+
+ if( ! v_asset_feasibility_cut.empty() )
+  ::serialize( group , "AssetFeasibilityCut" , netCDF::NcUint() , NumAssets ,
+               v_asset_feasibility_cut );
 
  // asset -> active-variable mapping: written only if non-identity (non-empty),
  // so legacy files stay byte-identical
@@ -1328,9 +1406,6 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  // the Modification of the inner Block are ignored until the linearization
  // is read, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
-
- if( generator_node_map.empty() )
-  build_generator_node_map();
 
  if( changedvars || ( ! f_blocks_are_updated ) ) {
   // Update the Blocks.
@@ -1554,9 +1629,6 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
  // the Modification of the inner Blocks are ignored until the simulation is
  // over, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
-
- if( generator_node_map.empty() )
-  build_generator_node_map();
 
  if( changedvars || ( ! f_blocks_are_updated ) ) {
   // Update the Blocks.
@@ -1809,9 +1881,6 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    }
   }
 
- if( generator_node_map.empty() )
-  build_generator_node_map();
-
  if( changedvars || ( ! f_blocks_are_updated ) ) {
   // Update the Blocks.
   try {
@@ -1857,7 +1926,10 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
 
  auto simulation_value = decltype( f_value )( 0 );
 
- std::vector< double > local_linearization( v_linearization.size() , 0 );
+ // one coefficient per active Variable, as reset_linearization() sizes it:
+ // v_linearization is empty until a linearization has been computed, and
+ // sizing on it wrote the first coefficient out of an empty vector
+ std::vector< double > local_linearization( v_x.size() , 0 );
 
 #ifdef USE_MPI
  boost::mpi::communicator world;
@@ -2481,9 +2553,14 @@ void InvestmentFunction::add_Modification( sp_Mod mod ,
 /*--------------------------------------------------------------------------*/
 
 int InvestmentFunction::get_inner_block_objective_sense() const {
- auto inner_block = get_ucblock( 0 , 0 );
- assert( inner_block );
- return( inner_block->get_objective_sense() );
+ if( const auto inner_block = get_ucblock( 0 , 0 ) )
+  return( inner_block->get_objective_sense() );
+ // an inner Block with no UCBlock is an error that compute() reports at the
+ // worst value, whose sign is asked here: the inner Block answers for its
+ // sub-Blocks, so that the report does not fail in turn
+ if( v_Block.empty() || ( ! v_Block.front() ) )
+  return( Objective::eUndef );
+ return( v_Block.front()->get_objective_sense() );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2668,451 +2745,16 @@ InvestmentFunction::compute_farkas_value( Index stage ,
 
 /*--------------------------------------------------------------------------*/
 
-Index InvestmentFunction::get_node( Index stage , Index block_index ,
-                                    Index generator ) const {
- // i is between 0 and the number of UnitBlock assets - 1.
- const auto i = v_block_indices_map[ block_index ];
- return( generator_node_map[ stage ][ i ][ generator ] );
-}
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::build_generator_node_map() {
-
- // The indices of the UnitBlocks
- std::vector< Index > block_indices;
- block_indices.reserve( v_asset_indices.size() );
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-  if( v_asset_type[ i ] == eUnitBlock )
-   block_indices.push_back( v_asset_indices[ i ] );
- }
-
- if( block_indices.empty() )
-  return;
-
- v_block_indices_map.resize
-  ( 1 + * std::max_element( block_indices.cbegin() , block_indices.cend() ) ,
-    Inf< Index >() );
- for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-  v_block_indices_map[ block_indices[ i ] ] = i;
- }
-
- const auto num_stages = get_number_stages();
-
- generator_node_map.resize( num_stages );
-
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-
-  generator_node_map[ stage ].resize( block_indices.size() );
-
-  const auto ucblock = get_ucblock( stage , 0 );
-  const auto network_data = ucblock->get_NetworkData();
-  const auto number_nodes = network_data ? network_data->get_number_nodes() : 1;
-
-  if( number_nodes <= 1 ) {
-   // Since there is only one node, all generators belong to the same node
-   // (node 0).
-   for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-    const auto unit_block = ucblock->get_unit_block( block_indices[ i ] );
-    const auto num_generators = unit_block->get_number_generators();
-    generator_node_map[ stage ][ i ].resize( num_generators , 0 );
-   }
-   continue;
-  }
-
-  // There are multiple nodes.
-
-  const auto number_units = ucblock->get_number_units();
-  const auto & generator_node = ucblock->get_generator_node();
-
-  for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-
-   Index elc_generator = 0;
-   for( Index unit_id = 0 ; unit_id < number_units ; ++unit_id ) {
-
-    const auto unit_block = ucblock->get_unit_block( unit_id );
-    const auto num_generators = unit_block->get_number_generators();
-
-    auto it = std::find( block_indices.cbegin() ,
-                         block_indices.cend() , unit_id );
-
-    const auto index = std::distance( block_indices.cbegin() , it );
-
-    if( index == block_indices.size() ) {
-     // This UnitBlock is not subject to investment.
-     elc_generator += num_generators;
-     continue;
-    }
-
-    generator_node_map[ stage ][ index ].resize( num_generators );
-
-    for( Index generator = 0 ; generator < num_generators ;
-         ++generator , ++elc_generator ) {
-     generator_node_map[ stage ][ index ][ generator ] =
-      generator_node[ elc_generator ];
-    }
-   } // end( for each UnitBlock )
-  } // end( for each node )
- } // end( for each stage )
-} // end( InvestmentFunction::build_generator_node_map )
-
-/*--------------------------------------------------------------------------*/
-
-double InvestmentFunction::compute_scale_linearization
-( Index block_index , Index stage , Index sub_block_index ) {
-
- /* TODO The following code does not take into account the reactive node
-  * injection constraints and the heat constraints. When these constraints are
-  * correctly implemented, this function must be updated. */
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto network_data = ucblock->get_NetworkData();
- const auto number_nodes = network_data ? network_data->get_number_nodes() : 1;
- const auto time_horizon = ucblock->get_time_horizon();
-
- const auto block = ucblock->get_unit_block( block_index );
-
- // This is the contribution to the linearization associated with this
- // UnitBlock.
- double linearization = 0;
-
- // Add the contribution associated with the node injection constraints
-
- const auto & node_injection_constraints =
-  ucblock->get_node_injection_constraints();
-
- for( Index t = 0 ; t < time_horizon ; ++t ) {
-
-  for( Index g = 0 ; g < block->get_number_generators() ; ++g ) {
-
-   const auto node = get_node( stage , block_index , g );
-
-   const auto & constraint = node_injection_constraints[ t ][ node ];
-   const auto function = constraint.get_function();
-
-   const auto dual = constraint.get_dual();
-   const auto & active_power = block->get_active_power( g )[ t ];
-   linearization += dual * active_power.get_value();
-
-   assert( active_power.is_active( &constraint ) < Inf< Index >() );
-   assert( function->is_active( &active_power ) < Inf< Index >() );
-
-   if( auto fc = block->get_fixed_consumption( g ) ) {
-    if( auto u = block->get_commitment( g ) ) {
-     const auto commitment = u[ t ].get_value();
-     const auto fixed_consumption = fc[ t ];
-     // the unit gives the node k * ( p - fc * ( 1 - u ) ): the fixed
-     // consumption of a unit that is off is subtracted
-     linearization -= dual * fixed_consumption * ( 1.0 - commitment );
-
-     assert( u[ t ].is_active( &constraint ) );
-     assert( function->is_active( &u[ t ] ) );
-    }
-   }
-
-  } // end( for each generator )
- } // end( for each time instant )
-
- // Add the contribution associated with the primary demand constraints.
-
- const auto & primary_demand_constraints =
-  ucblock->get_primary_demand_constraints();
-
- if( ! primary_demand_constraints.empty() ) {
-
-  const auto number_primary_zones = ucblock->get_number_primary_zones();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-   for( Index zone_id = 0 ; zone_id < number_primary_zones ; ++zone_id ) {
-    for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-     if( ! ucblock->node_belongs_to_primary_zone( node_id , zone_id ) )
-      continue;
-
-     // Compute the index of the first electrical generator of the current
-     // UnitBlock.
-     Index elc_generator = 0;
-     for( Index unit_id = 0 ; unit_id < block_index ; ++unit_id ) {
-      const auto unit_block = ucblock->get_unit_block( unit_id );
-      elc_generator += unit_block->get_number_generators();
-     }
-
-     const auto num_generators = block->get_number_generators();
-
-     for( Index generator = 0 ; generator < num_generators ;
-          ++generator , ++elc_generator ) {
-
-      if( ! ucblock->generator_belongs_to_node( elc_generator , node_id ) )
-       continue;
-
-      if( const auto primary_s_r =
-          block->get_primary_spinning_reserve( generator ) ) {
-
-       const auto primary_spinning_reserve = & primary_s_r[ t ];
-       const auto dual = primary_demand_constraints[ t ][ zone_id ].get_dual();
-       linearization += dual * primary_spinning_reserve->get_value();
-      }
-
-     } // end( for each generator )
-    } // end( for each node )
-   } // end( for each zone )
-  } // end( for each time instant )
-
- } // end( non-empty primary demand constraints )
-
- // Add the contribution associated with the secondary demand constraints.
-
- const auto & secondary_demand_constraints =
-  ucblock->get_secondary_demand_constraints();
-
- if( ! secondary_demand_constraints.empty() ) {
-
-  const auto number_secondary_zones = ucblock->get_number_secondary_zones();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-   for( Index zone_id = 0 ; zone_id < number_secondary_zones ; ++zone_id ) {
-    for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-     if( ! ucblock->node_belongs_to_secondary_zone( node_id , zone_id ) )
-      continue;
-
-     // Compute the index of the first electrical generator of the current
-     // UnitBlock.
-     Index elc_generator = 0;
-     for( Index unit_id = 0 ; unit_id < block_index ; ++unit_id ) {
-      const auto unit_block = ucblock->get_unit_block( unit_id );
-      elc_generator += unit_block->get_number_generators();
-     }
-
-     const auto num_generators = block->get_number_generators();
-
-     for( Index generator = 0 ; generator < num_generators ;
-          ++generator , ++elc_generator ) {
-
-      if( ! ucblock->generator_belongs_to_node( elc_generator , node_id ) )
-       continue;
-
-      if( const auto secondary_s_r =
-          block->get_secondary_spinning_reserve( generator ) ) {
-
-       const auto secondary_spinning_reserve = & secondary_s_r[ t ];
-       const auto dual = secondary_demand_constraints[ t ][ zone_id ].get_dual();
-       linearization += dual * secondary_spinning_reserve->get_value();
-      }
-
-     } // end( for each generator )
-    } // end( for each node )
-   } // end( for each zone )
-  } // end( for each time instant )
-
- } // end( non-empty secondary demand constraints )
-
- // Add the contribution associated with the inertia demand constraints.
-
- const auto & inertia_demand_constraints =
-  ucblock->get_inertia_demand_constraints();
-
- if( ! inertia_demand_constraints.empty() ) {
-
-  const auto number_inertia_zones = ucblock->get_number_inertia_zones();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-   for( Index zone_id = 0 ; zone_id < number_inertia_zones ; ++zone_id ) {
-    for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-     if( ! ucblock->node_belongs_to_inertia_zone( node_id , zone_id ) )
-      continue;
-
-     // Compute the index of the first electrical generator of the current
-     // UnitBlock.
-     Index elc_generator = 0;
-     for( Index unit_id = 0 ; unit_id < block_index ; ++unit_id ) {
-      const auto unit_block = ucblock->get_unit_block( unit_id );
-      elc_generator += unit_block->get_number_generators();
-     }
-
-     const auto num_generators = block->get_number_generators();
-
-     for( Index generator = 0 ; generator < num_generators ;
-          ++generator , ++elc_generator ) {
-
-      if( ! ucblock->generator_belongs_to_node( elc_generator , node_id ) )
-       continue;
-
-      const auto dual = inertia_demand_constraints[ t ][ zone_id ].get_dual();
-
-      // Commitment variable
-
-      auto commitment = block->get_commitment( generator );
-      auto inertia_commitment = block->get_inertia_commitment( generator );
-
-      if( commitment && inertia_commitment ) {
-       const auto commitment_t = & commitment[ t ];
-       linearization +=
-        dual * inertia_commitment[ t ] * commitment_t->get_value();
-      }
-
-      // Active power variable
-
-      auto active_power = block->get_active_power( generator );
-      auto inertia_power = block->get_inertia_power( generator );
-
-      if( active_power && inertia_power ) {
-       auto active_power_t = & active_power[ t ];
-       linearization += dual * inertia_power[ t ] * active_power_t->get_value();
-      }
-
-     } // end( for each generator )
-    } // end( for each node )
-   } // end( for each zone )
-  } // end( for each time instant )
-
- } // end( non-empty inertia demand constraints )
-
- /* Add the contribution associated with the pollutant budget constraints.
-  * In the constraint of zone z of pollutant p the factor multiplies rho * p
-  * for each generator of the UnitBlock in that zone and sigma * v for each
-  * of its storages, which are at the node of its first generator (see
-  * UCBlock::for_each_pollutant_term()). */
-
- const auto & pollutant_constraints =
-  ucblock->get_const_pollutant_constraints();
-
- if( ! pollutant_constraints.empty() ) {
-
-  const auto & pollutant_zone = ucblock->get_pollutant_zone();
-  const auto & number_pollutant_zones = ucblock->get_number_pollutant_zones();
-  const bool has_storage_rho = ! ucblock->get_pollutant_storage_rho().empty();
-
-  // an empty table means one zone per pollutant, with all the nodes in it
-  const auto zone_of_node = [ & ]( Index p , Index node ) -> Index {
-   return( pollutant_zone.empty() ? 0 : pollutant_zone[ p ][ node ] );
-  };
-
-  // the generators and the storages of the UCBlock are numbered unit after
-  // unit: the index of the first ones of this UnitBlock
-  Index first_generator = 0;
-  Index first_storage = 0;
-  for( Index u = 0 ; u < block_index ; ++u ) {
-   const auto unit = ucblock->get_unit_block( u );
-   first_generator += unit->get_number_generators();
-   first_storage += unit->get_number_storages();
-  }
-
-  for( Index p = 0 ; p < pollutant_constraints.size() ; ++p ) {
-
-   for( Index g = 0 ; g < block->get_number_generators() ; ++g ) {
-    const auto zone = zone_of_node( p , get_node( stage , block_index , g ) );
-    if( zone >= number_pollutant_zones[ p ] )
-     continue;  // the generator belongs to no zone of pollutant p
-    const auto active_power = block->get_active_power( g );
-    if( ! active_power )
-     continue;
-    const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
-    for( Index t = 0 ; t < time_horizon ; ++t )
-     linearization += dual *
-      ucblock->get_pollutant_rho( t , p , first_generator + g ) *
-      active_power[ t ].get_value();
-   } // end( for each generator )
-
-   if( ! has_storage_rho )
-    continue;
-
-   const auto zone = zone_of_node( p , block->get_number_generators() ?
-                                       get_node( stage , block_index , 0 ) :
-                                       0 );
-   if( zone >= number_pollutant_zones[ p ] )
-    continue;  // the storages belong to no zone of pollutant p
-   const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
-   for( Index s = 0 ; s < block->get_number_storages() ; ++s )
-    if( const auto level = block->get_storage_level( s ) )
-     for( Index t = 0 ; t < time_horizon ; ++t )
-      linearization += dual *
-       ucblock->get_pollutant_storage_rho( t , p , first_storage + s ) *
-       level[ t ].get_value();
-  } // end( for each pollutant )
-
- } // end( non-empty pollutant budget constraints )
-
- /* Finally, add the contribution associated with the objective function (if
-  * any) of the UnitBlock.
-  *
-  * The objective function of a UnitBlock may have the form k*f(x), where k is
-  * the scale factor. The contribution associated with the objective to the
-  * linearization is therefore f(x). If k is non-zero, f(x) can be retrieved
-  * by simply computing the objective and then dividing its value by k. If k
-  * is zero, then we can temporarily scale the UnitBlock to 1, evaluate the
-  * objective (whose value must then be f(x)), and finally scale the UnitBlock
-  * back to its original scale factor. */
-
- if( auto objective =
-     dynamic_cast< FRealObjective * >( block->get_objective() ) ) {
-
-  const auto scale = block->get_scale();
-
-  if( scale != 0 ) {
-   objective->compute();
-   linearization += objective->value() / scale;
-  }
-  else {
-   /* Scale the UnitBlock to 1 so that we can retrieve the value of the
-    * objective associated with a single representative unit. No Modification
-    * should be issued since the UnitBlock will be scaled back to the original
-    * scale factor after the objective is computed. */
-   block->scale( 1.0 , eNoMod , eNoMod );
-
-   // Compute the Objective and retrieve its value.
-   objective->compute();
-   linearization += objective->value();
-
-   // Scale the UnitBlock to its original scale factor.
-   block->scale( scale , eNoMod , eNoMod );
-
-   // Recompute the objective to take into account its original scale factor.
-   objective->compute();
-  }
- }
-
- return( linearization );
-} // end( InvestmentFunction::compute_scale_linearization )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_unit_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & block_indices ,
+void InvestmentFunction::add_asset_linearization
+( Index stage , Index sub_block_index , std::vector< double > & linearization ,
   bool direction ) {
 
- // one body, two destinations: this overload is the same walk, writing into
- // the member vector. The two were copies of one another until now, and the
- // next divergence between them would have been a defect no test sees.
-
- update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
-                                   v_linearization , direction );
-} // end( InvestmentFunction::update_linearization_unit_blocks )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_unit_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & block_indices ,
-  std::vector< double > & linearization , bool direction ) {
-
- /* The UnitBlocks that are subject to investment can be divided into
-  * groups, depending on how the investment is represented.
-  *
-  * The first group is formed by the UnitBlocks whose scale factors represent
-  * the investment. These are the assets sized by eReplicate. For these
-  * UnitBlocks, the linearization is impacted by
-  * their objective function (as they are scaled) and the linking constraints
-  * in the UCBlock.
-  *
-  * The second group is formed by the UnitBlocks whose kappa constants
-  * represent the investment. These are the assets sized by eResize. For these
-  * UnitBlocks, the linearization is impacted only by the constraints in which
-  * the kappa constants appear, which are the constraints defined by
-  * themselves.
-  */
-
  const auto ucblock = get_ucblock( stage , sub_block_index );
+ if( ! ucblock )
+  throw( std::logic_error( "InvestmentFunction::update_linearization: the "
+                           "inner Block has no UCBlock in stage " +
+                           std::to_string( stage ) + " of sub-Block " +
+                           std::to_string( sub_block_index ) ) );
 
  /* A kappa enters the constraints it appears in through their right-hand
   * side alone, so the set of designs that a certificate of infeasibility
@@ -3121,7 +2763,7 @@ void InvestmentFunction::update_linearization_unit_blocks
   * wherever the UCBlock uses them [see UnitBlock::scale()], hence it
   * multiplies the COLUMNS of that unit: a certificate then holds only over
   * the scales on which it stays dual feasible, and that interval ends at the
-  * current scale. Measured on a replicated IntermittentUnitBlock: the one
+  * current scale. Measured on a replicated intermittent unit: the one
   * column the ray charges carries - 1 / scale against the linking constraint
   * and 1 against its own bound, at scale 1200 and again at scale 20000, so
   * the sharpest cut the certificate supports is x >= x_bar and it cuts
@@ -3129,197 +2771,30 @@ void InvestmentFunction::update_linearization_unit_blocks
   * something hard to read: an investment that can make the inner Block
   * infeasible has to be represented by a kappa.
   *
-  * Which of the two an asset is, is now said by how it is sized -- eReplicate
-  * is the scale factor, eResize the kappa -- and no longer by its class; the
-  * road that chooses by class takes the scale factor for a ThermalUnitBlock
-  * and the kappa for the other two classes it knows. */
+  * Which getter gives a cut is not known here, what it reads being unknown:
+  * the instance says it [see "AssetFeasibilityCut" in serialize()], and
+  * when it does not, the assets that it says to be replicated give none. */
 
- const auto no_cut_out_of_a_scale = [ & direction ]( Index asset ) {
-  if( direction )
-   throw( std::logic_error( "InvestmentFunction::update_linearization: the "
-			    "coefficient of the scaled asset " +
-			    std::to_string( asset ) + " cannot be read "
-			    "out of an unbounded dual direction." ) );
-  };
-
- for( const auto & [ block_index , asset ] : block_indices ) {
-
-  auto block = ucblock->get_unit_block( block_index );
-  const auto var_index = asset_var( asset );
-
-
-  /* The road that does not know what it is reading from: the getter was
-   * resolved out of the methods factory together with the setter, and the
-   * two are the pair that the size parameter travels on. Only the assets
-   * sized by eReplicate have no getter here, that sensitivity being a sum
-   * over rows of the UCBlock and so not this Block's to publish. */
-
-  if( ( asset < v_asset_query.size() ) && v_asset_query[ asset ] ) {
-
-   /* Where the getter lives, and over what it is indexed, follows from how
-    * the asset is sized: eResize asks the Block of the asset about its own
-    * parameter, eReplicate asks the container about its u-th unit. */
-
-   const bool on_container = ( v_asset_sizing[ asset ] == eReplicate );
-
-   /* The container reads that sensitivity by scaling the unit and computing
-    * its Objective [see UCBlock::get_replicate_linearization()], so it wants
-    * the primal solution exactly as the road below does. */
-   if( on_container )
-    no_cut_out_of_a_scale( asset );
-
-   double answer = 0;
-   std::invoke( *v_asset_query[ asset ] ,
-                on_container ? static_cast< Block * >( ucblock ) : block ,
-                Block::MF_dbl_msp( & answer , 1 ) ,
-                on_container
-                ? Block::Range( block_index , block_index + 1 )
-                // the Block of the asset has one size parameter, and the
-                // buffer above is one element: ask for exactly that
-                : Block::Range( 0 , 1 ) );
-   linearization[ var_index ] += answer;
-  }
-  else if( ( asset < v_asset_setter.size() ) && v_asset_setter[ asset ] ) {
-   // sized by eReplicate, and the container does not publish the derivative:
-   // it is computed from outside, reading the rows of the UCBlock
-   no_cut_out_of_a_scale( asset );
-   linearization[ var_index ] +=
-    compute_scale_linearization( block_index , stage , sub_block_index );
-  }
-
-  // ... and the road that chooses by class, for the assets whose Block
-  // registers no name
-
-  else if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
-   no_cut_out_of_a_scale( asset );
-   linearization[ var_index ] +=
-    compute_scale_linearization( block_index , stage , sub_block_index );
-  }
-  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) )
-   linearization[ var_index ] += unit->get_kappa_linearization();
-  else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) )
-   linearization[ var_index ] += unit->get_kappa_linearization();
-  else {
-   // Unrecognized Block
-   auto error_message = "InvestmentFunction::update_linearization: "
-    "unrecognized UnitBlock: " + block->classname();
-   if( ! block->name().empty() )
-    error_message += " with name '" + block->name() + "'";
-   error_message += ".";
-   throw( std::logic_error( error_message ) );
-  }
- } // end( for each UnitBlock )
-} // end( InvestmentFunction::update_linearization_unit_blocks, out variant )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_network_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & line_indices ) {
-
- update_linearization_network_blocks( stage , sub_block_index , line_indices ,
-                                      v_linearization );
-} // end( InvestmentFunction::update_linearization_network_blocks )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_network_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & line_indices ,
-  std::vector< double > & linearization ) {
-
- // Update the linearization with respect to the lines. One body, two
- // destinations: the overload above is the same walk writing into the member
- // vector.
-
- if( line_indices.empty() )
-  // There is no investment in lines, so there is nothing to be done.
-  return;
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto time_horizon = ucblock->get_time_horizon();
-
- /* The road that does not know what it is reading from. Every line of this
-  * call is sized the same way and every NetworkBlock of the horizon is of
-  * the same class, so one getter answers for all of them and is resolved
-  * once. It takes the lines as a Subset, this being the shape in which they
-  * arrive. */
-
- Block::QueryType< Block::MF_dbl_msp , Block::c_Subset & , bool > * query
-  = nullptr;
-
- if( ( line_indices[ 0 ].second < v_asset_setter.size() ) &&
-     v_asset_setter[ line_indices[ 0 ].second ] )
-  if( const auto nb = ucblock->get_network_block( 0 ) )
-   query = Block::get_query_fs< Block::MF_dbl_msp , Block::c_Subset & ,
-                                bool >
-            ( nb->classname() + "::get_resize_linearization" );
-
- Block::Subset lines;
  std::vector< double > answer;
 
- if( query ) {
-  lines.reserve( line_indices.size() );
-  for( const auto & [ line , asset ] : line_indices )
-   lines.push_back( line );
-  answer.resize( lines.size() );
+ for( const auto & group : v_asset_groups ) {
+
+  if( direction && ( ! group.feasibility_cut ) )
+   throw( std::logic_error( "InvestmentFunction::update_linearization: the "
+                            "coefficient of asset " +
+                            std::to_string( group.assets.front() ) +
+                            ", read by '" + group.linearization_name +
+                            "', cannot be read out of an unbounded dual "
+                            "direction." ) );
+
+  answer.resize( group.indices.size() );
+  std::invoke( *group.linearization , ucblock , Block::MF_dbl_msp( answer ) ,
+               group.indices , group.ordered );
+
+  for( Index k = 0 ; k < group.assets.size() ; ++k )
+   linearization[ asset_var( group.assets[ k ] ) ] += answer[ k ];
   }
-
- for( Index t = 0 ; t < time_horizon ; ++t ) {
-
-  const auto network_block = ucblock->get_network_block( t );
-
-  if( query ) {
-   std::invoke( *query , network_block ,
-                Block::MF_dbl_msp( answer.data() , answer.size() ) ,
-                lines , false );
-
-   for( Index i = 0 ; i < line_indices.size() ; ++i )
-    linearization[ asset_var( line_indices[ i ].second ) ] += answer[ i ];
-
-   continue;
-   }
-
-  // ... and the road that chooses by class, kept for a NetworkBlock that
-  // registers no name
-
-  if( const auto dc_network =
-      dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
-
-   const auto & constraints = dc_network->get_power_flow_limit_HVDC_bounds();
-
-   if( constraints.empty() )
-    continue;
-
-   const auto obj_sign =
-    ( dc_network->get_objective_sense() == Objective::eMin ) ? - 1 : 1;
-
-   /* The bounds read kappa C^v P, with C^v the factor the DCNetworkBlock
-    * scales its flow limits by, so the derivative of a bound with respect to
-    * the design is C^v P: leaving the factor out is right only while it is 1,
-    * which is its default but not its only value. */
-   const auto scale = dc_network->get_C_v_scal();
-
-   for( const auto & [ line , asset ] : line_indices ) {
-
-    const auto dual = constraints[ line ].get_dual();
-
-    auto bound = scale * dc_network->get_max_power_flow( line );
-    if( obj_sign * dual > 0 )
-     // The dual value is associated with the lower bound constraint.
-     bound = scale * dc_network->get_min_power_flow( line );
-
-    linearization[ asset_var( asset ) ] += - dual * bound;
-   } // end( for each line )
-  } // end( dynamic_cast< const DCNetworkBlock * > )
-  else {
-   // Unrecognized NetworkBlock
-   auto error_message = "InvestmentFunction::update_linearization_network_"
-    "blocks: unrecognized NetworkBlock: " + network_block->classname() + ".";
-   throw( std::logic_error( error_message ) );
-  }
- } // end( for each time instant )
-} // end( InvestmentFunction::update_linearization_network_blocks, out variant )
+} // end( InvestmentFunction::add_asset_linearization )
 
 /*--------------------------------------------------------------------------*/
 
@@ -3327,31 +2802,6 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
 					       bool direction ) {
 
  const auto num_stages = get_number_stages();
-
- // The indices of the UnitBlocks and the indices of their variables
- std::vector< std::pair< Index , Index > > block_indices;
- block_indices.reserve( v_asset_indices.size() );
-
- // The indices of the transmission lines and the indices of their variables
- std::vector< std::pair< Index , Index > > line_indices;
- line_indices.reserve( v_asset_indices.size() );
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-
-  const auto asset_type = v_asset_type[ i ];
-  const auto asset_index = v_asset_indices[ i ];
-
-  if( asset_type == eUnitBlock ) {
-   block_indices.push_back( { asset_index , i } );
-  }
-  else if( asset_type == eLine ) {
-   line_indices.push_back( { asset_index , i } );
-  }
-  else {
-   throw( std::logic_error( "InvestmentFunction::update_linearization: invalid"
-                            " asset type: " + std::to_string( asset_type ) ) );
-  }
- } // end( for each asset )
 
  // which Solver produced the solution is already told by the state: the
  // greedy ones are built only in the SDDPBlock branch of compute(), which
@@ -3376,7 +2826,8 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
 
   // Retrieve the primal solution.
 
-  if( ! block_indices.empty() ) {
+  if( std::find( v_asset_type.begin() , v_asset_type.end() , eUnitBlock ) !=
+      v_asset_type.end() ) {
    // The primal solution may only be necessary if there are UnitBlocks
    // subject to investment.
    if( solver && solver->has_var_solution() )
@@ -3387,11 +2838,9 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
   }
  }
 
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
-				    direction );
-  update_linearization_network_blocks( stage , sub_block_index , line_indices );
- } // end( for each stage )
+ for( Index stage = 0 ; stage < num_stages ; ++stage )
+  add_asset_linearization( stage , sub_block_index , v_linearization ,
+                           direction );
 
 }  // end( InvestmentFunction::update_linearization() )
 
@@ -3418,24 +2867,6 @@ void InvestmentFunction::update_linearization
 
  const auto num_stages = sddp_block->get_time_horizon();
 
- std::vector< std::pair< Index , Index > > block_indices;
- block_indices.reserve( v_asset_indices.size() );
- std::vector< std::pair< Index , Index > > line_indices;
- line_indices.reserve( v_asset_indices.size() );
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-  const auto asset_type = v_asset_type[ i ];
-  const auto asset_index = v_asset_indices[ i ];
-  if( asset_type == eUnitBlock )
-   block_indices.push_back( { asset_index , i } );
-  else if( asset_type == eLine )
-   line_indices.push_back( { asset_index , i } );
-  else
-   throw( std::logic_error( "InvestmentFunction::update_linearization: "
-                            "invalid asset type: " +
-                            std::to_string( asset_type ) ) );
-  }
-
  auto solver = get_solver< CDASolver >( sub_block_index );
 
  if( solver && solver->has_dual_solution() )
@@ -3444,7 +2875,8 @@ void InvestmentFunction::update_linearization
   throw( std::logic_error( "InvestmentFunction::update_linearization: "
                            "dual solution not available." ) );
 
- if( ! block_indices.empty() ) {
+ if( std::find( v_asset_type.begin() , v_asset_type.end() , eUnitBlock ) !=
+     v_asset_type.end() ) {
   if( solver && solver->has_var_solution() )
    solver->get_var_solution();
   else
@@ -3452,12 +2884,8 @@ void InvestmentFunction::update_linearization
                             "primal solution not available." ) );
   }
 
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
-                                    linearization );
-  update_linearization_network_blocks( stage , sub_block_index , line_indices ,
-                                       linearization );
-  }
+ for( Index stage = 0 ; stage < num_stages ; ++stage )
+  add_asset_linearization( stage , sub_block_index , linearization );
 
 }  // end( InvestmentFunction::update_linearization, out variant )
 
@@ -3468,229 +2896,130 @@ void InvestmentFunction::resolve_asset_methods( void ) {
  if( f_methods_resolved )
   return;
 
- f_methods_resolved = true;
-
  const auto num_assets = v_asset_indices.size();
 
- v_asset_setter.assign( num_assets , nullptr );
- v_asset_query.assign( num_assets , nullptr );
- v_asset_sizing.assign( num_assets , eReplicate );
+ for( Index i = 0 ; i < num_assets ; ++i )
+  if( ( v_asset_type[ i ] != eUnitBlock ) && ( v_asset_type[ i ] != eLine ) )
+   throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                            "invalid type of asset " + std::to_string( i ) +
+                            ": " + std::to_string( v_asset_type[ i ] ) ) );
 
- const auto ucblock = get_ucblock( 0 , 0 );
+ // the names of the two methods of each asset, and whether its getter gives
+ // a feasibility cut: those of the instance, or worked out below
 
- if( ! ucblock )
-  return;  // nothing to resolve against: keep the road that casts
+ auto setter_name = v_asset_setter_name;
+ auto linearization_name = v_asset_linearization_name;
+ auto feasibility_cut = v_asset_feasibility_cut;
+
+ if( setter_name.empty() && num_assets ) {
+
+  /* An instance written before the assets named their methods says how each
+   * one is sized by AssetType and AssetMethod, and without AssetMethod not
+   * even that: a unit is then resized if its class offers it, and replicated
+   * otherwise, which is what such an instance has always meant. Being the
+   * conversion of the instance to the names, this is the one place here
+   * that looks at the class of a unit, and only to choose a name. */
+
+  setter_name.resize( num_assets );
+  linearization_name.resize( num_assets );
+  const bool cuts_given = ! feasibility_cut.empty();
+  if( ! cuts_given )
+   feasibility_cut.assign( num_assets , 1 );
+
+  for( Index i = 0 ; i < num_assets ; ++i ) {
+
+   if( v_asset_type[ i ] == eLine ) {
+    setter_name[ i ] = "UCBlock::resize_line";
+    linearization_name[ i ] = "UCBlock::get_resize_line_linearization";
+    continue;
+    }
+
+   int method;
+   if( ! v_asset_method.empty() )
+    method = v_asset_method[ i ];
+   else {
+    const auto ucblock = get_ucblock( 0 , 0 );
+    if( ! ucblock )
+     throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                              "asset " + std::to_string( i ) + " names no "
+                              "method, and the inner Block has no UCBlock "
+                              "to work it out of" ) );
+    const auto & cls =
+     ucblock->get_unit_block( v_asset_indices[ i ] )->classname();
+    method = Block::get_method_fs< Block::MF_dbl_it , Block::Range >
+              ( cls + "::resize" ) ? eResize : eReplicate;
+    }
+
+   if( method == eResize ) {
+    setter_name[ i ] = "UCBlock::resize_unit";
+    linearization_name[ i ] = "UCBlock::get_resize_unit_linearization";
+    }
+   else {
+    setter_name[ i ] = "UCBlock::replicate";
+    linearization_name[ i ] = "UCBlock::get_replicate_linearization";
+    if( ! cuts_given )
+     feasibility_cut[ i ] = 0;
+    }
+   }
+  }
+
+ // the assets naming the same methods go together, and are written and read
+ // back with one call each [see update_blocks()]
+
+ v_asset_groups.clear();
 
  for( Index i = 0 ; i < num_assets ; ++i ) {
 
-  const Block * block = nullptr;
+  const bool cut = feasibility_cut.empty() || feasibility_cut[ i ];
 
-  if( v_asset_type[ i ] == eUnitBlock )
-   block = ucblock->get_unit_block( v_asset_indices[ i ] );
-  else
-   // every NetworkBlock of the horizon is of the same class, so any of them
-   // answers for all of them
-   block = ucblock->get_network_block( 0 );
+  auto group = std::find_if( v_asset_groups.begin() , v_asset_groups.end() ,
+                             [ & ]( const AssetGroup & g ) {
+                              return( ( g.setter_name == setter_name[ i ] ) &&
+                                      ( g.linearization_name ==
+                                        linearization_name[ i ] ) &&
+                                      ( g.feasibility_cut == cut ) );
+                              } );
 
-  if( ! block )
-   continue;
+  if( group == v_asset_groups.end() ) {
 
-  const auto & cls = block->classname();
+   AssetGroup g;
+   g.setter_name = setter_name[ i ];
+   g.linearization_name = linearization_name[ i ];
+   g.feasibility_cut = cut;
 
-  /* Which of the two ways: what the instance says, and otherwise eResize
-   * where the Block offers it. Deducing it is what lets an instance written
-   * before AssetMethod existed take this road all the same. */
+   g.setter = Block::get_method_fs< Block::MF_dbl_it , Block::Subset && ,
+                                    bool >( g.setter_name );
+   if( ! g.setter )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "asset " + std::to_string( i ) + " is written "
+                             "by '" + g.setter_name + "', which the methods "
+                             "factory does not have as a setter taking a "
+                             "Subset." ) );
 
-  int method;
+   g.linearization = Block::get_query_fs< Block::MF_dbl_msp ,
+                                          Block::c_Subset & , bool >
+                      ( g.linearization_name );
+   if( ! g.linearization )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "asset " + std::to_string( i ) + " is read by '"
+                             + g.linearization_name + "', which the methods "
+                             "factory does not have as a getter taking a "
+                             "Subset." ) );
 
-  if( ! v_asset_method.empty() )
-   method = v_asset_method[ i ];
-  else
-   method = Block::get_method_fs< Block::MF_dbl_it , Block::Range >
-             ( cls + "::resize" ) ? eResize : eReplicate;
-
-  v_asset_sizing[ i ] = method;
-
-  const std::string suffix = ( method == eResize ) ? "::resize"
-                                                   : "::replicate";
-
-  v_asset_setter[ i ] = Block::get_method_fs< Block::MF_dbl_it , Block::Range >
-                         ( cls + suffix );
-
-  if( ( ! v_asset_setter[ i ] ) && ( ! v_asset_method.empty() ) )
-   // the instance asked for a way that this Block does not offer. Saying so
-   // here is the point of resolving up front: the alternative is finding out
-   // during a solve, with no asset index to name
-   throw( std::logic_error
-          ( "InvestmentFunction::resolve_asset_methods: asset " +
-            std::to_string( i ) + " asks to be sized by '" + cls + suffix +
-            "', which " + cls + " does not register." ) );
-
-  if( ( method == eReplicate ) && v_asset_setter[ i ] &&
-      ( v_asset_type[ i ] == eUnitBlock ) ) {
-
-   /* The factor of a replicated unit appears in the rows the UCBlock builds
-    * on top of it, not in the rows of the unit, so it is the container that
-    * publishes the derivative, indexed over its own units. If it does not,
-    * the road below computes it from outside, which is what this is meant
-    * to replace. */
-
-   v_asset_query[ i ] =
-    Block::get_query_fs< Block::MF_dbl_msp , Block::Range >
-     ( ucblock->classname() + "::get_replicate_linearization" );
+   v_asset_groups.push_back( std::move( g ) );
+   group = std::prev( v_asset_groups.end() );
    }
 
-  if( ( method == eResize ) && v_asset_setter[ i ] ) {
+  group->assets.push_back( i );
+  group->indices.push_back( v_asset_indices[ i ] );
+  }
 
-   v_asset_query[ i ] =
-    Block::get_query_fs< Block::MF_dbl_msp , Block::Range >
-     ( cls + "::get_resize_linearization" );
+ for( auto & g : v_asset_groups )
+  g.ordered = std::is_sorted( g.indices.begin() , g.indices.end() );
 
-   /* A Block that takes the size parameter and does not publish the
-    * sensitivity would be written into and then read wrong, because the only
-    * other way of reading is the sum over the rows of the UCBlock, which
-    * answers for eReplicate and not for this. Refusing here is what lets the
-    * reader below take "sized, and no getter" to mean eReplicate without
-    * having to be told. */
-
-   if( ! v_asset_query[ i ] )
-    throw( std::logic_error
-           ( "InvestmentFunction::resolve_asset_methods: " + cls +
-             " registers '" + cls + "::resize' but not '" + cls +
-             "::get_resize_linearization', so the sensitivity of asset " +
-             std::to_string( i ) + " could not be read back." ) );
-   }
- }
+ f_methods_resolved = true;
 
 } // end( InvestmentFunction::resolve_asset_methods )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_unit_block( UnitBlock * block ,
-                                            double investment ,
-                                            Index asset ) {
-
- // The road that does not know what it is writing into: the method was
- // resolved out of the methods factory when the names were looked up, and
- // all that is left here is to call it.
-
- if( asset < v_asset_setter.size() )
-  if( auto * const setter = v_asset_setter[ asset ] ) {
-   const std::vector< double > value{ investment };
-   std::invoke( *setter , block , value.cbegin() ,
-                Block::Range( 0 , Inf< Block::Index >() ) ,
-                eNoBlck , eNoBlck );
-   return;
-   }
-
- // ... and the road that chooses by class, kept for the assets whose Block
- // registers neither name.
-
- if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
-  block->scale( investment );
- }
- else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) )
-  unit->set_kappa( investment );
- else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) )
-  unit->set_kappa( investment );
- else {
-  // Unrecognized UnitBlock
-  auto error_message = "InvestmentFunction::update_unit_block: "
-   "unrecognized UnitBlock: " + block->classname();
-  if( ! block->name().empty() )
-   error_message += " with name '" + block->name() + "'";
-  error_message += ".";
-  throw( std::logic_error( error_message ) );
- }
-}
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_unit_blocks
-( Index sub_block_index ,
-  const std::vector< Index > & block_indices ,
-  const std::vector< double > & investment ,
-  const std::vector< Index > & assets ) {
-
- assert( block_indices.size() == investment.size() );
- assert( block_indices.size() == assets.size() );
-
- if( block_indices.empty() )
-  return;
-
- const auto num_stages = get_number_stages();
-
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  auto ucblock = get_ucblock( stage , sub_block_index );
-  for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-   auto block = ucblock->get_unit_block( block_indices[ i ] );
-   update_unit_block( block , investment[ i ] , assets[ i ] );
-  } // end( for each UnitBlock )
- } // end( for each stage )
-} // end( InvestmentFunction::update_unit_blocks )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_network_blocks
-( Index sub_block_index , const std::vector< Index > & line_indices ,
-  const std::vector< double > & investment ,
-  const std::vector< Index > & assets ) {
-
- assert( line_indices.size() == investment.size() );
- assert( line_indices.size() == assets.size() );
-
- if( line_indices.empty() )
-  return;
-
- /* Every line of this call is sized the same way, the assets of a call
-  * being all of type eLine and every NetworkBlock of the horizon being of
-  * the same class, so one method answers for all of them and is resolved
-  * once. The lines arrive as a Subset, so it is the subset-taking family
-  * that is wanted here, the one that v_asset_setter does not hold.
-  * A nullptr means that no name resolved and that the road choosing by
-  * class is taken below. */
-
- Block::FunctionType< Block::MF_dbl_it , Block::Subset && , bool > * setter
-  = nullptr;
-
- if( ( assets[ 0 ] < v_asset_setter.size() ) &&
-     v_asset_setter[ assets[ 0 ] ] )
-  if( const auto ucb = get_ucblock( 0 , sub_block_index ) )
-   if( const auto nb = ucb->get_network_block( 0 ) )
-    setter = Block::get_method_fs< Block::MF_dbl_it , Block::Subset && ,
-                                   bool >( nb->classname() + "::resize" );
-
- const auto num_stages = get_number_stages();
-
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-
-  auto ucblock = get_ucblock( stage , sub_block_index );
-  const auto time_horizon = ucblock->get_time_horizon();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-
-   auto network_block = ucblock->get_network_block( t );
-
-   if( setter ) {
-    // the road that does not know what it is writing into
-    auto subset = line_indices;
-    std::invoke( *setter , network_block , investment.cbegin() ,
-                 std::move( subset ) , false , eNoBlck , eNoBlck );
-   }
-   else if( auto dc_network =
-            dynamic_cast< DCNetworkBlock * >( network_block ) ) {
-    auto subset = line_indices;
-    dc_network->set_kappa( investment.cbegin() , std::move( subset ) );
-   }
-   else {
-    // Unrecognized NetworkBlock
-    auto error_message = "InvestmentFunction::update_network_blocks: "
-     "unrecognized NetworkBlock: " + network_block->classname() + ".";
-    throw( std::logic_error( error_message ) );
-   }
-  } // end( for each time instant )
- } // end( for each stage )
-} // end( InvestmentFunction::update_network_blocks )
 
 /*--------------------------------------------------------------------------*/
 
@@ -3700,59 +3029,44 @@ void InvestmentFunction::update_blocks() {
  // own: they are ignored up to the end, whichever way the end comes
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
- // The indices of the UnitBlocks
- std::vector< Index > block_indices;
- block_indices.reserve( v_asset_indices.size() );
-
- // The investment to be made in the UnitBlocks
- std::vector< double > block_investment;
- block_investment.reserve( v_asset_indices.size() );
-
- // The indices of the transmission lines
- std::vector< Index > line_indices;
- line_indices.reserve( v_asset_indices.size() );
-
- // The investment to be made in the transmission lines
- std::vector< double > line_investment;
- line_investment.reserve( v_asset_indices.size() );
-
- // The index, among the assets, of each entry of the four vectors above:
- // it is what says which method sizes that asset
- std::vector< Index > block_assets;
- block_assets.reserve( v_asset_indices.size() );
- std::vector< Index > line_assets;
- line_assets.reserve( v_asset_indices.size() );
-
- // the inner Block does not exist while this Function is deserialized, so
- // the names are resolved here, once
+ // the names are resolved once, the first time the investment is written
  resolve_asset_methods();
 
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-
-  const auto asset_type =  v_asset_type[ i ];
-  const auto asset_index =  v_asset_indices[ i ];
-  const auto var_value = get_var_value( asset_var( i ) , false );
-
-  if( asset_type == eUnitBlock ) {
-   block_indices.push_back( asset_index );
-   block_investment.push_back( var_value );
-   block_assets.push_back( i );
+ // the investment in the assets of each group, in the order of the group
+ std::vector< std::vector< double > > investment( v_asset_groups.size() );
+ for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
+  investment[ g ].reserve( v_asset_groups[ g ].assets.size() );
+  for( const auto asset : v_asset_groups[ g ].assets )
+   investment[ g ].push_back( get_var_value( asset_var( asset ) , false ) );
   }
-  else if( asset_type == eLine ) {
-   line_indices.push_back( asset_index );
-   line_investment.push_back( var_value );
-   line_assets.push_back( i );
-  }
-  else {
-   throw( std::logic_error( "InvestmentFunction::update_blocks: invalid asset"
-                            " type: " + std::to_string( asset_type ) ) );
-  }
- } // end( for each asset )
 
- for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
-  update_unit_blocks( i , block_indices , block_investment , block_assets );
-  update_network_blocks( i , line_indices , line_investment , line_assets );
- }
+ const auto num_stages = get_number_stages();
+
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+  for( Index stage = 0 ; stage < num_stages ; ++stage ) {
+
+   const auto ucblock = get_ucblock( stage , i );
+   if( ! ucblock )
+    throw( std::logic_error( "InvestmentFunction::update_blocks: the inner "
+                             "Block has no UCBlock in stage " +
+                             std::to_string( stage ) + " of sub-Block " +
+                             std::to_string( i ) ) );
+
+   for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
+    const auto & group = v_asset_groups[ g ];
+    try {
+     std::invoke( *group.setter , ucblock , investment[ g ].cbegin() ,
+                  Subset( group.indices ) , group.ordered , eNoBlck ,
+                  eNoBlck );
+     }
+    catch( const std::exception & e ) {
+     throw( std::logic_error( "InvestmentFunction::update_blocks: writing "
+                              "asset " + std::to_string( group.assets.front() )
+                              + " and the others written by '" +
+                              group.setter_name + "': " + e.what() ) );
+     }
+    }
+   }
 
  f_blocks_are_updated = true;
 }  // end( InvestmentFunction::update_blocks )
@@ -3777,7 +3091,10 @@ void InvestmentFunction::send_nuclear_modification
  // "nuclear modification" for Function: everything changed
  global_pool.invalidate();
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
+ // what the names of the assets resolve to may depend on the inner Block,
+ // when they are worked out of the classes of its units
+ v_asset_groups.clear();
+ f_methods_resolved = false;
  if( f_Observer )
   f_Observer->add_Modification
    ( std::make_shared< FunctionMod >( this , FunctionMod::NaNshift ) , chnl );

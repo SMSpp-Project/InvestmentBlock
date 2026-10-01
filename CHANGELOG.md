@@ -75,6 +75,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design variable it invests in, so several components can share the same design
   variables while each one acts on its own subset of them (the multi-period case)
 
+- `AssetSetter` and `AssetLinearization` (netCDF): for each asset, the names
+  in the methods factory of the method that writes the investment into the
+  inner Block and of the one that reads back the derivative of its value,
+  both called on the UCBlock at the root of the inner Block (or on each of
+  them, the leaves of a TwoStageStochasticBlock and the stages of an
+  SDDPBlock) with the index of the asset, for instance
+  `UCBlock::resize_unit`, `UCBlock::replicate` and `UCBlock::resize_line`
+  with their getters. InvestmentFunction does not know what they do: the
+  assets naming the same methods are written with one call, and read back
+  with one call. `AssetSignature` says with which parameters the two methods
+  are registered, 0 (the subset form) being the only value and the default;
+  `AssetFeasibilityCut` says whether the getter also gives the coefficient
+  of a feasibility cut out of an unbounded dual direction, 1 by default.
+  A file without the names has them worked out from `AssetType` and
+  `AssetMethod`, which says for each unit whether it is resized (1) or
+  replicated (0), and without `AssetMethod` from whether the class of the
+  unit registers `<class>::resize`; `AssetMethod` together with the names,
+  half of the pair of names, or an unknown signature are refused at
+  deserialize, and a name the methods factory does not have makes the first
+  `compute()` fail before the solve
+
 - `set_implicit_constraints()` on InvestmentFunction, to set the implicit
   linear constraints (caps or budgets over the assets of the component)
   programmatically; one coefficient per ASSET, as the netCDF format declares
@@ -166,10 +187,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - the `ReplicateBatteryUnits` and `ReplicateIntermittentUnits` attributes of
   InvestmentFunction, which sized by replication every battery or every
-  intermittent unit: how each asset is sized is said by `AssetMethod`, and
-  a group that still carries either attribute is now refused at deserialize
+  intermittent unit: how each asset is sized is said by `AssetSetter`, or by
+  `AssetMethod`, and a group that still carries either attribute is now
+  refused at deserialize
+
+- what InvestmentFunction knew of the classes of the assets: the casts to
+  `ThermalUnitBlock`, `BatteryUnitBlock`, `IntermittentUnitBlock` and
+  `DCNetworkBlock` that chose what to call on each asset, and the copy of the
+  derivative with respect to the number of copies of a unit that it computed
+  out of the rows of the UCBlock, with the map from generators to nodes that
+  served it; the UCBlock answers for both [see `AssetSetter`]
 
 ### Fixed
+
+- the path of `InvestmentFunction` over several replicas of an SDDPBlock
+  summed the linearization into a vector as long as the last one computed,
+  which is empty before the first, and wrote the first coefficient out of
+  it: it is now as long as the active Variables
+
+- an InvestmentFunction that finds no UCBlock in its inner Block reports it
+  with `kError` at the worst value: asking the sign of that value looked for
+  the UCBlock again, and failed in turn, with an assertion or a null
+  pointer; the sense of the Objective comes now from the inner Block when
+  there is no UCBlock
 
 - `InvestmentFunction::compute()` returns `kError` when the inner Block is
   solved but its linearization cannot be read, e.g. because its Solver gives

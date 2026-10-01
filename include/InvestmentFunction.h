@@ -37,13 +37,9 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
- class BatteryUnitBlock;       // forward declaration of BatteryUnitBlock
-
  class BendersBFunction;       // forward declaration of BendersBFunction
 
  class BlockSolverConfig;      // forward declaration of BlockSolverConfig
-
- class IntermittentUnitBlock;  // forward declaration of IntermittentUnitBlock
 
  class SDDPBlock;              // forward declaration of SDDPBlock
 
@@ -53,8 +49,6 @@ namespace SMSpp_di_unipi_it
  class SDDPSolver;             // forward declaration of SDDPSolver
 
  class UCBlock;                // forward declaration of UClock
-
- class UnitBlock;              // forward declaration of UnitBlock
 
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
@@ -75,21 +69,16 @@ namespace SMSpp_di_unipi_it
  *
  * - The active ColVariable of the InvestmentFunction represent investments
  *   that can be made in certain assets. The i-th active ColVariable
- *   represents the investment to be made in the i-th asset. An asset can be
- *   one of the following: a ThermalUnitBlock, an IntermittentUnitBlock, a
- *   BatteryUnitBlock, or a transmission line. The meaning of an investment
- *   depends on the type of asset it is associated with.
- *
- *   - Investing an amount x in a ThermalUnitBlock means that the unit is
- *     scaled (see ThermalUnitBlock::scale()) by x.
- *
- *   - For BatteryUnitBlock and IntermittentUnitBlock, two types of
- *     investments can be made. Considering an investment of an amount x, the
- *     unit may either be scaled by x (according to UnitBlock::scale()) or
- *     have its minimum and maximum power and storage levels scaled by x.
- *
- *   - Investing an amount x in a transmission line means that its minimum and
- *     maximum power flow are scaled by x.
+ *   represents the investment to be made in the i-th asset, a unit or a
+ *   transmission line of the inner Block. What an investment means is not
+ *   known here: each asset names, in the instance, the method of the methods
+ *   factory that writes the investment into the inner Block and the one that
+ *   reads back the derivative of the value of the inner Block with respect
+ *   to it [see "AssetSetter" in serialize()]. Both are called on the UCBlock
+ *   at the root of the inner Block, which hands the value on to the unit or
+ *   to the lines [see UCBlock::resize_unit()]: a unit may stand for that
+ *   many copies of itself, or for one of that many times its size, and a
+ *   line for one of that many times its capacity.
  *
  * - The value of the InvestmentFunction is given by a fixed investment cost
  *   (CAPEX) and an [expected] operational cost (OPEX). The fixed investment
@@ -134,12 +123,9 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
  /// public enum representing the ways of sizing an asset
  /** The two ways in which the Block carrying an asset can be sized [see
-  * Design and scaling of this Block in Block.h], and therefore the two
-  * methods that this InvestmentFunction may call on it through the methods
-  * factory. Which one an asset uses is read from the instance; which one a
-  * :Block offers is said by the names it registers, so an asset asking for a
-  * way that its Block does not offer is caught when the names are resolved
-  * rather than during a solve.
+  * Design and scaling of this Block in Block.h], as the netCDF variable
+  * "AssetMethod" says them in an instance that does not name the methods of
+  * its assets [see "AssetSetter" in serialize()]:
   *
   * - eReplicate: the Block stands for k identical copies of itself;
   * - eResize: the Block stands for one of k times the size it was given. */
@@ -1426,7 +1412,7 @@ class InvestmentFunction : public C05Function , public Block {
   *   of earlier versions, which sized by replication every battery or every
   *   intermittent unit, are no longer part of the format: deserialize()
   *   refuses a group that carries either, and how each asset is sized is
-  *   said by "AssetMethod".
+  *   said by "AssetSetter", or by "AssetMethod".
   *
   * - The dimension "NumAssets" containing the number of assets that are
   *   subject to investment. This dimension is optional. If it is not
@@ -1447,6 +1433,48 @@ class InvestmentFunction : public C05Function , public Block {
   *   = AssetType[0] for all i in {0, ..., NumAssets - 1}. This variable is
   *   optional. If it is not provided, then we assume that AssetType[i] = 0
   *   for each i in {0, ..., NumAssets - 1}.
+  *
+  * - The one-dimensional variables "AssetSetter" and "AssetLinearization",
+  *   of type netCDF::NcString and indexed over "NumAssets", containing the
+  *   names in the methods factory of the method that writes the investment
+  *   in the i-th asset and of the one that reads back the derivative of the
+  *   value of the inner Block with respect to it. Both are called on the
+  *   UCBlock at the root of the inner Block, or on each of them when there
+  *   are several (the leaves of a TwoStageStochasticBlock, the stages of an
+  *   SDDPBlock), with the index of the asset in "Assets": for instance
+  *   "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization",
+  *   "UCBlock::replicate" and "UCBlock::get_replicate_linearization", or
+  *   "UCBlock::resize_line" and "UCBlock::get_resize_line_linearization".
+  *   This InvestmentFunction does not know what they do. The assets with the
+  *   same setter are written with one call, and read back with one call.
+  *   The two variables are optional, and go together: if they are not
+  *   provided, the names are worked out the first time the inner Block is
+  *   written, from "AssetType" and from "AssetMethod" (eResize is
+  *   "UCBlock::resize_unit", eReplicate "UCBlock::replicate", a line
+  *   "UCBlock::resize_line"); and without "AssetMethod", a unit is resized if
+  *   its class registers "<classname>::resize", and replicated otherwise.
+  *
+  * - The variable "AssetSignature", of type netCDF::NcUint, which is either
+  *   a scalar or indexed over "NumAssets", saying with which parameters the
+  *   two methods of the i-th asset are registered. 0 is the only value today:
+  *   the setter takes ( MF_dbl_it , Subset && , bool ) and the getter
+  *   ( MF_dbl_msp , c_Subset & , bool ); any other value is refused. This
+  *   variable is optional. If it is not provided, then it is 0 everywhere.
+  *
+  * - The variable "AssetFeasibilityCut", of type netCDF::NcUint, which is
+  *   either a scalar or indexed over "NumAssets": 1 if the getter of the
+  *   i-th asset also gives the coefficient of a feasibility cut when the
+  *   inner Block is proved infeasible, reading an unbounded dual direction in
+  *   place of the duals; 0 if it does not, and then a point at which the
+  *   inner Block is infeasible is reported with no cut. This variable is
+  *   optional. If it is not provided, then it is 1 everywhere, save for the
+  *   assets whose names are worked out from "AssetMethod" as replicated,
+  *   for which it is 0 [see update_linearization()].
+  *
+  * - The variable "AssetMethod", of type netCDF::NcUint, which is either a
+  *   scalar or indexed over "NumAssets", saying how the i-th asset is sized
+  *   [see AssetMethod] in an instance without "AssetSetter". It is refused
+  *   together with "AssetSetter". This variable is optional.
   *
   * - The variable "LowerBound", of type netCDF::NcDouble(), which is either a
   *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
@@ -1940,9 +1968,6 @@ class InvestmentFunction : public C05Function , public Block {
   * diagonal linearization at the end of compute() (scale_diagonal_by_weight);
   * the vertical/feasibility linearizations from v_A are weight-invariant. */
 
- std::vector< Index > v_block_indices_map;
- ///< map the index of an UnitBlock to the index of the asset under investment
-
  std::vector< Index > v_asset_indices;
  ///< indices of the assets that are subject to investment
 
@@ -1979,32 +2004,54 @@ class InvestmentFunction : public C05Function , public Block {
  ///< the type of each asset that is subject to investment
 
  std::vector< int > v_asset_method;
- /**< how each asset is sized, as an AssetMethod. Empty if the instance does
-  * not say, in which case the way is deduced from the names the Block of
-  * that asset registers: eResize if it offers it, eReplicate otherwise. */
+ /**< how each asset is sized, as an AssetMethod, in an instance that does
+  * not name the methods of its assets; empty otherwise, or if it does not
+  * say [see "AssetSetter" in serialize()]. */
 
- std::vector< Block::FunctionType< Block::MF_dbl_it , Block::Range > * >
-  v_asset_setter;
- /**< the method writing the size parameter into the Block of each asset,
-  * resolved once out of the methods factory and held here, so that nothing
-  * during a solve depends on the class of that Block. nullptr means that the
-  * name did not resolve, and that the asset falls back on the road that
-  * chooses by class. */
+ std::vector< std::string > v_asset_setter_name;
+ ///< the name of the setter of each asset, empty if the instance has none
 
- std::vector< Block::QueryType< Block::MF_dbl_msp , Block::Range > * >
-  v_asset_query;
- /**< the getter reading the sensitivity back, resolved the same way. For an
-  * asset sized by eResize it is called on the Block of the asset, the
-  * parameter living in its own rows; for one sized by eReplicate it is
-  * called on the Block that *holds* the asset, the factor appearing in the
-  * rows of the container and not in those of the asset. Which of the two it
-  * is, is said by v_asset_sizing. */
+ std::vector< std::string > v_asset_linearization_name;
+ ///< the name of the getter of each asset, empty if the instance has none
 
- std::vector< int > v_asset_sizing;
- ///< how each asset is sized, as an AssetMethod, once resolved
+ std::vector< int > v_asset_signature;
+ ///< the parameters of the two methods of each asset, empty if all are 0
+
+ std::vector< int > v_asset_feasibility_cut;
+ ///< whether the getter of each asset gives a feasibility cut, empty if
+ ///< the instance does not say
+
+ /// the assets that are written, and read back, by the same pair of methods
+ /** The methods are resolved once out of the methods factory, so that nothing
+  * during a solve depends on what they write into: they are called on the
+  * UCBlock at the root of the inner Block, with the indices of all the
+  * assets of the group at once [see update_blocks()]. */
+
+ struct AssetGroup {
+
+  std::string setter_name;         ///< the name of the setter
+  std::string linearization_name;  ///< the name of the getter
+
+  Block::FunctionType< Block::MF_dbl_it , Block::Subset && , bool > * setter;
+  ///< writes the investment
+
+  Block::QueryType< Block::MF_dbl_msp , Block::c_Subset & , bool > *
+   linearization;
+  ///< reads the derivative back
+
+  bool feasibility_cut;
+  ///< whether the getter gives a feasibility cut [see AssetFeasibilityCut]
+
+  Subset assets;   ///< the assets of the group, among those of this Function
+  Subset indices;  ///< their indices in "Assets", what the methods are given
+  bool ordered;    ///< whether indices is sorted
+  };
+
+ std::vector< AssetGroup > v_asset_groups;
+ ///< the assets, by the pair of methods that write and read them
 
  bool f_methods_resolved = false;
- ///< whether the vectors above have been filled
+ ///< whether v_asset_groups has been filled
 
  std::vector< double > v_linearization;
  ///< linearization associated with the most recent call to compute()
@@ -2017,15 +2064,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< double > v_installed_quantity;
  ///< amount of each asset currently installed in the system
-
- std::vector< std::vector< std::vector< Index > > > generator_node_map;
- ///< maps the index of a generator to the node it belongs to
- /**< This vector maps a generator to the node it belongs to. The generator is
-  * identified by a triplet (stage, unit_block_index, generator_index), where
-  * stage indicates the stage (between 0 and SDDPBlock::get_time_horizon() -
-  * 1), unit_block_index identifies the UnitBlock to which the generator
-  * belongs (and index between 0 and v_block_indices.size() - 1) and
-  * generator_index is the index of the generator within its UnitBlock. */
 
  std::vector< double > v_lower_bound;
  ///< lower bound on the value of the active variables
@@ -2388,78 +2426,24 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
- /// Update the given UnitBlock according to the given \p investment
- /** This function updates the given UnitBlock according to the given \p
-  * investment.
+ /// resolves, for each asset, the methods that write and read it
+ /** Resolves out of the methods factory the two methods that each asset
+  * names [see "AssetSetter" in serialize()], and puts together the assets
+  * naming the same ones [see AssetGroup], so that nothing during a solve has
+  * to know what they write into. An instance that does not name them has
+  * them worked out here, out of "AssetType" and "AssetMethod", or out of the
+  * names that the class of each unit registers.
   *
-  * @param block A pointer to a UnitBlock.
-  *
-  * @param investment The investment to be made in the given UnitBlock.
-  *
-  * @param asset The asset the UnitBlock is. */
-
- void update_unit_block( UnitBlock * block , double investment ,
-                         Index asset );
-
-/*--------------------------------------------------------------------------*/
- /// resolves, for each asset, the methods that size its Block
- /** For each asset, works out which of the two ways of sizing its Block is
-  * used and resolves, out of the methods factory, the method that writes the
-  * size parameter and the one that reads the sensitivity back. Both are kept
-  * so that nothing during a solve has to know the class of a Block.
-  *
-  * The way comes from the instance when it says, and otherwise from the names
-  * the Block registers: eResize where it offers it, eReplicate otherwise. An
-  * asset whose Block registers neither keeps the road that chooses by class.
-  *
-  * Called once, the first time the Blocks are updated: the inner Block does
-  * not exist while this InvestmentFunction is being deserialized. */
+  * Called once, the first time the Blocks are updated, before the first
+  * solve: a name that the methods factory does not have makes it throw,
+  * naming the asset. */
 
  void resolve_asset_methods( void );
 
 /*--------------------------------------------------------------------------*/
- /// Update a set of UnitBlock according to the given \p investment
- /** This function updates a set of UnitBlock, given by their indices \p
-  * block_indices, according to the given \p investment.
-  *
-  * @param sub_block_index The index of a sub-Block of this
-  *        InvestmentFunction.
-  *
-  * @param block_indices Indices of the UnitBlock which must be updated.
-  *
-  * @param investment The investment to be made in each UnitBlock.
-  *
-  * @param assets The asset each UnitBlock is. */
-
- void update_unit_blocks( Index sub_block_index ,
-                          const std::vector< Index > & block_indices ,
-                          const std::vector< double > & investment ,
-                          const std::vector< Index > & assets );
-
-/*--------------------------------------------------------------------------*/
- /// Update a set of line according to the given \p investment
- /** This function updates a set of transmission lines, given by their indices
-  * \p line_indices, according to the given \p investment.
-  *
-  * @param sub_block_index The index of a sub-Block of this
-  *        InvestmentFunction.
-  *
-  * @param line_indices Indices of the transmission lines which must be
-  *        updated.
-  *
-  * @param investment The investment to be made in each line.
-  *
-  * @param assets The asset each line is. */
-
- void update_network_blocks( Index sub_block_index ,
-                             const std::vector< Index > & line_indices ,
-                             const std::vector< double > & investment ,
-                             const std::vector< Index > & assets );
-
-/*--------------------------------------------------------------------------*/
- /// update the sub-Block of the UCBlock
- /** This function updates the sub-Block of the UCBlock to reflect the current
-  * values of the x variables. */
+ /// writes the current values of the x variables into the inner Block
+ /** Calls the setter of each group of assets [see AssetGroup] on each UCBlock
+  * of the inner Block, with the values of the x variables of its assets. */
 
  void update_blocks( void );
 
@@ -2607,11 +2591,6 @@ class InvestmentFunction : public C05Function , public Block {
  FunctionValue compute_farkas_value( Index stage , Index sub_block_index );
 
 /*--------------------------------------------------------------------------*/
-
- double compute_scale_linearization( Index block_index , Index stage ,
-                                     Index sub_block_index );
-
-/*--------------------------------------------------------------------------*/
  /// updates the linearization to reflect the most recent scenario considered
  /** This function updates the linearization to reflect the most recent
   * scenario considered, whose subproblem was solved by the Solver attached to
@@ -2625,36 +2604,10 @@ class InvestmentFunction : public C05Function , public Block {
   *        place, so it is not asked for again, and no primal solution is
   *        asked for either, there being none. Only the coefficients that are
   *        read out of the duals alone are then available, so an asset whose
-  *        coefficient needs the primal makes this throw. */
+  *        getter gives no feasibility cut [see "AssetFeasibilityCut" in
+  *        serialize()] makes this throw. */
 
  void update_linearization( Index sub_block_index , bool direction = false );
-
-/*--------------------------------------------------------------------------*/
- /// updates the linearization with respect to the set of UnitBlock
- /** @param direction Whether the duals are those of an unbounded dual
-  *        direction [see update_linearization()]. */
-
- void update_linearization_unit_blocks( Index stage , Index sub_block_index ,
-	   const std::vector< std::pair< Index , Index > > & block_indices ,
-	   bool direction = false );
-
-/*--------------------------------------------------------------------------*/
- /// updates the linearization with respect to the set of NetworkBlock
-
- void update_linearization_network_blocks( Index stage ,
-					   Index sub_block_index ,
-            const std::vector< std::pair< Index , Index > > & line_indices );
-
-/*--------------------------------------------------------------------------*/
- /// returns the node to which the given generator belongs
-
- Index get_node( Index stage , Index unit_block_index , Index generator )
-  const;
-
-/*--------------------------------------------------------------------------*/
- /// builds the mapping between generator and the node it belongs to
-
- void build_generator_node_map();
 
 /*--------------------------------------------------------------------------*/
  /// returns a pointer to the BendersBFunction associated with the given stage
@@ -2891,20 +2844,18 @@ class InvestmentFunction : public C05Function , public Block {
                             std::vector< double > & linearization );
 
 /*--------------------------------------------------------------------------*/
- /// as the one above, writing into \p linearization
+ /// adds the derivatives read on one UCBlock to \p linearization
+ /** Calls the getter of each group of assets [see AssetGroup] on the UCBlock
+  * of the given \p stage in the given sub-Block, and adds what it answers to
+  * the coefficients of the x variables of the assets of the group.
+  *
+  * @param direction Whether the duals are those of an unbounded dual
+  *        direction [see update_linearization()]: then a group whose getter
+  *        gives no feasibility cut makes this throw. */
 
- void update_linearization_unit_blocks(
-   Index stage , Index sub_block_index ,
-   const std::vector< std::pair< Index , Index > > & block_indices ,
-   std::vector< double > & linearization , bool direction = false );
-
-/*--------------------------------------------------------------------------*/
- /// as the one above, writing into \p linearization
-
- void update_linearization_network_blocks(
-   Index stage , Index sub_block_index ,
-   const std::vector< std::pair< Index , Index > > & line_indices ,
-   std::vector< double > & linearization );
+ void add_asset_linearization( Index stage , Index sub_block_index ,
+                               std::vector< double > & linearization ,
+                               bool direction = false );
 
 /*--------------------------------------------------------------------------*/
 
