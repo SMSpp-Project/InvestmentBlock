@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the netCDF variable `Integer`, scalar or per asset, which makes the
+  ColVariable of the assets where it is nonzero integer, e.g., the number of
+  modules of a modular asset; a `BundleSolver` with `intIntVars` 1 keeps
+  them integer
+
 - `InvestmentBlockSolution::is_dual_feasible()` asks the Solution of the
   inner Block it holds [see `Solution::is_dual_feasible()`]
 

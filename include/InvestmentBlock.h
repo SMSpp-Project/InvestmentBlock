@@ -158,6 +158,16 @@ public:
   *   not provided, then we assume that UpperBound[i] = +inf for all i in {0,
   *   ..., NumAssets - 1}.
   *
+  * - The variable "Integer", of type netCDF::NcInt(), which is either a
+  *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
+  *   that Integer[i] = Integer[0] for all i in {0, ..., NumAssets - 1}. If
+  *   Integer[i] is nonzero, the i-th ColVariable of this InvestmentBlock is
+  *   integer, e.g., the number of modules of a modular asset. This variable
+  *   is optional. If it is not provided, then we assume that every
+  *   ColVariable is continuous. The lower bound of an integer ColVariable has
+  *   to be integer if the bounds are reformulated [see
+  *   generate_abstract_constraints()].
+  *
   * - The dimension "ObjectiveSense", which indicates the sense of the
   *   Objective of this InvestmentBlock. If it is zero, then the Objective is
   *   a "maximization" one. Otherwise, it is a "minimization" one. This
@@ -411,6 +421,11 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
+ /// returns, for each Variable, nonzero if it is integer; empty if none is
+
+ const std::vector< int > & get_integer() const { return v_integer; }
+
+/*--------------------------------------------------------------------------*/
  /// returns the box constraints on the Variable
 
  const std::vector< BoxConstraint > & get_constraints() const {
@@ -602,6 +617,8 @@ protected:
 
  std::vector< double > v_lower_bound;  ///< lower bound on the Variable
  std::vector< double > v_upper_bound;  ///< upper bound on the Variable
+
+ std::vector< int > v_integer;  ///< nonzero if the Variable is integer
 
  /// Box constraints on the Variable
  std::vector< BoxConstraint > v_constraints;
