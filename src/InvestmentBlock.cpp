@@ -450,29 +450,6 @@ void InvestmentBlockSolution::write( Block * block )
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentBlockSolution::is_dual_feasible( Block * block ,
-						Configuration * fsbc )
-{
- auto IB = dynamic_cast< InvestmentBlock * >( block );
- if( ! IB )
-  throw( std::invalid_argument( "InvestmentBlockSolution::is_dual_feasible: "
-				"block is not a InvestmentBlock" ) );
-
- if( ! f_inner_Solution )
-  return( false );
-
- auto IF = dynamic_cast< InvestmentFunction * >( IB->get_function() );
- if( ( ! IF ) || IF->get_nested_Blocks().empty() )
-  throw( std::logic_error( "InvestmentBlockSolution::is_dual_feasible: "
-			   "the InvestmentBlock has no inner Block" ) );
-
- return( f_inner_Solution->is_dual_feasible( IF->get_nested_Blocks().front() ,
-					      fsbc ) );
-
- }  // end( InvestmentBlockSolution::is_dual_feasible )
-
-/*--------------------------------------------------------------------------*/
-
 void InvestmentBlockSolution::serialize( netCDF::NcGroup & group ) const
 {
  Solution::serialize( group );

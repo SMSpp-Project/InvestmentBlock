@@ -14,9 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules of a modular asset; a `BundleSolver` with `intIntVars` 1 keeps
   them integer
 
-- `InvestmentBlockSolution::is_dual_feasible()` asks the Solution of the
-  inner Block it holds [see `Solution::is_dual_feasible()`]
-
 - the data archive 2026-09-26, which adds to `pypsa-data` one scenario of
   the modular family of pypsa2smspp with the design in an InvestmentBlock
   over the UCBlock (`smspp_mod_t48_s1_b2c_det_investment.nc`), the same
