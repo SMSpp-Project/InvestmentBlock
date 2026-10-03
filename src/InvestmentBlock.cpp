@@ -363,16 +363,24 @@ bool InvestmentBlock::expand_stochastic_template(
 	  "possible to create the StochasticBlock of Component_" +
 	  std::to_string( k ) + "." ) );
 
-  const auto scenario = generator->get_current_scenario();
-  const auto probability = generator->get_current_scenario_probability();
-  const std::vector< double > data( scenario.begin() , scenario.end() );
-  sb->set_data( data );
-
   auto inner_raw = sb->get_inner_block();
   if( ! inner_raw )
    throw( std::logic_error( "InvestmentBlock::deserialize: the "
 	  "StochasticBlock of Component_" + std::to_string( k ) +
 	  " has no inner Block." ) );
+
+  // resolve the caller of every DataMapping against the inner Block before
+  // applying the scenario, as TwoStageStochasticBlock does: a DataMapping
+  // acting on the inner Block itself has an empty AbstractPath, which the
+  // deserialize of the StochasticBlock resolves to no caller at all
+  for( const auto & dm : sb->get_data_mappings() )
+   dm->set_caller_from_reference( inner_raw );
+
+  const auto scenario = generator->get_current_scenario();
+  const auto probability = generator->get_current_scenario_probability();
+  const std::vector< double > data( scenario.begin() , scenario.end() );
+  sb->set_data( data );
+
   sb->set_inner_block( nullptr , false );   // detach, do not destroy
 
   // once detached, inner is owned by nobody until f_s->deserialize() adopts it

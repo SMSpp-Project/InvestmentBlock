@@ -200,6 +200,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- the expansion of a `StochasticBlock` template into components resolves the
+  caller of every DataMapping against the inner Block before applying a
+  scenario, as TwoStageStochasticBlock does: a DataMapping acting on the inner
+  Block itself has an empty path, and the files with one crashed at load
+
 - the path of `InvestmentFunction` over several replicas of an SDDPBlock
   summed the linearization into a vector as long as the last one computed,
   which is empty before the first, and wrote the first coefficient out of
