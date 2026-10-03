@@ -498,6 +498,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  ::deserialize( group , "UpperBound" , num_assets , v_upper_bound ,
                 true , true );
 
+ ::deserialize( group , "Integer" , num_assets , v_integer , true , true );
+
  f_objective_sense = Objective::eMin;
  if( deserialize_dim( group , "ObjectiveSense" , f_objective_sense ) &&
      ( ! f_objective_sense ) )
@@ -519,6 +521,24 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 
  check_bound( v_lower_bound , "LowerBound" );
  check_bound( v_upper_bound , "UpperBound" );
+
+ if( ! v_integer.empty() ) {
+  if( v_integer.size() == 1 )
+   v_integer.resize( num_assets , v_integer.front() );
+  else
+   if( v_integer.size() != num_assets )
+    throw( std::logic_error( "InvestmentBlock::deserialize: the 'Integer' "
+			     "netCDF variable, if provided, must have size 0,"
+			     " 1, or 'NumAssets'." ) );
+
+  for( Index i = 0 ; i < num_assets ; ++i )
+   if( v_integer[ i ] )
+    v_variables[ i ].is_integer( true , eNoMod );
+
+  if( std::find_if( v_integer.begin() , v_integer.end() ,
+                    []( int b ) { return( b != 0 ); } ) == v_integer.end() )
+   v_integer.clear();
+  }
 
  // bind every component to the SAME master design ColVariables, in the same
  // order (the BundleSolver "same active variables" rule); a fresh pointer
@@ -764,6 +784,15 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( ! v_lower_bound.empty() ) {
   assert( v_lower_bound.size() == v_constraints.size() );
   for( Index i = 0 ; i < v_constraints.size() ; ++i ) {
+   // shifting an integer Variable by its lower bound keeps it integer only
+   // if the bound is
+   if( f_reformulate_bounds && ( i < v_integer.size() ) && v_integer[ i ] &&
+       std::isfinite( v_lower_bound[ i ] ) &&
+       ( v_lower_bound[ i ] != std::floor( v_lower_bound[ i ] ) ) )
+    throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
+			     " the lower bound of an integer Variable must be"
+			     " integer for the bounds to be reformulated" ) );
+
    if( f_reformulate_bounds && ( v_lower_bound[ i ] > -Inf< double >() ) ) {
     assert( v_lower_bound[ i ] != Inf< double >() );
     v_constraints[ i ].set_lhs( 0.0 );
@@ -846,6 +875,9 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
 
  ::serialize( group , "UpperBound" , netCDF::NcDouble() , NumAssets ,
               v_upper_bound );
+
+ if( ! v_integer.empty() )
+  ::serialize( group , "Integer" , netCDF::NcInt() , NumAssets , v_integer );
 
  if( ! is_disaggregated() ) {
   // legacy single-component: write the InvestmentFunction at the root group
@@ -1122,41 +1154,6 @@ void InvestmentBlockSolution::write( Block * block )
    v_inner_Solutions[ k ]->write( funcs[ k ]->get_nested_Blocks().front() );
   }
  }  // end( InvestmentBlockSolution::write )
-
-/*--------------------------------------------------------------------------*/
-
-bool InvestmentBlockSolution::is_dual_feasible( Block * block ,
-						Configuration * fsbc )
-{
- auto IB = dynamic_cast< InvestmentBlock * >( block );
- if( ! IB )
-  throw( std::invalid_argument( "InvestmentBlockSolution::is_dual_feasible: "
-				"block is not a InvestmentBlock" ) );
-
- if( v_inner_Solutions.empty() )
-  return( false );
-
- // 1 InvestmentFunction in the legacy path, K in the disaggregated one, as in
- // write(): the root holds no Function in the latter
- auto funcs = component_functions( IB );
-
- if( v_inner_Solutions.size() != funcs.size() )
-  throw( std::invalid_argument( "InvestmentBlockSolution::is_dual_feasible: "
-				"inconsistent inner Solution count" ) );
-
- for( Index k = 0 ; k < funcs.size() ; ++k ) {
-  if( funcs[ k ]->get_nested_Blocks().empty() )
-   throw( std::logic_error( "InvestmentBlockSolution::is_dual_feasible: "
-			    "the InvestmentBlock has no inner Block" ) );
-  if( ( ! v_inner_Solutions[ k ] ) ||
-      ( ! v_inner_Solutions[ k ]->is_dual_feasible(
-			     funcs[ k ]->get_nested_Blocks().front() , fsbc ) ) )
-   return( false );
-  }
-
- return( true );
-
- }  // end( InvestmentBlockSolution::is_dual_feasible )
 
 /*--------------------------------------------------------------------------*/
 

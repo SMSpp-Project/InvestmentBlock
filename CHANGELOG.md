@@ -107,6 +107,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inner Block it holds, one per component, and is false if one is missing
   [see `Solution::is_dual_feasible()`]
 
+- the netCDF variable `Integer`, scalar or per asset, which makes the
+  ColVariable of the assets where it is nonzero integer, e.g., the number of
+  modules of a modular asset; a `BundleSolver` with `intIntVars` 1 keeps
+  them integer
+
 - the data archive 2026-09-26, which adds to `pypsa-data` one scenario of
   the modular family of pypsa2smspp with the design in an InvestmentBlock
   over the UCBlock (`smspp_mod_t48_s1_b2c_det_investment.nc`), the same
