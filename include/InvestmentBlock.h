@@ -867,8 +867,10 @@ protected:
 /*--------------------------------------------------------------------------*/
 
  /// separates a TwoStageStochasticBlock into one component per leaf
- /** If the "InnerBlock" of \p grp is a TwoStageStochasticBlock (the exact
-  * class), builds it and makes each of its leaves the inner Block of an
+ /** If the "InnerBlock" of \p grp is a TwoStageStochasticBlock or a
+  * MultiStageStochasticBlock (the exact classes), builds it and makes each
+  * of its leaves [see TwoStageStochasticBlock::get_leaf_block()], those of
+  * the whole tree for a MultiStageStochasticBlock, the inner Block of an
   * InvestmentFunction deserialized out of \p grp, added as a component
   * weighted by (probability of the leaf) x (its Weight). The
   * TwoStageStochasticBlock never generates its Objective, which would write
@@ -876,10 +878,12 @@ protected:
   * still has its leaves, until ~InvestmentBlock() gives them back to it to
   * delete them, and serialize() writes it in place of its components.
   *
-  * This is right only if the scenarios share nothing: if the
-  * TwoStageStochasticBlock has first-stage AbstractPath, or has no
-  * DiscreteScenarioSet, or no scenario, it is left whole, with a warning
-  * saying why, and false is returned, adding nothing.
+  * This is right only if the scenarios share nothing: if it has first-stage
+  * AbstractPath, at the root or in an inner Block, or no scenarios to weigh
+  * its copies with (a DiscreteScenarioSet, or the scenario tree of a
+  * MultiStageStochasticBlock, or one in each of its inner Blocks), or no
+  * scenario at all, it is left whole, with a warning saying why, and false
+  * is returned, adding nothing.
   *
   * @param grp the component (or root) group that may hold it;
   * @param k its index, for the messages and the wiring of the actives;
@@ -908,6 +912,7 @@ protected:
   TwoStageStochasticBlock * tssb;  ///< deleted, with its leaves, at the end
   Index first;                     ///< the component of its first leaf
   double weight;                   ///< the Weight of its group in the file
+  std::vector< Block * > fathers;  ///< the father of each leaf, to go back to
   };
 
  /// the TwoStageStochasticBlock whose leaves are components, in their order

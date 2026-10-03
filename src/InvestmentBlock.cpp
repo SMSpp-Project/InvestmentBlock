@@ -228,6 +228,30 @@ static std::string first_stage_obstacle( const TwoStageStochasticBlock * root ,
  }
 
 /*--------------------------------------------------------------------------*/
+
+// whether the stochastic Block described by \p g has scenarios to weigh its
+// copies with: a TwoStageStochasticBlock its DiscreteScenarioSet, a
+// MultiStageStochasticBlock its scenario tree, or else one in each of its
+// inner Blocks
+
+static bool has_scenarios( const netCDF::NcGroup & g )
+{
+ std::string type;
+ if( auto att = g.getAtt( "type" ) ; ! att.isNull() )
+  att.getValues( type );
+ if( type == "TwoStageStochasticBlock" )
+  return( ! g.getGroup( "DiscreteScenarioSet" ).isNull() );
+ if( ! g.getGroup( "ScenarioGenerator" ).isNull() )
+  return( true );
+ Block::Index n = 0;
+ deserialize_dim( g , "NumberSubBlocks" , n , false );
+ for( Block::Index l = 0 ; l < n ; ++l )
+  if( ! has_scenarios( g.getGroup( "Block_" + std::to_string( l ) ) ) )
+   return( false );
+ return( n > 0 );
+ }
+
+/*--------------------------------------------------------------------------*/
 /*----------------------------- STATIC MEMBERS -----------------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -431,23 +455,24 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
    att.getValues( inner_type );
   }
 
- // the exact class: a MultiStageStochasticBlock, which derives from it, nests
- // a tree of its own, and is not separated here
- if( inner_type != "TwoStageStochasticBlock" )
+ // the exact classes: a MultiStageStochasticBlock is a TwoStageStochasticBlock
+ // whose scenarios are inner TwoStageStochasticBlock, whose leaves are those
+ // of the whole tree [see get_leaf_block()]
+ if( ( inner_type != "TwoStageStochasticBlock" ) &&
+     ( inner_type != "MultiStageStochasticBlock" ) )
   return( false );
 
- const auto whole = [ k ]( const std::string & why ) {
-  std::cerr << "InvestmentBlock::deserialize: WARNING - the "
-               "TwoStageStochasticBlock of Component_" << k << " is solved "
-               "whole rather than one scenario at a time: " << why
-            << std::endl;
+ const auto whole = [ k , & inner_type ]( const std::string & why ) {
+  std::cerr << "InvestmentBlock::deserialize: WARNING - the " << inner_type
+            << " of Component_" << k << " is solved whole rather than one "
+               "scenario at a time: " << why << std::endl;
   return( false );
   };
 
- // without scenarios the TwoStageStochasticBlock sums identical copies with
- // no probability, which is not a weighted sum of scenarios
- if( inner_grp.getGroup( "DiscreteScenarioSet" ).isNull() )
-  return( whole( "it has no DiscreteScenarioSet" ) );
+ // without scenarios the stochastic Block sums identical copies with no
+ // probability, which is not a weighted sum of scenarios
+ if( ! has_scenarios( inner_grp ) )
+  return( whole( "it has no scenarios to weigh its copies with" ) );
 
  std::unique_ptr< Block > block( Block::new_Block( inner_grp , this ) );
  const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( block.get() );
@@ -457,11 +482,17 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
 	 std::to_string( k ) + "." ) );
 
  // the scenarios can be solved one at a time only if they share nothing: a
- // first-stage AbstractPath ties them, and what it reaches says why they stay
- // together. Designs could be separated, but only once they are the assets
- // of this InvestmentBlock: as they are, each scenario would choose its own.
- // The paths are counted, not their group, which serialize() always writes
- if( ! tssb->get_paths_to_static_here_and_now_vars().empty() ) {
+ // first-stage AbstractPath, of the root or of an inner Block, ties them, and
+ // what it reaches says why they stay together. Designs could be separated,
+ // but only once they are the assets of this InvestmentBlock: as they are,
+ // each scenario would choose its own. The paths are counted, not their
+ // group, which serialize() always writes
+ bool tied = ! tssb->get_paths_to_static_here_and_now_vars().empty();
+ if( inner_type == "MultiStageStochasticBlock" )
+  for( auto sub : tssb->get_nested_Blocks() )
+   tied = tied || ( ! static_cast< TwoStageStochasticBlock * >( sub )->
+                    get_paths_to_static_here_and_now_vars().empty() );
+ if( tied ) {
   std::string why;
   if( is_separable( tssb , & why ) )
    why = "its first stage is made of the designs of assets, which would "
@@ -480,8 +511,10 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
  // TwoStageStochasticBlock is leaked rather than left to delete them again
  const Index first = get_number_nested_Blocks();
  double weight = 1;
+ std::vector< Block * > fathers( L );
  try {
   for( Index l = 0 ; l < L ; ++l ) {
+   fathers[ l ] = tssb->get_leaf_block( l )->get_f_Block();
    auto f_l = std::make_unique< InvestmentFunction >();
    f_l->deserialize( grp , tssb->get_leaf_block( l ) );
    wire_component_actives( f_l.get() , k );
@@ -498,7 +531,7 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
   throw;
   }
 
- v_parked_tssb.push_back( { tssb , first , weight } );
+ v_parked_tssb.push_back( { tssb , first , weight , std::move( fathers ) } );
  block.release();
  return( true );
 
@@ -564,14 +597,14 @@ InvestmentBlock::get_investment_functions( void ) const
 
 InvestmentBlock::~InvestmentBlock()
 {
- // each leaf of a TwoStageStochasticBlock goes back under it, out of a
- // component that must not delete it with itself, and it deletes them all
- // [see expand_two_stage()]
+ // each leaf of a TwoStageStochasticBlock goes back under its father, out of
+ // a component that must not delete it with itself, and the
+ // TwoStageStochasticBlock deletes them all [see expand_two_stage()]
  for( const auto & parked : v_parked_tssb ) {
   for( Index l = 0 ; l < parked.tssb->get_number_leaves() ; ++l ) {
    component_function( this , parked.first + l )->set_inner_block( nullptr ,
                                                                    false );
-   parked.tssb->get_leaf_block( l )->set_f_Block( parked.tssb );
+   parked.tssb->get_leaf_block( l )->set_f_Block( parked.fathers[ l ] );
    }
   delete parked.tssb;
   }

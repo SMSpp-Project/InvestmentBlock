@@ -76,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   InvestmentBlock is destroyed, and serialize() writes it whole in their
   place, as one `Component_<k>`
 
+- a MultiStageStochasticBlock as the `InnerBlock` is separated as a
+  TwoStageStochasticBlock is, into one component per leaf of the whole tree,
+  weighted by the product of the probabilities along its path, when nothing
+  ties the scenarios: no first-stage path, neither at the root nor in an
+  inner TwoStageStochasticBlock, and scenarios to weigh the copies with (the
+  scenario tree, or a `DiscreteScenarioSet` in each inner Block); each leaf
+  goes back to the inner TwoStageStochasticBlock it was taken from
+
 - `get_investment_functions()` on InvestmentBlock, which returns its
   InvestmentFunction, or that of each of its components
 
