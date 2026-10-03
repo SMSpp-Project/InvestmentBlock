@@ -61,6 +61,8 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
+class TwoStageStochasticBlock;  // forward declaration of TwoStageStochasticBlock
+
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -528,6 +530,14 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
+ /// returns the InvestmentFunction of this InvestmentBlock
+ /** Returns the InvestmentFunction in the Objective of this InvestmentBlock,
+  * if it has a single one [see get_function()], or otherwise that of each of
+  * its components, in the order of the components [see add_component()]. */
+
+ std::vector< InvestmentFunction * > get_investment_functions( void ) const;
+
+/*--------------------------------------------------------------------------*/
  /// returns the lower bound on each Variable
 
  const std::vector< double > & get_variable_lower_bound() const {
@@ -855,6 +865,31 @@ protected:
                                   bool & all_unit_weights );
 
 /*--------------------------------------------------------------------------*/
+
+ /// separates a TwoStageStochasticBlock into one component per leaf
+ /** If the "InnerBlock" of \p grp is a TwoStageStochasticBlock (the exact
+  * class), builds it and makes each of its leaves the inner Block of an
+  * InvestmentFunction deserialized out of \p grp, added as a component
+  * weighted by (probability of the leaf) x (its Weight). The
+  * TwoStageStochasticBlock never generates its Objective, which would write
+  * the probabilities into the costs of the leaves: it is kept, believing it
+  * still has its leaves, until ~InvestmentBlock() gives them back to it to
+  * delete them, and serialize() writes it in place of its components.
+  *
+  * This is right only if the scenarios share nothing: if the
+  * TwoStageStochasticBlock has first-stage AbstractPath, or has no
+  * DiscreteScenarioSet, or no scenario, it is left whole, with a warning
+  * saying why, and false is returned, adding nothing.
+  *
+  * @param grp the component (or root) group that may hold it;
+  * @param k its index, for the messages and the wiring of the actives;
+  * @param num_components incremented by the number of leaves added;
+  * @param all_unit_weights cleared if any added weight differs from 1.0. */
+
+ bool expand_two_stage( const netCDF::NcGroup & grp , Index k ,
+                        Index & num_components , bool & all_unit_weights );
+
+/*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE FIELDS --------------------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -866,6 +901,17 @@ protected:
  ///< second bit of AR == 1 if the Constraints have been constructed
  static constexpr unsigned char HasObj = 4;
  ///< third bit of AR == 1 if the Objective has been constructed
+
+ /// a TwoStageStochasticBlock whose leaves are components
+ /** [see expand_two_stage()] */
+ struct ParkedTSSB {
+  TwoStageStochasticBlock * tssb;  ///< deleted, with its leaves, at the end
+  Index first;                     ///< the component of its first leaf
+  double weight;                   ///< the Weight of its group in the file
+  };
+
+ /// the TwoStageStochasticBlock whose leaves are components, in their order
+ std::vector< ParkedTSSB > v_parked_tssb;
 
  SMSpp_insert_in_factory_h;
 

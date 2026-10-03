@@ -885,7 +885,7 @@ class InvestmentFunction : public C05Function , public Block {
  [[nodiscard]] const std::string & get_dflt_str_par( const idx_type par )
   const override
  {
-  static const std::vector< std::string > default_values = { "" };
+  static const std::vector< std::string > default_values = { "" , "" };
 
   if( par >= str_par_type_C05F::strLastParC05F &&
       par < str_par_type_InvestmentF::strLastParInvestmentF )
@@ -1229,6 +1229,24 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
+ /// returns the lower bound for the given active variable
+ /** This function returns the lower bound for the value of the i-th active
+  * variable of this InvestmentFunction.
+  *
+  * @para i The index of an active variable of this InvestmentFunction.
+  *
+  * @return the lower bound for the value of the i-th active variable of this
+  *         InvestmentFunction. */
+
+ double get_var_lower_bound( Index i ) const
+ {
+  if( i < v_lower_bound.size() )
+   return( v_lower_bound[ i ] );
+
+  return( -Inf< double >() );
+  }
+
+/*--------------------------------------------------------------------------*/
  /// sets the mapping from assets to active variables
  /** Sets which active variable each asset invests in: \p avi has one entry per
   * asset, and avi[ i ] is the index of asset i's variable among the active
@@ -1535,7 +1553,20 @@ class InvestmentFunction : public C05Function , public Block {
   * - The group "InnerBlock", containing the description of the inner Block.
  */
 
- void serialize( netCDF::NcGroup & group ) const override;
+ void serialize( netCDF::NcGroup & group ) const override {
+  serialize( group , get_nested_Block( 0 ) , f_weight );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// serialize this InvestmentFunction with the given inner Block and weight
+ /** As serialize( group ), but writing \p inner, if not nullptr, in the
+  * group "InnerBlock" and \p weight as the attribute "Weight". This is how
+  * InvestmentBlock writes the components it has made out of the leaves of a
+  * TwoStageStochasticBlock: as the TwoStageStochasticBlock they were read
+  * from, with the Weight it had. */
+
+ void serialize( netCDF::NcGroup & group , const Block * inner ,
+                 double weight ) const;
 
 /**@} ----------------------------------------------------------------------*/
 /*------- METHODS DESCRIBING THE BEHAVIOR OF THE InvestmentFunction --------*/
@@ -2654,24 +2685,6 @@ class InvestmentFunction : public C05Function , public Block {
    return( v_x[ i ]->get_value() + v_lower_bound[ i ] );
 
   return( v_x[ i ]->get_value() );
-  }
-
-/*--------------------------------------------------------------------------*/
- /// returns the lower bound for the given active variable
- /** This function returns the lower bound for the value of the i-th active
-  * variable of this InvestmentFunction.
-  *
-  * @para i The index of an active variable of this InvestmentFunction.
-  *
-  * @return the lower bound for the value of the i-th active variable of this
-  *         InvestmentFunction. */
-
- double get_var_lower_bound( Index i ) const
- {
-  if( i < v_lower_bound.size() )
-   return( v_lower_bound[ i ] );
-
-  return( -Inf< double >() );
   }
 
 /*--------------------------------------------------------------------------*/

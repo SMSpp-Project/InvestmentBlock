@@ -1214,17 +1214,23 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
 /*------------ METHODS FOR Saving THE DATA OF THE InvestmentFunction -------*/
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
+void InvestmentFunction::serialize( netCDF::NcGroup & group ,
+                                    const Block * inner ,
+                                    double weight ) const {
 
  Block::serialize( group );
 
  // per-component weight: written only if != 1.0, so legacy single-component
  // files stay byte-identical (the default is restored on deserialize)
- if( f_weight != 1.0 )
-  group.putAtt( "Weight" , netCDF::NcDouble() , f_weight );
+ if( weight != 1.0 )
+  group.putAtt( "Weight" , netCDF::NcDouble() , weight );
 
+ // in the single-component format the group is that of the InvestmentBlock,
+ // which has already written the number of assets and their lower bounds
  const auto num_assets = v_asset_indices.size();
- auto NumAssets = group.addDim( "NumAssets" , num_assets );
+ auto NumAssets = group.getDim( "NumAssets" );
+ if( NumAssets.isNull() )
+  NumAssets = group.addDim( "NumAssets" , num_assets );
 
  ::serialize( group , "Assets" , netCDF::NcUint() , NumAssets ,
               v_asset_indices );
@@ -1260,8 +1266,9 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
   ::serialize( group , "AssetBaselineVarIndex" , netCDF::NcUint() , NumAssets ,
                v_asset_baseline_var_index );
 
- ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
-              v_lower_bound );
+ if( group.getVar( "LowerBound" ).isNull() )
+  ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
+               v_lower_bound );
 
  ::serialize( group , "Cost" , netCDF::NcDouble() , NumAssets , v_cost );
 
@@ -1291,9 +1298,9 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
    Constraints_A.putVar( { i , 0 } , { 1 , num_assets } , v_A[ i ].data() );
  }
 
- if( auto inner_block = get_nested_Block( 0 ) ) {
+ if( inner ) {
   auto inner_block_group = group.addGroup( BLOCK_NAME );
-  inner_block->serialize( inner_block_group );
+  inner->serialize( inner_block_group );
  }
 }
 

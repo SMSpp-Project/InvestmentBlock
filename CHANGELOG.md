@@ -65,6 +65,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Block from outside instead of creating it out of the `InnerBlock` group
   (this is what the expansion above hands each scenario component)
 
+- a TwoStageStochasticBlock as the `InnerBlock` of a `Component_<k>`, or as
+  the direct inner Block, is separated by deserialize into one component per
+  scenario, weighted by (probability of the scenario) x (`Weight`), when its
+  scenarios share nothing, i.e., when it has a `DiscreteScenarioSet` and no
+  first-stage path; otherwise it is solved whole, with a warning saying why.
+  The components take the Blocks of the scenarios that the
+  TwoStageStochasticBlock has built, before it generates its Objective, which
+  would write the probabilities into their costs; it is kept until the
+  InvestmentBlock is destroyed, and serialize() writes it whole in their
+  place, as one `Component_<k>`
+
+- `get_investment_functions()` on InvestmentBlock, which returns its
+  InvestmentFunction, or that of each of its components
+
+- `InvestmentFunction::serialize( group , inner , weight )`, which writes the
+  InvestmentFunction with the given inner Block and weight
+
 - `InvestmentBlockSolution` now carries one inner Solution per component,
   serialized as `InnerSolution_<k>` groups with a `NumInnerSolutions`
   round-trip guardrail; the legacy single-`InnerSolution` format is unchanged
@@ -128,9 +145,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `generate_objective()` now builds a disaggregated sum when there are multiple
   components; the single-component (legacy) path is unchanged
 
-- the `f_reformulate_bounds` option cannot be combined with a multi-component
-  construction: it is now rejected with an error rather than silently producing
-  wrong results
+- the `f_reformulate_bounds` option works with several components when each
+  of them has the lower bounds of the design variables it is active in, and
+  neither `AssetVarIndex` nor `AssetBaselineVarIndex`; otherwise it is
+  rejected with an error rather than silently producing wrong results
+
+- `InvestmentFunction::get_var_lower_bound()` is public
 
 - the deserialize consistency check between the number of assets and of
   active variables is now mapping-aware (a component with an `AssetVarIndex`
@@ -204,6 +224,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   served it; the UCBlock answers for both [see `AssetSetter`]
 
 ### Fixed
+
+- the serialize of the single-component format no longer fails:
+  InvestmentFunction added the dimension `NumAssets` and the variable
+  `LowerBound` again to the group of the InvestmentBlock, which already holds
+  them, and left the group with its own type
+
+- `InvestmentFunction::get_dflt_str_par()` has a default for each of its two
+  string parameters: it had one, and the default of
+  `strOutputSolutionDirectory` was read past the end of the vector, which made
+  every reset to the defaults crash, as `investmentblock_solver` does after
+  solving
 
 - the expansion of a `StochasticBlock` template into components resolves the
   caller of every DataMapping against the inner Block before applying a

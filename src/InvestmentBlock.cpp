@@ -419,6 +419,93 @@ bool InvestmentBlock::expand_stochastic_template(
 
 /*--------------------------------------------------------------------------*/
 
+bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
+                                        Index & num_components ,
+                                        bool & all_unit_weights )
+{
+ const auto inner_grp = grp.getGroup( "InnerBlock" );
+ std::string inner_type;
+ if( ! inner_grp.isNull() ) {
+  auto att = inner_grp.getAtt( "type" );
+  if( ! att.isNull() )
+   att.getValues( inner_type );
+  }
+
+ // the exact class: a MultiStageStochasticBlock, which derives from it, nests
+ // a tree of its own, and is not separated here
+ if( inner_type != "TwoStageStochasticBlock" )
+  return( false );
+
+ const auto whole = [ k ]( const std::string & why ) {
+  std::cerr << "InvestmentBlock::deserialize: WARNING - the "
+               "TwoStageStochasticBlock of Component_" << k << " is solved "
+               "whole rather than one scenario at a time: " << why
+            << std::endl;
+  return( false );
+  };
+
+ // without scenarios the TwoStageStochasticBlock sums identical copies with
+ // no probability, which is not a weighted sum of scenarios
+ if( inner_grp.getGroup( "DiscreteScenarioSet" ).isNull() )
+  return( whole( "it has no DiscreteScenarioSet" ) );
+
+ std::unique_ptr< Block > block( Block::new_Block( inner_grp , this ) );
+ const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( block.get() );
+ if( ! tssb )
+  throw( std::logic_error( "InvestmentBlock::deserialize: it was not "
+	 "possible to create the TwoStageStochasticBlock of Component_" +
+	 std::to_string( k ) + "." ) );
+
+ // the scenarios can be solved one at a time only if they share nothing: a
+ // first-stage AbstractPath ties them, and what it reaches says why they stay
+ // together. Designs could be separated, but only once they are the assets
+ // of this InvestmentBlock: as they are, each scenario would choose its own.
+ // The paths are counted, not their group, which serialize() always writes
+ if( ! tssb->get_paths_to_static_here_and_now_vars().empty() ) {
+  std::string why;
+  if( is_separable( tssb , & why ) )
+   why = "its first stage is made of the designs of assets, which would "
+         "first have to become the assets of this InvestmentBlock";
+  return( whole( why ) );
+  }
+
+ const Index L = tssb->get_number_leaves();
+ if( ! L )
+  return( whole( "it has no scenario" ) );
+
+ // each leaf becomes a component, weighted by its probability, which the
+ // TwoStageStochasticBlock writes into the costs of the leaf only when it
+ // generates its Objective, which it never does here. Should a leaf be
+ // rejected, the components made so far own their leaves, and the
+ // TwoStageStochasticBlock is leaked rather than left to delete them again
+ const Index first = get_number_nested_Blocks();
+ double weight = 1;
+ try {
+  for( Index l = 0 ; l < L ; ++l ) {
+   auto f_l = std::make_unique< InvestmentFunction >();
+   f_l->deserialize( grp , tssb->get_leaf_block( l ) );
+   wire_component_actives( f_l.get() , k );
+   weight = f_l->get_weight();
+   const auto w_l = weight * tssb->get_leaf_probability( l );
+   add_component( f_l.release() , w_l );
+   if( w_l != 1.0 )
+    all_unit_weights = false;
+   ++num_components;
+   }
+  }
+ catch( ... ) {
+  block.release();
+  throw;
+  }
+
+ v_parked_tssb.push_back( { tssb , first , weight } );
+ block.release();
+ return( true );
+
+ }  // end( InvestmentBlock::expand_two_stage )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
 {
  // the structure must be defined before the abstract representation
@@ -467,8 +554,28 @@ void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
 
 /*--------------------------------------------------------------------------*/
 
+std::vector< InvestmentFunction * >
+InvestmentBlock::get_investment_functions( void ) const
+{
+ return( component_functions( this ) );
+ }
+
+/*--------------------------------------------------------------------------*/
+
 InvestmentBlock::~InvestmentBlock()
 {
+ // each leaf of a TwoStageStochasticBlock goes back under it, out of a
+ // component that must not delete it with itself, and it deletes them all
+ // [see expand_two_stage()]
+ for( const auto & parked : v_parked_tssb ) {
+  for( Index l = 0 ; l < parked.tssb->get_number_leaves() ; ++l ) {
+   component_function( this , parked.first + l )->set_inner_block( nullptr ,
+                                                                   false );
+   parked.tssb->get_leaf_block( l )->set_f_Block( parked.tssb );
+   }
+  delete parked.tssb;
+  }
+
  for( auto block : v_Block )
   delete block;
  v_Block.clear();
@@ -579,6 +686,11 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     continue;
     }
 
+   // a TwoStageStochasticBlock whose scenarios share nothing is separated in
+   // the same way, one component per scenario
+   if( expand_two_stage( grp_k , k , num_components , all_unit_weights ) )
+    continue;
+
    auto f_k = new InvestmentFunction();
    try {   // f_k (and its inner Block) must not leak on a rejected file:
            // Block::new_Block swallows the exception and returns nullptr
@@ -668,6 +780,13 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
    throw( std::logic_error( "InvestmentBlock::deserialize: a "
 	  "'ScenarioGenerator' group is present, but the inner Block is not a "
 	  "StochasticBlock to expand with it." ) );
+
+  // a TwoStageStochasticBlock whose scenarios share nothing is separated as
+  // a Component_0 one is
+  if( expand_two_stage( group , 0 , num_components , all_unit_weights ) ) {
+   Block::deserialize( group );
+   return;
+   }
  }
 
  // ---- legacy single-component path (unchanged behaviour) ----
@@ -758,19 +877,26 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( config )
   f_reformulate_bounds = config->f_value;
 
- if( is_disaggregated() ) {
-  // multi-component path: reformulating the bounds would shift the design
-  // variables on the master, but the per-component InvestmentFunction are not
-  // informed of the shift and would compute with the wrong bounds. Refuse
-  // instead of silently returning wrong values.
-  if( f_reformulate_bounds )
-   throw( std::logic_error(
-    "InvestmentBlock::generate_abstract_constraints: bound reformulation not "
-    "supported with multiple components" ) );
-  }
- else if( auto function =
-          dynamic_cast< InvestmentFunction * >( objective.get_function() ) )
+ // each InvestmentFunction computes at the shifted Variable plus its own
+ // lower bounds, which are those of this InvestmentBlock if it is the only
+ // one; a component reads them out of its own group, so they must be those of
+ // the design Variable it is active in, or it would compute at a wrong point
+ for( auto function : component_functions( this ) ) {
   function->reformulated_bounds( f_reformulate_bounds );
+  if( f_reformulate_bounds && is_disaggregated() )
+   for( Index i = 0 ; i < function->get_num_active_var() ; ++i ) {
+    const auto g = Index( static_cast< const ColVariable * >(
+                         function->get_active_var( i ) ) - v_variables.data() );
+    if( function->get_var_lower_bound( i ) !=
+        ( v_lower_bound.empty() ? - Inf< double >() : v_lower_bound[ g ] ) )
+     throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
+                              " the bounds cannot be reformulated, the lower "
+                              "bound of the active Variable " +
+                              std::to_string( i ) + " of a component differs "
+                              "from that of the design Variable " +
+                              std::to_string( g ) ) );
+    }
+  }
 
  // Initialize the constraints
  v_constraints.resize( v_variables.size() );
@@ -881,21 +1007,33 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
 
  if( ! is_disaggregated() ) {
   // legacy single-component: write the InvestmentFunction at the root group
-  // (byte-identical to before: no Component_<k>)
-  if( auto function = objective.get_function() )
+  // (byte-identical to before: no Component_<k>), which it would leave
+  // with its own type
+  if( auto function = objective.get_function() ) {
    static_cast< InvestmentFunction * >( function )->serialize( group );
+   group.putAtt( "type" , "InvestmentBlock" );
+   }
   }
  else {
   // disaggregated (1:K): one Component_<k> group per nested sub-Block, each the
   // existing InvestmentFunction serialize (which writes its own Weight and
   // AssetVarIndex when non-default); the count is implicit in the suffixes
-  for( Index k = 0 ; k < get_number_nested_Blocks() ; ++k ) {
+  auto parked = v_parked_tssb.begin();
+  for( Index k = 0 , j = 0 ; k < get_number_nested_Blocks() ; ++k , ++j ) {
    // reach the component's InvestmentFunction through the single navigation
    // helper (checked in debug), so serialize does not re-encode the component
    // structure sub-Block -> FRealObjective -> InvestmentFunction
    const auto f_k = component_function( this , k );
-   auto grp_k = group.addGroup( "Component_" + std::to_string( k ) );
-   f_k->serialize( grp_k );
+   auto grp_k = group.addGroup( "Component_" + std::to_string( j ) );
+   // the components made out of the leaves of a TwoStageStochasticBlock are
+   // written as one, the TwoStageStochasticBlock [see expand_two_stage()]
+   if( ( parked != v_parked_tssb.end() ) && ( parked->first == k ) ) {
+    f_k->serialize( grp_k , parked->tssb , parked->weight );
+    k += parked->tssb->get_number_leaves() - 1;
+    ++parked;
+    }
+   else
+    f_k->serialize( grp_k );
 
    // the file speaks GLOBAL indices: when the component's actives are a
    // proper subset of the design variables (the per-period binding), its
