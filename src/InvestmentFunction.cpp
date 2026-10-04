@@ -542,10 +542,12 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
   if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
           dynamic_cast< TwoStageStochasticBlock * >( inner_block ) ||
-          dynamic_cast< UCBlock * >( inner_block ) ) )
+          dynamic_cast< UCBlock * >( inner_block ) ) ) {
+   delete inner_block;
    throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
                             "Block is neither an SDDPBlock, nor a "
                             "TwoStageStochasticBlock, nor a UCBlock." ) );
+   }
 
   set_inner_block( inner_block );
   }
@@ -562,10 +564,14 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
     throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
                              "possible to create the inner Block from group '"
                              + BLOCK_NAME + "'." ) );
-   if( ! dynamic_cast< SDDPBlock * >( inner_block ) )
+   if( ! dynamic_cast< SDDPBlock * >( inner_block ) ) {
+    // the replicas are read out of the same group: either the first one is
+    // rejected, and none was made before it, or none is
+    delete inner_block;
     throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
                              "Block is not an SDDPBlock (only SDDPBlock is "
                              "supported in the multi-replica path)." ) );
+    }
    blocks.push_back( inner_block );
    }
   set_inner_blocks( blocks );

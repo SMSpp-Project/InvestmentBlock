@@ -520,28 +520,38 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
 
  // each leaf becomes a component, weighted by its probability, which the
  // TwoStageStochasticBlock writes into the costs of the leaf only when it
- // generates its Objective, which it never does here. Should a leaf be
- // rejected, the components made so far own their leaves, and the
- // TwoStageStochasticBlock is leaked rather than left to delete them again
+ // generates its Objective, which it never does here. A leaf goes to its
+ // component only once the component is in place: until then it belongs to
+ // the TwoStageStochasticBlock alone, since add_component() deletes a
+ // rejected function, and with it its inner Block. Should a leaf be rejected,
+ // the leaves handed out so far go back under their fathers, and the
+ // TwoStageStochasticBlock deletes them all with itself
  const Index first = get_number_nested_Blocks();
  double weight = 1;
  std::vector< Block * > fathers( L );
  try {
   for( Index l = 0 ; l < L ; ++l ) {
-   fathers[ l ] = tssb->get_leaf_block( l )->get_f_Block();
+   const auto leaf = tssb->get_leaf_block( l );
+   fathers[ l ] = leaf->get_f_Block();
    auto f_l = std::make_unique< InvestmentFunction >();
-   f_l->deserialize( grp , tssb->get_leaf_block( l ) );
+   f_l->deserialize( grp , leaf );
+   f_l->set_inner_block( nullptr , false );
    wire_component_actives( f_l.get() , k );
    weight = f_l->get_weight();
    const auto w_l = weight * tssb->get_leaf_probability( l );
    add_component( f_l.release() , w_l );
+   component_function( this , first + l )->set_inner_block( leaf , false );
    if( w_l != 1.0 )
     all_unit_weights = false;
    ++num_components;
    }
   }
  catch( ... ) {
-  block.release();
+  for( Index c = first ; c < get_number_nested_Blocks() ; ++c )
+   component_function( this , c )->set_inner_block( nullptr , false );
+  for( Index l = 0 ; l < L ; ++l )
+   if( fathers[ l ] )
+    tssb->get_leaf_block( l )->set_f_Block( fathers[ l ] );
   throw;
   }
 
@@ -555,21 +565,27 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
 
 void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
 {
+ // f is adopted: on success an FRealObjective deletes it, so on failure it
+ // must be freed here or it leaks
+
  // the structure must be defined before the abstract representation
- if( objective_generated() || constraints_generated() )
+ if( objective_generated() || constraints_generated() ) {
+  delete f;
   throw( std::logic_error( "InvestmentBlock::add_component: "
                            "abstract representation already generated" ) );
+  }
 
- if( v_variables.empty() )   // a component has no active Variable to bind to
+ if( v_variables.empty() ) {   // a component has no active Variable to bind to
+  delete f;
   throw( std::logic_error( "InvestmentBlock::add_component: "
                            "no design variables" ) );
+  }
 
  if( ! f )
   throw( std::invalid_argument( "InvestmentBlock::add_component: "
                                 "null component" ) );
 
- // f is adopted: on success an FRealObjective deletes it, so on failure it
- // must be freed here or it leaks. weight must be > 0 (BundleSolver eMin)
+ // weight must be > 0 (BundleSolver eMin)
  if( weight <= 0 ) {
   delete f;
   throw( std::invalid_argument( "InvestmentBlock::add_component: "
@@ -585,7 +601,13 @@ void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
   p.reserve( v_variables.size() );
   for( auto & variable : v_variables )
    p.push_back( & variable );
-  f->set_variables( std::move( p ) );
+  try {
+   f->set_variables( std::move( p ) );
+   }
+  catch( ... ) {
+   delete f;
+   throw;
+   }
   }
 
  // one bare AbstractBlock per component, holding an FRealObjective over f:
@@ -852,7 +874,13 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  investment_function->set_num_sub_blocks_per_stage(
 					       f_num_sub_blocks_per_stage );
  investment_function->set_number_sub_blocks( f_num_sub_blocks );
- investment_function->deserialize( group );
+ try {   // as for a Component_<k>: the function must not leak on a rejected file
+  investment_function->deserialize( group );
+  }
+ catch( ... ) {
+  delete investment_function;
+  throw;
+  }
  set_function( investment_function );
  investment_function->set_f_Block( this );
 

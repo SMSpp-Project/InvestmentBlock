@@ -245,6 +245,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- a rejected deserialize frees what it had built: `add_component()` deletes
+  the component on every error, as it promises, the single-component format
+  deletes its InvestmentFunction, `InvestmentFunction::deserialize()` deletes
+  an inner Block of a class it does not accept, and a TwoStageStochasticBlock
+  with a rejected scenario gets back the scenarios already handed out and is
+  deleted with them
+
 - a `StochasticBlock` template whose ScenarioGenerator is a
   MultiStageScenarioGenerator with more than one stage is rejected at
   deserialize: it was expanded along its first stage alone, as a file of a
