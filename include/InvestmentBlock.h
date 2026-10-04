@@ -269,6 +269,15 @@ public:
   *   InvestmentBlock is an FRealObjective whose Function is an
   *   InvestmentFunction.
   *
+  * - The dimension "ScenarioDecomposition", which indicates whether a
+  *   TwoStageStochasticBlock or MultiStageStochasticBlock inner Block, of the
+  *   root or of a component, is separated into one component per scenario
+  *   when its scenarios share nothing [see expand_two_stage()]. If it is
+  *   zero, then it is left whole. If it is one, then it is separated. Any
+  *   other value is an error. This dimension is optional. If it is not
+  *   provided, then it is assumed to be one. A StochasticBlock template is
+  *   expanded regardless.
+  *
   * - A description of the InvestmentFunction.
   *
   * The linear constraints are assumed to have the following form:
@@ -795,6 +804,10 @@ protected:
 
  int f_objective_sense = Objective::eMin;  ///< the sense of the Objective
 
+ /// whether a TwoStageStochasticBlock or MultiStageStochasticBlock inner Block
+ /// is separated into components [see expand_two_stage()]
+ bool f_scenario_decomposition = true;
+
  /// indicates whether the bound constraints must be reformulated
  int f_reformulate_bounds = 0;
 
@@ -883,7 +896,8 @@ protected:
   * its copies with (a DiscreteScenarioSet, or the scenario tree of a
   * MultiStageStochasticBlock, or one in each of its inner Blocks), or no
   * scenario at all, it is left whole, with a warning saying why, and false
-  * is returned, adding nothing.
+  * is returned, adding nothing. It is left whole with no warning if the
+  * file asks so, with a ScenarioDecomposition of zero [see deserialize()].
   *
   * @param grp the component (or root) group that may hold it;
   * @param k its index, for the messages and the wiring of the actives;

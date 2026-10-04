@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ScenarioDecomposition` (netCDF), an optional dimension of the root: 0
+  keeps a TwoStageStochasticBlock or MultiStageStochasticBlock inner Block
+  whole, 1, the default, separates it into components when its scenarios
+  share nothing; a `StochasticBlock` template is expanded regardless, and
+  serialize writes the dimension only when it is 0
+
 - `is_separable()` tells whether the scenarios of a TwoStageStochasticBlock
   or MultiStageStochasticBlock can be solved one by one under a single
   investment, and why not: every first-stage Variable has to be the design of
@@ -150,6 +156,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- an inner Block that its Solver proves unbounded makes
+  `InvestmentFunction::compute()` return `kUnbounded` at the opposite of the
+  worst value, with no linearization, as LagBFunction and BendersBFunction
+  return the status of their Solver: it ended in `kError`, or in -Inf with a
+  linearization read from whatever duals the Solver had
+
 - `generate_objective()` now builds a disaggregated sum when there are multiple
   components; the single-component (legacy) path is unchanged
 
@@ -232,6 +244,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   served it; the UCBlock answers for both [see `AssetSetter`]
 
 ### Fixed
+
+- a `StochasticBlock` template whose ScenarioGenerator is a
+  MultiStageScenarioGenerator with more than one stage is rejected at
+  deserialize: it was expanded along its first stage alone, as a file of a
+  single stage
 
 - the serialize of the single-component format no longer fails:
   InvestmentFunction added the dimension `NumAssets` and the variable

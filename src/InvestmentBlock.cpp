@@ -370,11 +370,22 @@ bool InvestmentBlock::expand_stochastic_template(
 	 "possible to create the ScenarioGenerator of Component_" +
 	 std::to_string( k ) + "." ) );
 
+ // the scenarios are walked along one axis only: seen as a plain generator, a
+ // multi-stage one shows its first stage alone, and a file of T stages would
+ // be read as one of a single stage
+ if( auto ms = dynamic_cast< MultiStageScenarioGenerator * >( generator.get() ) )
+  if( ms->get_stage_number() > 1 )
+   throw( std::logic_error( "InvestmentBlock::deserialize: the "
+	  "ScenarioGenerator of Component_" + std::to_string( k ) + " has " +
+	  std::to_string( ms->get_stage_number() ) + " stages, but a "
+	  "StochasticBlock template is expanded along a single stage: write one "
+	  "Component_k per stage instead." ) );
+
  generator->init_representative_pool();
 
  // Walk the pool with next_scenario(), as every other ScenarioGenerator
  // consumer does (SDDPBlock, TwoStageStochasticBlock). NOT get_support_size():
- // that is INFScenario for a continuous/multi-stage generator (not enumerable)
+ // that is INFScenario for a continuous generator (not enumerable)
  // -- an infinite-support generator must be reduced upstream to a finite pool.
  Index added = 0;
  do {
@@ -447,6 +458,9 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
                                         Index & num_components ,
                                         bool & all_unit_weights )
 {
+ if( ! f_scenario_decomposition )
+  return( false );   // left whole, as the file asks
+
  const auto inner_grp = grp.getGroup( "InnerBlock" );
  std::string inner_type;
  if( ! inner_grp.isNull() ) {
@@ -644,6 +658,14 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  if( deserialize_dim( group , "ObjectiveSense" , f_objective_sense ) &&
      ( ! f_objective_sense ) )
   f_objective_sense = Objective::eMax;
+
+ Index scenario_decomposition = 1;
+ deserialize_dim( group , "ScenarioDecomposition" , scenario_decomposition );
+ if( scenario_decomposition > 1 )
+  throw( std::logic_error( "InvestmentBlock::deserialize: the "
+			   "'ScenarioDecomposition' dimension, if provided, "
+			   "must be 0 or 1." ) );
+ f_scenario_decomposition = scenario_decomposition;
 
  // a bound vector, if provided, must have size 0, 1 (broadcast to NumAssets),
  // or exactly NumAssets; enforce this once for both LowerBound and UpperBound
@@ -1028,6 +1050,9 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
 
  if( f_objective_sense == Objective::eMax )
   group.addDim( "ObjectiveSense" , 0 );
+
+ if( ! f_scenario_decomposition )
+  group.addDim( "ScenarioDecomposition" , 0 );
 
  ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
               v_lower_bound );

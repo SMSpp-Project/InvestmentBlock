@@ -1435,6 +1435,18 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
 
  f_solver_status = solver->compute();
 
+ // a provably unbounded inner Block is an answer, not an error, as for
+ // LagBFunction and BendersBFunction [see Solver::kUnbounded]: the value is
+ // the opposite of the worst one, whether or not the Solver also has a
+ // solution, and there is no linearization of an unbounded value to read
+ if( f_solver_status == Solver::kUnbounded ) {
+  f_value = - worst_value();
+  f_has_value = true;
+  output_function_value();
+  solver->set_id( solver_id );
+  return( f_solver_status );
+  }
+
  if( ! solver->has_var_solution() ) {
   f_value = worst_value();
   output_function_value();
