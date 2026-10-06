@@ -600,9 +600,10 @@ class InvestmentFunction : public C05Function , public Block {
   * Function). The weight scales the value and the diagonal linearization; the
   * feasibility (vertical) linearizations are weight-invariant and not scaled.
   *
-  * Must be set ONCE before the function is first computed / attached to a
-  * Solver: it is a plain setter that issues no Modification and does not
-  * rescale linearizations already stored in the global pool.
+  * A new weight is refused once the function has been computed, that is
+  * once it holds a value or a linearization in its global pool: it is a
+  * plain setter that issues no Modification and does not rescale what was
+  * computed with the previous weight.
   *
   * @param w the component weight ( > 0 ). */
 
@@ -610,6 +611,11 @@ class InvestmentFunction : public C05Function , public Block {
   if( w <= 0 )
    throw( std::invalid_argument( "InvestmentFunction::set_weight: "
                                  "weight must be > 0" ) );
+  if( ( w != f_weight ) && ( f_has_value || ( ! global_pool.empty() ) ) )
+   throw( std::logic_error( "InvestmentFunction::set_weight: the weight "
+                            "cannot change once the function has been "
+                            "computed, its value and its linearizations "
+                            "being weighted by the previous one" ) );
   f_weight = w;
   }
 
@@ -1529,7 +1535,7 @@ class InvestmentFunction : public C05Function , public Block {
   *   of the i-th asset that is currently installed in the system and,
   *   therefore, that is not subject to investment costs. This variable is
   *   optional. If it is not provided, then we assume that
-  *   InstalledQuantity[i] = 1 for all i in {0, ..., NumAssets - 1}.
+  *   InstalledQuantity[i] = 0 for all i in {0, ..., NumAssets - 1}.
   *
   * Let x[i] represent the value of the i-th active Variable of this
   * InvestmentFunction. If x[i] is greater than InstalledQuantity[i], then the
@@ -1649,10 +1655,11 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns true only if this InvestmentFunction is concave
- /** This method returns true only if this InvestmentFunction is concave. If
-  * this InvestmentFunction has no sub-Block or the sense of the Objective of
-  * its sub-Block is minimization, then this method returns false. Otherwise,
-  * it returns true. */
+ /** This method returns false. Over a sub-Block whose Objective is a
+  * minimization the InvestmentFunction is convex [see is_convex()]; over a
+  * maximization its value would be concave, but the cost of the investment,
+  * convex, is added to it [see add_linear_term()], so that the sum is
+  * neither convex nor concave. */
 
  bool is_concave( void ) override;
 
@@ -2614,6 +2621,17 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 
  int get_inner_block_objective_sense() const;
+
+/*--------------------------------------------------------------------------*/
+ /// removes the active Variable in \p removed and the assets sized by them
+ /** \p removed is ordered and holds valid indices of active Variable. An
+  * asset goes with the active Variable that sizes it [see
+  * v_asset_var_index], and all of its data with it, in every vector indexed
+  * by asset; the Variable of the assets that stay, and their baselines, are
+  * moved to their new positions. An asset that stays cannot lose its
+  * baseline: that is refused, before anything is changed. */
+
+ void remove_actives( const Subset & removed );
 
 /*--------------------------------------------------------------------------*/
  /// prepares the linearization for a new simulation

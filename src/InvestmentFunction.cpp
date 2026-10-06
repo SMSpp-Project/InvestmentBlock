@@ -848,27 +848,7 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
                            "Variable index " + std::to_string( i ) + "." ) );
 
  auto var = v_x[ i ];
- v_x.erase( v_x.begin() + i ); // erase it in v_x
-
- // Erase the asset index, asset type, and the linear coefficient associated
- // with the Variable being removed
- v_asset_indices.erase( v_asset_indices.begin() + i );
- v_asset_type.erase( v_asset_type.begin() + i );
-
- for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
-  if( ! v->empty() )
-   v->erase( v->begin() + i );
-
- for( auto v : { & v_asset_setter_name , & v_asset_linearization_name } )
-  if( ! v->empty() )
-   v->erase( v->begin() + i );
-
- // the groups of assets are indexed by asset, so they no longer are: drop
- // them and let them be resolved again the next time the Blocks are updated
- v_asset_groups.clear();
- f_methods_resolved = false;
-
- f_blocks_are_updated = false;
+ remove_actives( { i } );
 
  if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
   return;
@@ -891,103 +871,21 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
  if( range.second <= range.first )
   return;
 
- f_blocks_are_updated = false;
+ Vec_p_Var vars( v_x.begin() + range.first , v_x.begin() + range.second );
+ Subset removed;
+ removed.reserve( range.second - range.first );
+ for( Index i = range.first ; i < range.second ; ++i )
+  removed.push_back( i );
 
- if( ( range.first == 0 ) && ( range.second == Index( v_x.size() ) ) ) {
-  // removing *all* Variables
-  Vec_p_Var vars( v_x.size() );
+ remove_actives( removed );
 
-  for( decltype( v_x )::size_type i = 0 ; i < v_x.size() ; ++i )
-   vars[ i ] = v_x[ i ];
-
-  v_x.clear();
-  v_asset_indices.clear();
-  v_asset_type.clear();
-  v_cost.clear();
-  v_disinvestment_cost.clear();
-  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
-   v->clear();
-  v_asset_setter_name.clear();
-  v_asset_linearization_name.clear();
-  v_asset_groups.clear();
-  f_methods_resolved = false;
-
-  // Now issue the Modification.
-  // An InvestmentFunction is strongly quasi-additive.
-  if( f_Observer && f_Observer->issue_mod( issueMod ) )
-   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsRngd >
-                                 ( this , std::move( vars ) , range , 0 ,
-                                   Observer::par2concern( issueMod ) ) ,
-                                 Observer::par2chnl( issueMod ) );
-  return;
- }
-
- // Removing *some* Variables.
-
- // Iterators to the Variables to be removed.
-
- const auto v_x_it = std::make_pair( v_x.begin() + range.first ,
-                                     v_x.begin() + range.second );
-
- const auto erase = [ this , &v_x_it , range ]() {
-
-  // Iterators to the elements to be removed
-
-  const auto v_asset_indices_it =
-   std::make_pair( v_asset_indices.begin() + range.first ,
-                   v_asset_indices.begin() + range.second );
-
-  const auto v_asset_type_it =
-   std::make_pair( v_asset_type.begin() + range.first ,
-                   v_asset_type.begin() + range.second );
-
-  const auto v_cost_it =
-   std::make_pair( v_cost.begin() + range.first ,
-                   v_cost.begin() + range.second );
-
-  const auto v_disinvestment_cost_it =
-   std::make_pair( v_disinvestment_cost.begin() + range.first ,
-                   v_disinvestment_cost.begin() + range.second );
-
-  v_x.erase( v_x_it.first , v_x_it.second );
-  v_asset_indices.erase( v_asset_indices_it.first , v_asset_indices_it.second );
-  v_asset_type.erase( v_asset_type_it.first , v_asset_type_it.second );
-  v_cost.erase( v_cost_it.first , v_cost_it.second );
-  v_disinvestment_cost.erase( v_disinvestment_cost_it.first ,
-                              v_disinvestment_cost_it.second );
-
-  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
-   if( ! v->empty() )
-    v->erase( v->begin() + range.first , v->begin() + range.second );
-
-  for( auto v : { & v_asset_setter_name , & v_asset_linearization_name } )
-   if( ! v->empty() )
-    v->erase( v->begin() + range.first , v->begin() + range.second );
-
-  // the resolved methods are indexed by asset, so they no longer are
-  v_asset_groups.clear();
-  f_methods_resolved = false;
- };
-
- if( f_Observer && f_Observer->issue_mod( issueMod ) ) {
-  // Somebody is there: meanwhile, prepare data for the Modification
-
-  Vec_p_Var vars( range.second - range.first );
-  std::copy( v_x_it.first , v_x_it.second , vars.begin() );
-
-  // Erase the elements associated with the Variables being removed
-  erase();
-
-  // Now issue the Modification.
-  // An InvestmentFunction is strongly quasi-additive
+ // Now issue the Modification.
+ // An InvestmentFunction is strongly quasi-additive.
+ if( f_Observer && f_Observer->issue_mod( issueMod ) )
   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsRngd >
                                 ( this , std::move( vars ) , range , 0 ,
                                   Observer::par2concern( issueMod ) ) ,
                                 Observer::par2chnl( issueMod ) );
- }
- else  // no one is there: just do it
-  // Erase the elements associated with the Variables being removed
-  erase();
 
 }  // end( InvestmentFunction::remove_variables( range ) )
 
@@ -1013,95 +911,117 @@ static void compact( std::vector< T > & x ,
 
 /*--------------------------------------------------------------------------*/
 
+void InvestmentFunction::remove_actives( const Subset & removed )
+{
+ const auto is_removed = [ & removed ]( Index i ) {
+  return( std::binary_search( removed.begin() , removed.end() , i ) );
+  };
+
+ // the assets that go, those sized by a removed Variable: with the identity
+ // mapping asset i is sized by the i-th active Variable
+ const Index num_assets = v_asset_indices.size();
+ Subset assets;
+ for( Index j = 0 ; j < num_assets ; ++j )
+  if( is_removed( v_asset_var_index.empty() ? j : v_asset_var_index[ j ] ) )
+   assets.push_back( j );
+
+ // an asset that stays cannot lose its baseline: refused before anything
+ // is changed
+ for( Index j = 0 ; j < v_asset_baseline_var_index.size() ; ++j )
+  if( is_removed( v_asset_baseline_var_index[ j ] ) &&
+      ( ! std::binary_search( assets.begin() , assets.end() , j ) ) )
+   throw( std::logic_error( "InvestmentFunction::remove_variables: the active "
+                            "Variable " +
+                            std::to_string( v_asset_baseline_var_index[ j ] ) +
+                            " is the baseline of the asset " +
+                            std::to_string( j ) + ", which stays." ) );
+
+ // the data of the assets that go, in every vector indexed by asset; one
+ // shorter than the assets holds the default for those past its end
+ const auto drop = [ & assets ]( auto & v ) {
+  Subset in;
+  for( auto j : assets )
+   if( j < v.size() )
+    in.push_back( j );
+  if( ! in.empty() )
+   compact( v , in );
+  };
+
+ if( ! assets.empty() ) {
+  drop( v_asset_indices );
+  drop( v_asset_type );
+  drop( v_asset_setter_name );
+  drop( v_asset_linearization_name );
+  drop( v_asset_signature );
+  drop( v_asset_feasibility_cut );
+  drop( v_cost );
+  drop( v_disinvestment_cost );
+  drop( v_installed_quantity );
+  drop( v_asset_var_index );
+  drop( v_asset_baseline_var_index );
+  for( auto & row : v_A )  // a column for each asset
+   drop( row );
+  }
+
+ // the Variable of the assets that stay, and their baselines, move to the
+ // positions they have once the removed ones are gone
+ for( auto v : { & v_asset_var_index , & v_asset_baseline_var_index } )
+  for( auto & k : *v )
+   k -= std::lower_bound( removed.begin() , removed.end() , k ) -
+        removed.begin();
+
+ // the data indexed by active Variable
+ const auto num_active = v_x.size();
+ compact( v_x , removed );
+ for( auto v : { & v_lower_bound , & v_linearization } )
+  if( v->size() == num_active )
+   compact( *v , removed );
+
+ // the groups of assets are indexed by asset, so they no longer are: drop
+ // them and let them be resolved again the next time the Blocks are updated
+ v_asset_groups.clear();
+ f_methods_resolved = false;
+ f_blocks_are_updated = false;
+
+}  // end( InvestmentFunction::remove_actives )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
                                            ModParam issueMod ) {
 
- if( indices.empty() ) {      // removing *all* Variables
-
+ const bool all = indices.empty();
+ if( all ) {      // removing *all* Variables
   if( v_x.empty() )       // there is no Variable to be removed
    return;                // cowardly (and silently) return
-
-  Vec_p_Var vars( v_x.size() );
-
   for( Index i = 0 ; i < v_x.size() ; ++i )
-   vars[ i ] = v_x[ i ];
+   indices.push_back( i );
+  }
+ else {           // removing *some* Variables
+  if( ! ordered )
+   std::sort( indices.begin() , indices.end() );
 
-  // Clear all elements
-  v_x.clear();
-  v_asset_indices.clear();
-  v_asset_type.clear();
-  v_cost.clear();
-  v_disinvestment_cost.clear();
-  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
-   v->clear();
-  v_asset_setter_name.clear();
-  v_asset_linearization_name.clear();
-  v_asset_groups.clear();
-  f_methods_resolved = false;
+  if( indices.back() >= v_x.size() )  // the last name is wrong
+   throw( std::invalid_argument( "InvestmentFunction::remove_variables: wrong "
+                                 "Variable index in the Subset indices." ) );
+  }
 
-  f_blocks_are_updated = false;
+ Vec_p_Var vars;
+ vars.reserve( indices.size() );
+ for( auto nm : indices )
+  vars.push_back( v_x[ nm ] );
 
-  // Now issue the Modification: note that the subset is empty.
-  // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
-  if( f_Observer && f_Observer->issue_mod( issueMod ) )
-   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsSbst >
-                                 ( this , std::move( vars ) , Subset() , true ,
-                                   0 , Observer::par2concern( issueMod ) ) ,
-                                 Observer::par2chnl( issueMod ) );
-  return;
- }
+ remove_actives( indices );
 
- // removing *some* Variables
-
- if( ! ordered )
-  std::sort( indices.begin() , indices.end() );
-
- if( indices.back() >= v_x.size() )  // the last name is wrong
-  throw( std::invalid_argument( "InvestmentFunction::remove_variables: wrong "
-                                "Variable index in the Subset indices." ) );
-
- f_blocks_are_updated = false;
-
- const auto erase = [ this , &indices ]() {
-  compact( v_asset_indices , indices );
-  compact( v_asset_type , indices );
-  compact( v_cost , indices );
-  compact( v_disinvestment_cost , indices );
-  compact( v_x , indices );
-
-  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
-   if( ! v->empty() )
-    compact( *v , indices );
-
-  for( auto v : { & v_asset_setter_name , & v_asset_linearization_name } )
-   if( ! v->empty() )
-    compact( *v , indices );
-
-  // the resolved methods are indexed by asset, so they no longer are
-  v_asset_groups.clear();
-  f_methods_resolved = false;
- };
-
- if( f_Observer && f_Observer->issue_mod( issueMod ) ) {
-  Vec_p_Var vars( indices.size() );
-  auto its = vars.begin();
-  for( auto nm : indices )
-   *(its++) = v_x[ nm ];
-
-  erase();
-
-  // Remove
-
-  // Now issue the Modification.
-  // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
+ // Now issue the Modification: an empty subset if all were removed.
+ // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
+ if( f_Observer && f_Observer->issue_mod( issueMod ) )
   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsSbst >
                                 ( this , std::move( vars ) ,
-                                  std::move( indices ) , true , 0 ,
+                                  all ? Subset() : std::move( indices ) ,
+                                  true , 0 ,
                                   Observer::par2concern( issueMod ) ) ,
                                 Observer::par2chnl( issueMod ) );
- }
- else  // no one is there: just do it
-  erase();
 
 }  // end( InvestmentFunction::remove_variables( subset ) )
 
@@ -1249,6 +1169,14 @@ int InvestmentFunction::compute( bool changedvars ) {
  if( ( ! owned ) && ( ! v_Block.front()->lock( f_id ) ) )
   return( kError ); // If this does not work, this is clearly an error.
 
+ // the inner Block is unlocked on every way out of here, a throw of this
+ // function or of the Solver it calls included
+ struct Unlock {
+  Block * block;
+  const void * id;
+  ~Unlock() { if( block ) block->unlock( id ); }
+  } unlock{ owned ? nullptr : v_Block.front() , f_id };
+
  int status;
  if( get_sddp_block() ) {
   status = compute_SDDPBlock( changedvars , owned );
@@ -1273,15 +1201,9 @@ int InvestmentFunction::compute( bool changedvars ) {
   // each scenario, which update_blocks() takes care of, and that the value
   // it returns is already the expected one over the scenarios
   status = compute_UCBlock( changedvars , owned );
- else {
-  if( ! owned )
-   v_Block.front()->unlock( f_id );  // unlock the inner Block
+ else
   throw( std::invalid_argument( "InvestmentFunction::compute: "
                                 "invalid inner Block." ) );
- }
-
- if( ! owned )
-  v_Block.front()->unlock( f_id );  // unlock the inner Block
 
  return( status );
 }
@@ -1298,6 +1220,15 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
 
  void * solver_id = solver->id();
  solver->set_id( f_id );
+
+ // the Solver gets its identity back on every way out of here, a throw
+ // included, which the set_id() below, each before the code that follows
+ // it, do not cover
+ struct GiveBack {
+  Solver * solver;
+  void * id;
+  ~GiveBack() { solver->set_id( id ); }
+  } give_back{ solver , solver_id };
 
  // the Modification of the inner Block are ignored until the linearization
  // is read, and the flag is put back on every way out, errors included
@@ -2071,7 +2002,13 @@ Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_convex( void ) { return( true ); }
+bool InvestmentFunction::is_convex( void ) {
+ // the value of a minimization is convex in the investment, and so is the
+ // cost of the investment [see add_linear_term()]; the value of a
+ // maximization is concave, and with that cost neither convex nor concave
+ return( ( ! v_Block.empty() ) && v_Block.front() &&
+         ( get_inner_block_objective_sense() != Objective::eMax ) );
+ }
 
 /*--------------------------------------------------------------------------*/
 

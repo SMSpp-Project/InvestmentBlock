@@ -383,11 +383,18 @@ bool InvestmentBlock::expand_stochastic_template(
 
  generator->init_representative_pool();
 
+ // an empty pool would leave 0 components (a degenerate InvestmentBlock with a
+ // null objective), and the walk below reads the current scenario before it
+ // asks for the next one: fail loud before it
+ if( ! generator->get_support_size() )
+  throw( std::logic_error( "InvestmentBlock::deserialize: the ScenarioGenerator"
+	 " of Component_" + std::to_string( k ) + " has no scenarios; the "
+	 "expansion requires a non-empty, finite scenario set." ) );
+
  // Walk the pool with next_scenario(), as every other ScenarioGenerator
  // consumer does (SDDPBlock, TwoStageStochasticBlock). NOT get_support_size():
  // that is INFScenario for a continuous generator (not enumerable)
  // -- an infinite-support generator must be reduced upstream to a finite pool.
- Index added = 0;
  do {
   // a fresh StochasticBlock per scenario (set_data() rewrites the inner IN
   // PLACE, so a shared one would leave every scenario with the last one's data)
@@ -436,17 +443,8 @@ bool InvestmentBlock::expand_stochastic_template(
   if( weight != 1.0 )
    all_unit_weights = false;
   ++num_components;
-  ++added;
   }
  while( generator->next_scenario() );
-
- // an empty pool would leave 0 components (a degenerate InvestmentBlock with a
- // null objective) -- fail loud, as SDDPBlock does on an empty scenario pool
- if( added == 0 )
-  throw( std::logic_error( "InvestmentBlock::deserialize: the ScenarioGenerator"
-	 " of Component_" + std::to_string( k ) + " produced no scenarios "
-	 "(empty representative pool); the expansion requires a non-empty, "
-	 "finite scenario set." ) );
 
  return( true );
 
@@ -836,10 +834,20 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  // a StochasticBlock as the direct inner is a template too: expand it exactly
  // as a Component_0 one, only without the wrapper.
  {
+  // the components made by the inner Block at the root are minimized, as
+  // those of Component_<k> groups are: a maximization asked at the root is
+  // refused rather than ignored
+  const auto refuse_maximization = [ this ]() {
+   if( f_objective_sense == Objective::eMax )
+    throw( std::logic_error( "InvestmentBlock::deserialize: the root asks "
+	   "for a maximization, but its inner Block is separated into "
+	   "components, each of which is minimized." ) );
+   };
   Index num_components = 0;
   bool all_unit_weights = true;
   if( expand_stochastic_template( group , group , 0 ,
                                   num_components , all_unit_weights ) ) {
+   refuse_maximization();
    if( ( num_components > 1 ) && all_unit_weights )
     std::cerr << "InvestmentBlock::deserialize: WARNING - " << num_components
               << " components all have weight 1.0; if these are "
@@ -859,6 +867,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   // a TwoStageStochasticBlock whose scenarios share nothing is separated as
   // a Component_0 one is
   if( expand_two_stage( group , 0 , num_components , all_unit_weights ) ) {
+   refuse_maximization();
    Block::deserialize( group );
    return;
    }

@@ -44,9 +44,9 @@ defined in `UCBlock`, like generating units and transmission lines.
 > rejects it.
 > With BundleSolver 2.0 the number of components does not change how the
 > master problem is solved: it is the `:MILPSolver` of the BlockSolverConfig
-> named by the `strMPBSolverCfg` parameter. The single-component
-> (legacy) path — netCDF format included — is read and written byte-for-byte
-> unchanged.
+> named by the `strMPBSolverCfg` parameter. A file of the single-component
+> format written by `serialize()` is written back byte for byte the same;
+> how that format changed since 0.2.0 is in the CHANGELOG.
 
 The `InvestmentBlock` class, which derives from `Block`, has a vector of
 `ColVariable`, each of which represents the investment in a particular asset.

@@ -315,6 +315,48 @@ public:
   *   provided, then it is assumed that Constraints_UpperBound[i] = +inf for
   *   each i in {0, ..., NumConstraints - 1}.
   *
+  * This is the format with the inner Block at the root, where the group is
+  * also the description of the single InvestmentFunction [see
+  * InvestmentFunction::serialize()]. The group may instead hold components
+  * [see add_component()]:
+  *
+  * - The groups "Component_0", "Component_1", ..., numbered consecutively
+  *   from 0, each the description of an InvestmentFunction [see
+  *   InvestmentFunction::serialize()], which becomes a component weighted by
+  *   its attribute "Weight" (> 0, 1 if it is not provided). In each of them
+  *   the optional variables "AssetVarIndex" and "AssetBaselineVarIndex",
+  *   scalar or indexed over its "NumAssets", give for each asset the index,
+  *   among the ColVariable of this InvestmentBlock, of the one that sizes
+  *   the asset and of the one that is its baseline [see
+  *   InvestmentFunction::set_asset_variable_indices() and
+  *   InvestmentFunction::set_asset_baseline_variable_indices()]; with no
+  *   "AssetVarIndex" the i-th asset is sized by the i-th ColVariable. The
+  *   component is bound to the ColVariable of its assets and of their
+  *   baselines only.
+  *
+  * - At the root "NumAssets", "LowerBound", "UpperBound", "Integer" and
+  *   "ScenarioDecomposition", as above, and the group "ScenarioGenerator"
+  *   below. "NumConstraints", the variables "Constraints_*" and an
+  *   "ObjectiveSense" of size 0 are refused: each component holds its own
+  *   linear constraints and is a minimization.
+  *
+  * The inner Block of a component, or the one at the root, can make several
+  * components:
+  *
+  * - A StochasticBlock is a template, which makes one component for each
+  *   scenario of the group "ScenarioGenerator" of its own group or, if there
+  *   is none, of the root, weighted by the "Weight" of the template times
+  *   the probability of the scenario [see expand_stochastic_template()]; a
+  *   "ScenarioGenerator" at the root with no template to feed is refused.
+  *
+  * - A TwoStageStochasticBlock, or a MultiStageStochasticBlock, whose
+  *   scenarios share nothing makes one component for each scenario, or leaf,
+  *   weighted by the "Weight" of its group times the probability of the
+  *   scenario, unless "ScenarioDecomposition" is 0 [see expand_two_stage()].
+  *
+  * When the inner Block at the root makes the components, an
+  * "ObjectiveSense" of size 0 is refused as well.
+  *
   * @param group A netCDF::NcGroup holding the required data. */
 
  void deserialize( const netCDF::NcGroup & group ) override;
@@ -412,6 +454,11 @@ public:
 
 /*--------------------------------------------------------------------------*/
 
+ /// set the number of sub-Blocks per stage of the InvestmentFunction
+ /** As set_number_sub_blocks(), propagated at deserialize() time, and only
+  * in the format with the inner Block at the root and a single
+  * InvestmentFunction. */
+
  void set_num_sub_blocks_per_stage( Index n ) {
   f_num_sub_blocks_per_stage = n;
   }
@@ -419,9 +466,11 @@ public:
 /*--------------------------------------------------------------------------*/
  /// set the number of (replica) sub-Blocks of the InvestmentFunction
  /** This value is propagated to the underlying InvestmentFunction at
-  * deserialize() time. It is the number of identical inner Block replicas
-  * to construct when the inner Block is an SDDPBlock and the multi-replica
-  * parallel execution path is desired. See
+  * deserialize() time, and only in the format with the inner Block at the
+  * root and a single InvestmentFunction: the components [see
+  * add_component()] do not get it. It is the number of identical inner
+  * Block replicas to construct when the inner Block is an SDDPBlock and the
+  * multi-replica parallel execution path is desired. See
   * InvestmentFunction::set_number_sub_blocks() for the precise meaning. */
 
  void set_number_sub_blocks( Index n ) {
@@ -502,6 +551,25 @@ public:
 
  Index get_number_variables( void ) const {
   return( v_variables.size() );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the sense of the Objective of this InvestmentBlock
+ /** With the inner Block at the root the Objective is this InvestmentBlock's
+  * own, and the sense is the one of that Objective, or the one the file says
+  * [see deserialize()] before the Objective is generated. With components
+  * [see add_component()], even one, each of them holds its own Objective, a
+  * minimization, and this InvestmentBlock holds none: the default of Block
+  * [see Block::get_objective_sense()] would answer Objective::eUndef, and a
+  * Solver reporting the value of this InvestmentBlock by its sense [see
+  * Solver::get_var_value()] would report the lower bound of the minimization
+  * in place of the value of the solution it writes. */
+
+ int get_objective_sense( void ) const override {
+  if( is_disaggregated() )
+   return( Objective::eMin );
+  return( get_objective() ? Block::get_objective_sense()
+                          : f_objective_sense );
   }
 
 /*--------------------------------------------------------------------------*/

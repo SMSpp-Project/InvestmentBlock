@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `add_component()` to build an InvestmentBlock as a weighted sum of several
   InvestmentFunction components, each exposed separately to BundleSolver (the
-  disaggregated path); the single-component (legacy) path is unchanged.
+  disaggregated path); an InvestmentBlock with components is a minimization
+  [see `get_objective_sense()`], so that a Solver reports the value of the
+  solution it writes, and `set_number_sub_blocks()` and
+  `set_num_sub_blocks_per_stage()` hold only without components.
 
 - netCDF (1:K) format for the disaggregated InvestmentBlock: the group may now
   hold one `Component_<k>` sub-group per component (the presence of
@@ -32,8 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with its own `Weight` attribute and, for the multi-period case, its own
   `AssetVarIndex` and `AssetBaselineVarIndex` variables; all variable indices
   in the file are GLOBAL (positions in the design array of the root); both
-  deserialize and serialize support it, and the legacy single-component
-  format is read and written unchanged
+  deserialize and serialize support it, the comment of
+  `InvestmentBlock::deserialize()` describes it, and `NumConstraints`,
+  `Constraints_*` and a maximization at the root are refused, each component
+  holding its own linear constraints and being a minimization
 
 - `AssetBaselineVarIndex` (netCDF) and
   `set_asset_baseline_variable_indices()`: per-asset *variable* baseline for
@@ -63,9 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carrying its own inner Block materialized on that scenario and weighted by
   (scenario probability) x (`Weight`). This works both inside a `Component_<k>`
   and as the InvestmentBlock's direct inner (no `Component_0`) — the two speak
-  the same template format and expand identically. A StochasticBlock without a
-  ScenarioGenerator, and a ScenarioGenerator with no StochasticBlock to expand
-  (in either the disaggregated or the legacy branch), are both rejected
+  the same template format and expand identically. The caller of every
+  DataMapping is resolved against the inner Block before a scenario is
+  applied, as TwoStageStochasticBlock does. A StochasticBlock without a
+  ScenarioGenerator, a ScenarioGenerator with no StochasticBlock to expand
+  (in either the disaggregated or the legacy branch) or with no scenarios,
+  a MultiStageScenarioGenerator with more than one stage, and, for the
+  template at the root, a maximization asked at the root are all rejected
 
 - `InvestmentFunction::deserialize( group , inner )`, which takes the inner
   Block from outside instead of creating it out of the `InnerBlock` group
@@ -80,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TwoStageStochasticBlock has built, before it generates its Objective, which
   would write the probabilities into their costs; it is kept until the
   InvestmentBlock is destroyed, and serialize() writes it whole in their
-  place, as one `Component_<k>`
+  place, as one `Component_<k>`; when the one at the root is separated, a
+  maximization asked at the root is rejected
 
 - a MultiStageStochasticBlock as the `InnerBlock` is separated as a
   TwoStageStochasticBlock is, into one component per leaf of the whole tree,
@@ -100,7 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serialized as `InnerSolution_<k>` groups with a `NumInnerSolutions`
   round-trip guardrail; the legacy single-`InnerSolution` format is unchanged
 
-- `set_weight()` on InvestmentFunction, to weight a component (> 0)
+- `set_weight()` on InvestmentFunction, to weight a component (> 0); a new
+  weight is refused once the function has been computed, its value and its
+  linearizations being weighted by the previous one
 
 - `set_asset_variable_indices()` on InvestmentFunction, mapping each asset to the
   design variable it invests in, so several components can share the same design
@@ -131,10 +143,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `set_variable_bounds()` on InvestmentBlock, plus accessors for the
   programmatic construction path
 
-- `InvestmentBlockSolution::is_dual_feasible()` asks the Solution of each
-  inner Block it holds, one per component, and is false if one is missing
-  [see `Solution::is_dual_feasible()`]
-
 - the netCDF variable `Integer`, scalar or per asset, which makes the
   ColVariable of the assets where it is nonzero integer, e.g., the number of
   modules of a modular asset; a `BundleSolver` with `intIntVars` 1 keeps
@@ -158,10 +166,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1, holding for all, or of the size of `NumAssets` (`NumConstraints`), and
   any other size is refused at deserialize: a longer one was cut without a
   word, and one of size 1 was refused by netCDF without saying which
-
-- a file with `Component_<k>` groups that carries `NumConstraints`,
-  `Constraints_*` or a maximization at its root is refused at deserialize:
-  they were ignored
 
 - an inner Block that its Solver proves unbounded makes
   `InvestmentFunction::compute()` return `kUnbounded` at the opposite of the
@@ -251,6 +255,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- a throw in `InvestmentFunction::compute()`, its own or of the Solver of the
+  inner Block, leaves the inner Block unlocked and gives the Solver its
+  identity back: both were left to the function, as when the Solver returns
+  the multipliers of an unbounded dual direction with the Objective in them
+  (`intHomogeneousDirection` 0)
+
+- `remove_variable()` and `remove_variables()` of InvestmentFunction remove
+  the assets sized by the removed Variable with all of their data: the
+  single removal left the costs, and all of them the installed quantity and
+  the columns of the linear constraints, at the position of the removed
+  asset; with a mapping [see `set_asset_variable_indices()`] the Variable of
+  the assets that stay, and of their baselines, are moved to their new
+  positions, and a removal that would leave an asset without its baseline
+  is refused
+
+- the comment of `InstalledQuantity` says its default, 0, which
+  `get_installed_quantity()` gives: it said 1
+
+- `InvestmentFunction::is_convex()` returns false with no inner Block or with
+  an inner Block that maximizes, as its comment says: it returned true, so
+  that a bundle minimized as convex a function that is neither convex nor
+  concave; `is_concave()` keeps returning false, and its comment says why
+
 - the dimension `ObjectiveSense` of InvestmentBlock is read as documented,
   and as BendersBlock reads it: size 0 is a maximization, any other size a
   minimization; its size was taken as the sense itself, so that size 1 was
@@ -263,11 +290,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a rejected scenario gets back the scenarios already handed out and is
   deleted with them
 
-- a `StochasticBlock` template whose ScenarioGenerator is a
-  MultiStageScenarioGenerator with more than one stage is rejected at
-  deserialize: it was expanded along its first stage alone, as a file of a
-  single stage
-
 - the serialize of the single-component format no longer fails:
   InvestmentFunction added the dimension `NumAssets` and the variable
   `LowerBound` again to the group of the InvestmentBlock, which already holds
@@ -278,11 +300,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `strOutputSolutionDirectory` was read past the end of the vector, which made
   every reset to the defaults crash, as `investmentblock_solver` does after
   solving
-
-- the expansion of a `StochasticBlock` template into components resolves the
-  caller of every DataMapping against the inner Block before applying a
-  scenario, as TwoStageStochasticBlock does: a DataMapping acting on the inner
-  Block itself has an empty path, and the files with one crashed at load
 
 - the path of `InvestmentFunction` over several replicas of an SDDPBlock
   summed the linearization into a vector as long as the last one computed,
