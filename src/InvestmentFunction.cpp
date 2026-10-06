@@ -162,9 +162,11 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                                       ModParam issueMod ) {
 
  // The two attributes that sized by replication every battery, or every
- // intermittent unit, have left the format: each asset says how it is sized
- // in "AssetMethod". A file that still carries one is refused, rather than
- // read as a different model than the one it was written for
+ // intermittent unit, have left the format, and so has the variable that
+ // said whether each asset was replicated or resized: each asset names the
+ // methods that size it in "AssetSetter". A file that still carries one is
+ // refused, rather than read as a different model than the one it was
+ // written for
 
  for( const char * name : { "ReplicateBatteryUnits" ,
                             "ReplicateIntermittentUnits" } )
@@ -172,7 +174,17 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    throw( std::logic_error( std::string( "InvestmentFunction::deserialize: "
                             "the attribute '" ) + name + "' is no longer "
                             "supported: say how each asset is sized with "
-                            "'AssetSetter', or with 'AssetMethod'." ) );
+                            "'AssetSetter' and 'AssetLinearization'." ) );
+
+ if( ! group.getVar( "AssetMethod" ).isNull() )
+  throw( std::logic_error( "InvestmentFunction::deserialize: the variable "
+                           "'AssetMethod' is no longer supported: say how "
+                           "each asset is sized with 'AssetSetter' and "
+                           "'AssetLinearization', as \"UCBlock::resize_unit\" "
+                           "and \"UCBlock::get_resize_unit_linearization\" "
+                           "for 1, \"UCBlock::replicate\" and "
+                           "\"UCBlock::get_replicate_linearization\" for 0, "
+                           "with 'AssetFeasibilityCut' 0." ) );
 
  // Deserialize the dimensions
 
@@ -199,15 +211,12 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  // variable v_asset_var_index[ i ]; this lets several InvestmentFunction share
  // the same active variables while each invests only in some of them (the
  // multi-period (1:K) case). Absent ⇒ identity (legacy).
- ::deserialize( group , "AssetVarIndex" , num_assets , v_asset_var_index ,
-                true , true );
+ deserialize_one_each( group , "AssetVarIndex" , num_assets ,
+                       v_asset_var_index );
 
  if( ! v_x.empty() ) {
   if( ! v_asset_var_index.empty() ) {
    // mapping mode: one entry per asset, each pointing to an active variable
-   if( v_asset_var_index.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetVarIndex', "
-                             "if provided, must have size 'NumAssets'." ) );
    for( auto vi : v_asset_var_index )
     if( vi >= v_x.size() )
      throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetVarIndex' "
@@ -228,14 +237,10 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  // When present, entry i is the index of the active variable whose value is
  // asset i's baseline -- the multi-period transition: the component of period
  // t reads the design variable of period t-1 (see add_linear_term()).
- ::deserialize( group , "AssetBaselineVarIndex" , num_assets ,
-                v_asset_baseline_var_index , true , true );
+ deserialize_one_each( group , "AssetBaselineVarIndex" , num_assets ,
+                       v_asset_baseline_var_index );
 
  if( ! v_asset_baseline_var_index.empty() ) {
-  if( v_asset_baseline_var_index.size() != num_assets )
-   throw( std::logic_error( "InvestmentFunction::deserialize: "
-                            "'AssetBaselineVarIndex', if provided, must have "
-                            "size 'NumAssets'." ) );
   if( ! v_x.empty() )
    for( auto vi : v_asset_baseline_var_index )
     if( vi >= v_x.size() )
@@ -259,42 +264,20 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
   // Deserialize the asset indices.
 
-  ::deserialize( group , "Assets" , num_assets , v_asset_indices , false );
+  if( ! deserialize_one_each( group , "Assets" , num_assets ,
+                              v_asset_indices ) )
+   throw( std::logic_error( "InvestmentFunction::deserialize: the 'Assets' "
+                            "netCDF variable must be provided." ) );
 
   // Deserialize the types of assets.
 
-  if( ! ::deserialize( group , "AssetType" , num_assets , v_asset_type ,
-                       true , true ) )
+  if( ! deserialize_one_each( group , "AssetType" , num_assets ,
+                              v_asset_type ) )
    v_asset_type.resize( num_assets , eUnitBlock );
 
-  // Deserialize how each asset is sized. This is optional: when it is not
-  // there the way is deduced from the names that the Block of each asset
-  // registers, which is what keeps the instances written before this field
-  // existed working unchanged.
-
-  v_asset_method.clear();
-  ::deserialize( group , "AssetMethod" , num_assets , v_asset_method ,
-                 true , true );
-
-  if( ! v_asset_method.empty() ) {
-   // same shape as AssetType: one value for all the assets, or one each
-   if( v_asset_method.size() == 1 )
-    v_asset_method.resize( num_assets , v_asset_method.front() );
-   else if( v_asset_method.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the "
-                             "'AssetMethod' netCDF variable, if provided, must"
-                             " have size 0, 1, or 'NumAssets'." ) );
-
-   for( const auto method : v_asset_method )
-    if( ( method != eReplicate ) && ( method != eResize ) )
-     throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
-                              "AssetMethod: " + std::to_string( method ) +
-                              "." ) );
-   }
-
   // The names of the methods that write each asset and read it back. They
-  // go together, and they leave no room for AssetMethod, which says the same
-  // thing for an instance without them [see resolve_asset_methods()].
+  // go together; without them they are worked out of the class of each unit
+  // [see resolve_asset_methods()].
 
   ::deserialize( group , "AssetSetter" , num_assets , v_asset_setter_name ,
                  true );
@@ -306,105 +289,45 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                             "and 'AssetLinearization' go together, and only "
                             "one of them is there." ) );
 
-  if( ( ! v_asset_setter_name.empty() ) && ( ! v_asset_method.empty() ) )
-   throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetMethod' "
-                            "is for an instance without 'AssetSetter', and "
-                            "this one has both." ) );
-
-  // one value for all the assets, as a scalar, or one each. The length is
-  // checked on the variable, before reading: ::deserialize() reads as many
-  // values as asked, and would drop the ones past them without a word
-  const auto one_each = [ & group , num_assets ]( const char * name ,
-                                                  std::vector< int > & v ) {
-   v.clear();
-   const auto var = group.getVar( name );
-   if( ( ! var.isNull() ) && ( var.getDimCount() == 1 ) &&
-       ( var.getDim( 0 ).getSize() != num_assets ) )
-    throw( std::logic_error( std::string( "InvestmentFunction::deserialize: "
-                             "the '" ) + name + "' netCDF variable, if "
-                             "provided, must be a scalar or have size "
-                             "'NumAssets'." ) );
-   ::deserialize( group , name , num_assets , v , true , true );
-   };
-
-  one_each( "AssetSignature" , v_asset_signature );
+  deserialize_one_each( group , "AssetSignature" , num_assets ,
+                        v_asset_signature );
   for( const auto signature : v_asset_signature )
    if( signature )
     throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
                              "AssetSignature: " + std::to_string( signature )
                              + "; 0 is the only one there is." ) );
 
-  one_each( "AssetFeasibilityCut" , v_asset_feasibility_cut );
+  deserialize_one_each( group , "AssetFeasibilityCut" , num_assets ,
+                        v_asset_feasibility_cut );
   for( const auto cut : v_asset_feasibility_cut )
    if( ( cut != 0 ) && ( cut != 1 ) )
     throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
                              "AssetFeasibilityCut: " + std::to_string( cut ) +
                              "." ) );
 
-  if( ! v_asset_type.empty() ) {
-   if( v_asset_type.size() == 1 )
-    v_asset_type.resize( num_assets , v_asset_type.front() );
-   else if( v_asset_type.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the 'AssetType'"
-                             " netCDF variable, if provided, must have size 0,"
-                             " 1, or 'NumAssets'." ) );
-
-   assert( v_asset_indices.size() == v_asset_type.size() );
-   for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
-    for( Index j = i + 1 ; j < v_asset_indices.size() ; ++j )
-     if( ( v_asset_indices[ i ] == v_asset_indices[ j ] ) &&
-         ( v_asset_type[ i ] == v_asset_type[ j ] ) )
-      throw( std::logic_error
-             ( "InvestmentFunction::deserialize: asset with index " +
-               std::to_string( v_asset_indices[ i ] ) + " and type " +
-               std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
-  }
+  for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+   for( Index j = i + 1 ; j < v_asset_indices.size() ; ++j )
+    if( ( v_asset_indices[ i ] == v_asset_indices[ j ] ) &&
+        ( v_asset_type[ i ] == v_asset_type[ j ] ) )
+     throw( std::logic_error
+            ( "InvestmentFunction::deserialize: asset with index " +
+              std::to_string( v_asset_indices[ i ] ) + " and type " +
+              std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
 
   // Deserialize the lower bound on the active variables
 
-  ::deserialize( group , "LowerBound" , num_assets , v_lower_bound ,
-                 true , true );
+  deserialize_one_each( group , "LowerBound" , num_assets , v_lower_bound );
 
-  if( ! v_lower_bound.empty() ) {
-   if( v_lower_bound.size() == 1 )
-    v_lower_bound.resize( num_assets , v_lower_bound.front() );
-   else if( v_lower_bound.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the 'LowerBound'"
-                             " netCDF variable, if provided, must have size 0,"
-                             " 1, or 'NumAssets'." ) );
-  }
+  // Deserialize the costs of investments; absent, all coefficients are zero
 
-  // Deserialize the costs of investments
-
-  if( ::deserialize( group , "Cost" , num_assets ,
-                     v_cost , true , true ) ) {
-   if( v_cost.size() == 1 )
-    v_cost.resize( num_assets , v_cost.front() );
-   else if( v_cost.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the 'Cost'"
-                             " netCDF variable, if provided, must have size "
-                             "0, 1, or 'NumAssets'." ) );
-  }
-  else {
-   // All coefficients are zero.
+  if( ! deserialize_one_each( group , "Cost" , num_assets , v_cost ) )
    v_cost.resize( num_assets , 0 );
-  }
 
-  // Deserialize the costs of disinvestments
+  // Deserialize the costs of disinvestments; absent, all of them are zero
 
-  if( ::deserialize( group , "DisinvestmentCost" , num_assets ,
-                     v_disinvestment_cost , true , true ) ) {
-   if( v_disinvestment_cost.size() == 1 )
-    v_disinvestment_cost.resize( num_assets , v_disinvestment_cost.front() );
-   else if( v_disinvestment_cost.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the "
-                             "'DisinvestmentCost' netCDF variable, if provided,"
-                             " must have size 0, 1, or 'NumAssets'." ) );
-  }
-  else {
-   // All coefficients are zero.
+  if( ! deserialize_one_each( group , "DisinvestmentCost" , num_assets ,
+                              v_disinvestment_cost ) )
    v_disinvestment_cost.resize( num_assets , 0 );
-  }
 
   // Convexity precondition of the format: the transition cost
   // max( c+ d , -c- d ) is convex iff c+ + c- >= 0; the format requires the
@@ -421,15 +344,8 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
   // Deserialize the amount of assets currently installed in the system
 
-  if( ::deserialize( group , "InstalledQuantity" , num_assets ,
-                     v_installed_quantity , true , true ) ) {
-   if( v_installed_quantity.size() == 1 )
-    v_installed_quantity.resize( num_assets , v_installed_quantity.front() );
-   else if( v_installed_quantity.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the "
-                             "'InstalledCapacity' netCDF variable, if provided,"
-                             " must have size 0, 1, or 'NumAssets'." ) );
-  }
+  deserialize_one_each( group , "InstalledQuantity" , num_assets ,
+                        v_installed_quantity );
 
   // A variable baseline excludes the InstalledQuantity datum: both answer
   // "how much was there before", having the two together is ambiguous.
@@ -445,37 +361,15 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  if( num_constraints ) {
 
-  if( ::deserialize( group , "Constraints_LowerBound" , num_constraints ,
-                     v_constraints_lower_bound , true , true ) ) {
-   if( v_constraints_lower_bound.size() == 1 )
-    v_constraints_lower_bound.resize( num_constraints ,
-                                      v_constraints_lower_bound.front() );
-   else if( v_constraints_lower_bound.size() != num_constraints )
-    throw( std::logic_error
-           ( "InvestmentFunction::deserialize: the 'Constraints_LowerBound'"
-             " netCDF variable, if provided, must have size "
-             "0, 1, or 'NumConstraints'." ) );
-  }
-  else {
-   // The lower bound is - infinity
-   v_constraints_lower_bound.resize( num_constraints , -Inf< double >() );
-  }
+  // absent, the lower bounds are - infinity and the upper ones infinity
 
-  if( ::deserialize( group , "Constraints_UpperBound" , num_constraints ,
-                     v_constraints_upper_bound , true , true ) ) {
-   if( v_constraints_upper_bound.size() == 1 )
-    v_constraints_upper_bound.resize( num_constraints ,
-                                      v_constraints_upper_bound.front() );
-   else if( v_constraints_upper_bound.size() != num_constraints )
-    throw( std::logic_error
-           ( "InvestmentFunction::deserialize: the 'Constraints_UpperBound'"
-             " netCDF variable, if provided, must have size "
-             "0, 1, or 'NumConstraints'." ) );
-  }
-  else {
-   // The upper bound is infinity
+  if( ! deserialize_one_each( group , "Constraints_LowerBound" ,
+                              num_constraints , v_constraints_lower_bound ) )
+   v_constraints_lower_bound.resize( num_constraints , -Inf< double >() );
+
+  if( ! deserialize_one_each( group , "Constraints_UpperBound" ,
+                              num_constraints , v_constraints_upper_bound ) )
    v_constraints_upper_bound.resize( num_constraints , Inf< double >() );
-  }
 
   for( Index i = 0 ; i < num_constraints ; ++i )
    if( v_constraints_lower_bound[ i ] > v_constraints_upper_bound[ i ] )
@@ -961,8 +855,7 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
  v_asset_indices.erase( v_asset_indices.begin() + i );
  v_asset_type.erase( v_asset_type.begin() + i );
 
- for( auto v : { & v_asset_method , & v_asset_signature ,
-                  & v_asset_feasibility_cut } )
+ for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
   if( ! v->empty() )
    v->erase( v->begin() + i );
 
@@ -1012,8 +905,7 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
   v_asset_type.clear();
   v_cost.clear();
   v_disinvestment_cost.clear();
-  for( auto v : { & v_asset_method , & v_asset_signature ,
-                   & v_asset_feasibility_cut } )
+  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
    v->clear();
   v_asset_setter_name.clear();
   v_asset_linearization_name.clear();
@@ -1064,8 +956,7 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
   v_disinvestment_cost.erase( v_disinvestment_cost_it.first ,
                               v_disinvestment_cost_it.second );
 
-  for( auto v : { & v_asset_method , & v_asset_signature ,
-                   & v_asset_feasibility_cut } )
+  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
    if( ! v->empty() )
     v->erase( v->begin() + range.first , v->begin() + range.second );
 
@@ -1141,8 +1032,7 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
   v_asset_type.clear();
   v_cost.clear();
   v_disinvestment_cost.clear();
-  for( auto v : { & v_asset_method , & v_asset_signature ,
-                   & v_asset_feasibility_cut } )
+  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
    v->clear();
   v_asset_setter_name.clear();
   v_asset_linearization_name.clear();
@@ -1179,8 +1069,7 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
   compact( v_disinvestment_cost , indices );
   compact( v_x , indices );
 
-  for( auto v : { & v_asset_method , & v_asset_signature ,
-                   & v_asset_feasibility_cut } )
+  for( auto v : { & v_asset_signature , & v_asset_feasibility_cut } )
    if( ! v->empty() )
     compact( *v , indices );
 
@@ -1243,12 +1132,6 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ,
 
  ::serialize( group , "AssetType" , netCDF::NcUint() , NumAssets ,
               v_asset_type );
-
- // how each asset is sized, and by what: written only if the instance said
- // it, so the files that do not carry it stay byte-identical
- if( ! v_asset_method.empty() )
-  ::serialize( group , "AssetMethod" , netCDF::NcUint() , NumAssets ,
-               v_asset_method );
 
  ::serialize( group , "AssetSetter" , NumAssets , v_asset_setter_name );
  ::serialize( group , "AssetLinearization" , NumAssets ,
@@ -2938,12 +2821,11 @@ void InvestmentFunction::resolve_asset_methods( void ) {
 
  if( setter_name.empty() && num_assets ) {
 
-  /* An instance written before the assets named their methods says how each
-   * one is sized by AssetType and AssetMethod, and without AssetMethod not
-   * even that: a unit is then resized if its class offers it, and replicated
-   * otherwise, which is what such an instance has always meant. Being the
-   * conversion of the instance to the names, this is the one place here
-   * that looks at the class of a unit, and only to choose a name. */
+  /* An instance written before the assets named their methods says only
+   * their type: a unit is then resized if its class offers it, and
+   * replicated otherwise, which is what such an instance has always meant.
+   * Being the conversion of the instance to the names, this is the one place
+   * here that looks at the class of a unit, and only to choose a name. */
 
   setter_name.resize( num_assets );
   linearization_name.resize( num_assets );
@@ -2959,23 +2841,17 @@ void InvestmentFunction::resolve_asset_methods( void ) {
     continue;
     }
 
-   int method;
-   if( ! v_asset_method.empty() )
-    method = v_asset_method[ i ];
-   else {
-    const auto ucblock = get_ucblock( 0 , 0 );
-    if( ! ucblock )
-     throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
-                              "asset " + std::to_string( i ) + " names no "
-                              "method, and the inner Block has no UCBlock "
-                              "to work it out of" ) );
-    const auto & cls =
-     ucblock->get_unit_block( v_asset_indices[ i ] )->classname();
-    method = Block::get_method_fs< Block::MF_dbl_it , Block::Range >
-              ( cls + "::resize" ) ? eResize : eReplicate;
-    }
+   const auto ucblock = get_ucblock( 0 , 0 );
+   if( ! ucblock )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "asset " + std::to_string( i ) + " names no "
+                             "method, and the inner Block has no UCBlock "
+                             "to work it out of" ) );
+   const auto & cls =
+    ucblock->get_unit_block( v_asset_indices[ i ] )->classname();
 
-   if( method == eResize ) {
+   if( Block::get_method_fs< Block::MF_dbl_it , Block::Range >
+        ( cls + "::resize" ) ) {
     setter_name[ i ] = "UCBlock::resize_unit";
     linearization_name[ i ] = "UCBlock::get_resize_unit_linearization";
     }

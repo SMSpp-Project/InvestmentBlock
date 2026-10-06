@@ -120,18 +120,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  enum AssetType { eUnitBlock = 0 , eLine = 1 };
 
-/*--------------------------------------------------------------------------*/
- /// public enum representing the ways of sizing an asset
- /** The two ways in which the Block carrying an asset can be sized [see
-  * Design and scaling of this Block in Block.h], as the netCDF variable
-  * "AssetMethod" says them in an instance that does not name the methods of
-  * its assets [see "AssetSetter" in serialize()]:
-  *
-  * - eReplicate: the Block stands for k identical copies of itself;
-  * - eResize: the Block stands for one of k times the size it was given. */
-
- enum AssetMethod { eReplicate = 0 , eResize = 1 };
-
  /// public enum representing the sides of the linear constraints
  /** Public enum representing the sides of the linear constraints. */
 
@@ -446,6 +434,40 @@ class InvestmentFunction : public C05Function , public Block {
    throw;
    }
   f_external_inner_block = nullptr;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// reads a netCDF variable with one value for each of n items
+ /** Reads into \p data the variable \p name of \p group, which says one
+  * value for each of \p n items, the assets or the linear constraints: a
+  * scalar, or a variable of size 1, holds for all of them, and a variable of
+  * size \p n gives one each. If the variable is not there, or if \p n is 0,
+  * \p data is cleared and false is returned. Any other size is refused,
+  * naming the variable: ::deserialize() reads as many values as it is asked
+  * to, dropping without a word those of a longer variable, and fails on a
+  * shorter one without saying which. Used by deserialize(), and by that of
+  * InvestmentBlock for its own variables. */
+
+ template< class T >
+ static bool deserialize_one_each( const netCDF::NcGroup & group ,
+                                   const std::string & name , Index n ,
+                                   std::vector< T > & data ) {
+  data.clear();
+  const auto var = group.getVar( name );
+  if( var.isNull() || ( ! n ) )
+   return( false );
+
+  const Index size = var.getDimCount() ? var.getDim( 0 ).getSize() : 1;
+  if( ( var.getDimCount() > 1 ) || ( ( size != 1 ) && ( size != n ) ) )
+   throw( std::logic_error( "deserialize: the '" + name + "' netCDF "
+                            "variable of group '" + group.getName() +
+                            "' must be a scalar or have size 1 or " +
+                            std::to_string( n ) + ", and it has size " +
+                            std::to_string( size ) + "." ) );
+
+  SMSpp_di_unipi_it::deserialize( group , name , size , data , true , true );
+  data.resize( n , data.front() );
+  return( true );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -1424,13 +1446,17 @@ class InvestmentFunction : public C05Function , public Block {
   * InvestmentFunction being both a Function and a Block, the netCDF::NcGroup
   * will have to have the "standard format of a :Block", meaning whatever is
   * managed by the serialize() method of the base Block class, plus the
-  * InvestmentFunction-specific data with the following format:
+  * InvestmentFunction-specific data with the following format. A variable
+  * that is said below to be either a scalar or indexed over "NumAssets" (or
+  * "NumConstraints") can also have size 1: as a scalar, it then holds for
+  * all the assets (or constraints). Any other size is refused.
   *
   * - The attributes "ReplicateBatteryUnits" and "ReplicateIntermittentUnits"
   *   of earlier versions, which sized by replication every battery or every
-  *   intermittent unit, are no longer part of the format: deserialize()
-  *   refuses a group that carries either, and how each asset is sized is
-  *   said by "AssetSetter", or by "AssetMethod".
+  *   intermittent unit, are no longer part of the format, nor is the
+  *   variable "AssetMethod", which said for each asset whether it was
+  *   replicated or resized: deserialize() refuses a group that carries any
+  *   of them, and how each asset is sized is said by "AssetSetter".
   *
   * - The dimension "NumAssets" containing the number of assets that are
   *   subject to investment. This dimension is optional. If it is not
@@ -1467,10 +1493,9 @@ class InvestmentFunction : public C05Function , public Block {
   *   same setter are written with one call, and read back with one call.
   *   The two variables are optional, and go together: if they are not
   *   provided, the names are worked out the first time the inner Block is
-  *   written, from "AssetType" and from "AssetMethod" (eResize is
-  *   "UCBlock::resize_unit", eReplicate "UCBlock::replicate", a line
-  *   "UCBlock::resize_line"); and without "AssetMethod", a unit is resized if
-  *   its class registers "<classname>::resize", and replicated otherwise.
+  *   written, from "AssetType": a line is "UCBlock::resize_line", and a unit
+  *   is "UCBlock::resize_unit" if its class registers "<classname>::resize",
+  *   and "UCBlock::replicate" otherwise.
   *
   * - The variable "AssetSignature", of type netCDF::NcUint, which is either
   *   a scalar or indexed over "NumAssets", saying with which parameters the
@@ -1486,13 +1511,8 @@ class InvestmentFunction : public C05Function , public Block {
   *   place of the duals; 0 if it does not, and then a point at which the
   *   inner Block is infeasible is reported with no cut. This variable is
   *   optional. If it is not provided, then it is 1 everywhere, save for the
-  *   assets whose names are worked out from "AssetMethod" as replicated,
-  *   for which it is 0 [see update_linearization()].
-  *
-  * - The variable "AssetMethod", of type netCDF::NcUint, which is either a
-  *   scalar or indexed over "NumAssets", saying how the i-th asset is sized
-  *   [see AssetMethod] in an instance without "AssetSetter". It is refused
-  *   together with "AssetSetter". This variable is optional.
+  *   units whose names are worked out as replicated, for which it is 0 [see
+  *   update_linearization()].
   *
   * - The variable "LowerBound", of type netCDF::NcDouble(), which is either a
   *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
@@ -2034,11 +2054,6 @@ class InvestmentFunction : public C05Function , public Block {
  std::vector< AssetType > v_asset_type;
  ///< the type of each asset that is subject to investment
 
- std::vector< int > v_asset_method;
- /**< how each asset is sized, as an AssetMethod, in an instance that does
-  * not name the methods of its assets; empty otherwise, or if it does not
-  * say [see "AssetSetter" in serialize()]. */
-
  std::vector< std::string > v_asset_setter_name;
  ///< the name of the setter of each asset, empty if the instance has none
 
@@ -2462,8 +2477,8 @@ class InvestmentFunction : public C05Function , public Block {
   * names [see "AssetSetter" in serialize()], and puts together the assets
   * naming the same ones [see AssetGroup], so that nothing during a solve has
   * to know what they write into. An instance that does not name them has
-  * them worked out here, out of "AssetType" and "AssetMethod", or out of the
-  * names that the class of each unit registers.
+  * them worked out here, out of "AssetType" and out of the names that the
+  * class of each unit registers.
   *
   * Called once, the first time the Blocks are updated, before the first
   * solve: a name that the methods factory does not have makes it throw,

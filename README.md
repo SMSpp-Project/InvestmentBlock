@@ -33,8 +33,11 @@ defined in `UCBlock`, like generating units and transmission lines.
 > is a T periods x K scenarios problem. This works both inside a `Component_<k>`
 > and as the InvestmentBlock's *direct* inner (no `Component_0`), which expands
 > identically. The implicit `Constraints_*` of a component are per-ASSET
-> (column j applies to the variable of asset j through the mapping);
-> inter-period constraints between the design variables belong at the root.
+> (column j applies to the variable of asset j through the mapping); the
+> root has none of its own, and a file that writes `Constraints_*`, or a
+> maximization, at the root of its components is refused, since they would
+> be ignored. A period reads the design of the previous one through
+> `AssetBaselineVarIndex`.
 > Components are independent by construction: an inner Block that carries
 > state from one period to the next, written as one `Component_<k>` per
 > period, is solved as if the periods were independent, and no check

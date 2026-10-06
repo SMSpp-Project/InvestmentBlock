@@ -119,12 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are registered, 0 (the subset form) being the only value and the default;
   `AssetFeasibilityCut` says whether the getter also gives the coefficient
   of a feasibility cut out of an unbounded dual direction, 1 by default.
-  A file without the names has them worked out from `AssetType` and
-  `AssetMethod`, which says for each unit whether it is resized (1) or
-  replicated (0), and without `AssetMethod` from whether the class of the
-  unit registers `<class>::resize`; `AssetMethod` together with the names,
-  half of the pair of names, or an unknown signature are refused at
-  deserialize, and a name the methods factory does not have makes the first
+  A file without the names has them worked out from `AssetType` and from
+  whether the class of each unit registers `<class>::resize`; half of the
+  pair of names, or an unknown signature, are refused at deserialize, and a name the methods factory does not have makes the first
   `compute()` fail before the solve
 
 - `set_implicit_constraints()` on InvestmentFunction, to set the implicit
@@ -155,6 +152,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folder only where a `test/CMakeLists.txt` is present
 
 ### Changed
+
+- a variable with one value for each asset, or for each linear constraint,
+  of InvestmentBlock and InvestmentFunction is read as a scalar, or of size
+  1, holding for all, or of the size of `NumAssets` (`NumConstraints`), and
+  any other size is refused at deserialize: a longer one was cut without a
+  word, and one of size 1 was refused by netCDF without saying which
+
+- a file with `Component_<k>` groups that carries `NumConstraints`,
+  `Constraints_*` or a maximization at its root is refused at deserialize:
+  they were ignored
 
 - an inner Block that its Solver proves unbounded makes
   `InvestmentFunction::compute()` return `kUnbounded` at the opposite of the
@@ -232,9 +239,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - the `ReplicateBatteryUnits` and `ReplicateIntermittentUnits` attributes of
   InvestmentFunction, which sized by replication every battery or every
-  intermittent unit: how each asset is sized is said by `AssetSetter`, or by
-  `AssetMethod`, and a group that still carries either attribute is now
-  refused at deserialize
+  intermittent unit: how each asset is sized is said by `AssetSetter`, and
+  a group that still carries either attribute is now refused at deserialize
 
 - what InvestmentFunction knew of the classes of the assets: the casts to
   `ThermalUnitBlock`, `BatteryUnitBlock`, `IntermittentUnitBlock` and
@@ -244,6 +250,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   served it; the UCBlock answers for both [see `AssetSetter`]
 
 ### Fixed
+
+- the dimension `ObjectiveSense` of InvestmentBlock is read as documented,
+  and as BendersBlock reads it: size 0 is a maximization, any other size a
+  minimization; its size was taken as the sense itself, so that size 1 was
+  read as a maximization
 
 - a rejected deserialize frees what it had built: `add_component()` deletes
   the component on every error, as it promises, the single-component format

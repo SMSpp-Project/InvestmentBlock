@@ -668,18 +668,19 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  for( auto & variable : v_variables )
   variable.set_Block( this );
 
- ::deserialize( group , "LowerBound" , num_assets , v_lower_bound ,
-                true , true );
+ // one value for all the assets, or one each, and any other size refused
+ InvestmentFunction::deserialize_one_each( group , "LowerBound" , num_assets ,
+                                           v_lower_bound );
+ InvestmentFunction::deserialize_one_each( group , "UpperBound" , num_assets ,
+                                           v_upper_bound );
+ InvestmentFunction::deserialize_one_each( group , "Integer" , num_assets ,
+                                           v_integer );
 
- ::deserialize( group , "UpperBound" , num_assets , v_upper_bound ,
-                true , true );
-
- ::deserialize( group , "Integer" , num_assets , v_integer , true , true );
-
- f_objective_sense = Objective::eMin;
- if( deserialize_dim( group , "ObjectiveSense" , f_objective_sense ) &&
-     ( ! f_objective_sense ) )
-  f_objective_sense = Objective::eMax;
+ // the size of the dimension says the sense, as in BendersBlock: 0 is a
+ // maximization, any other size, or no dimension, a minimization
+ const auto objective_sense = group.getDim( "ObjectiveSense" );
+ f_objective_sense = ( objective_sense.isNull() || objective_sense.getSize() )
+                     ? Objective::eMin : Objective::eMax;
 
  Index scenario_decomposition = 1;
  deserialize_dim( group , "ScenarioDecomposition" , scenario_decomposition );
@@ -689,32 +690,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 			   "must be 0 or 1." ) );
  f_scenario_decomposition = scenario_decomposition;
 
- // a bound vector, if provided, must have size 0, 1 (broadcast to NumAssets),
- // or exactly NumAssets; enforce this once for both LowerBound and UpperBound
- auto check_bound = [ num_assets ]( std::vector< double > & bound ,
-				    const char * name ) {
-  if( bound.empty() )
-   return;
-  if( bound.size() == 1 )
-   bound.resize( num_assets , bound.front() );
-  else if( bound.size() != num_assets )
-   throw( std::logic_error( std::string( "InvestmentBlock::deserialize: the '" )
-			    + name + "' netCDF variable, if provided, must have"
-			    " size 0, 1, or 'NumAssets'." ) );
-  };
-
- check_bound( v_lower_bound , "LowerBound" );
- check_bound( v_upper_bound , "UpperBound" );
-
  if( ! v_integer.empty() ) {
-  if( v_integer.size() == 1 )
-   v_integer.resize( num_assets , v_integer.front() );
-  else
-   if( v_integer.size() != num_assets )
-    throw( std::logic_error( "InvestmentBlock::deserialize: the 'Integer' "
-			     "netCDF variable, if provided, must have size 0,"
-			     " 1, or 'NumAssets'." ) );
-
   for( Index i = 0 ; i < num_assets ; ++i )
    if( v_integer[ i ] )
     v_variables[ i ].is_integer( true , eNoMod );
@@ -741,6 +717,28 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  if( ! group.getGroup( "Component_0" ).isNull() ) {
 
   // ---- disaggregated (1:K) path ----
+
+  // the root has no function of its own: the linear constraints and the
+  // sense of each component are said by the component, and those written
+  // at the root would be ignored -- fail loud instead
+  if( ! group.getDim( "NumConstraints" , netCDF::NcGroup::Current ).isNull() )
+   throw( std::logic_error( "InvestmentBlock::deserialize: the root of a "
+	  "file with Component_<k> groups carries 'NumConstraints', but its "
+	  "linear constraints would be ignored: write them in a component." ) );
+  for( const char * name : { "Constraints_A" , "Constraints_LowerBound" ,
+			     "Constraints_UpperBound" } )
+   if( ! group.getVar( name ).isNull() )
+    throw( std::logic_error( std::string( "InvestmentBlock::deserialize: the "
+	   "root of a file with Component_<k> groups carries '" ) + name +
+	   "', but its linear constraints would be ignored: write them in a "
+	   "component." ) );
+  const auto sense = group.getDim( "ObjectiveSense" ,
+				   netCDF::NcGroup::Current );
+  if( ( ! sense.isNull() ) && ( ! sense.getSize() ) )
+   throw( std::logic_error( "InvestmentBlock::deserialize: the root of a "
+	  "file with Component_<k> groups asks for a maximization, but every "
+	  "component is minimized." ) );
+
   // access by numeric suffix => deterministic order; the count is implicit
   // (the loop stops at the first missing Component_<k> group)
   Index num_components = 0;
