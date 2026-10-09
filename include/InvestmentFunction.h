@@ -24,6 +24,8 @@
 /*------------------------------ INCLUDES ----------------------------------*/
 /*--------------------------------------------------------------------------*/
 
+#include <functional>
+
 #include "Block.h"
 
 #include "C05Function.h"
@@ -61,39 +63,306 @@ namespace SMSpp_di_unipi_it
 /*--------------------------------------------------------------------------*/
 /*--------------------------- GENERAL NOTES --------------------------------*/
 /*--------------------------------------------------------------------------*/
-/// a Function for scaling a set of UnitBlock
-/** An InvestmentFunction represents a C05Function that is capable of
- * evaluating the investment on a set of assets. InvestmentFunction derives
- * from *both* C05Function and Block. The main ingredients of an
- * InvestmentFunction are the following:
+/// a C05Function giving the cost of an investment in a set of assets
+/** An InvestmentFunction is a C05Function that gives the cost of an
+ * investment in a set of assets of an energy system, i.e., the cost of the
+ * investment plus the operational cost of the system with the capacities
+ * that result from it. InvestmentFunction derives from *both* C05Function
+ * and Block, and the operational problem is its inner Block. Its main
+ * ingredients are the following.
  *
- * - The active ColVariable of the InvestmentFunction represent investments
- *   that can be made in certain assets. The i-th active ColVariable
- *   represents the investment to be made in the i-th asset, a unit or a
- *   transmission line of the inner Block. What an investment means is not
- *   known here: each asset names, in the instance, the method of the methods
- *   factory that writes the investment into the inner Block and the one that
- *   reads back the derivative of the value of the inner Block with respect
- *   to it [see "AssetSetter" in serialize()]. Both are called on the UCBlock
- *   at the root of the inner Block, which hands the value on to the unit or
- *   to the lines [see UCBlock::resize_unit()]: a unit may stand for that
- *   many copies of itself, or for one of that many times its size, and a
- *   line for one of that many times its capacity.
+ * - Its active ColVariable are the investments that can be made in certain
+ *   assets, where the i-th one is the investment in the i-th asset. An asset
+ *   is either a UnitBlock of the UCBlock where the investment takes place,
+ *   identified by its index there, or a line of its network, identified by
+ *   its index in the NetworkData [see serialize()].
  *
- * - The value of the InvestmentFunction is given by a fixed investment cost
- *   (CAPEX) and an [expected] operational cost (OPEX). The fixed investment
- *   cost is a linear function of the variables of the InvestmentFunction.
- *   The [expected] operational cost is given by the solution value of the
- *   inner Block (which depends on the investment being made, i.e., the values
- *   of the variables of the InvestmentFunction).
+ * - The inner Block is the operational problem. It is either a UCBlock, or
+ *   a TwoStageStochasticBlock whose scenarios (more precisely, the leaves
+ *   of its tree of scenarios) are UCBlock, or an SDDPBlock whose stages are
+ *   UCBlock inside a BendersBFunction; several identical SDDPBlock can also
+ *   be given, in which case the scenarios are divided among them. The same
+ *   investment is written into each of these UCBlock, hence it is the same
+ *   for all the scenarios and all the stages.
  *
- * - The InvestmentFunction has an inner Block which contains the assets to
- *   invest in. This inner Block can be either a UCBlock or an SDDPBlock. In
- *   the former case the OPEX is deterministic. In the latter case it is the
- *   expected cost of the sub-Block of the SDDPBlock, some of which (the ones
- *   where the investments take place) must themselves  be UCBlock. Note that
- *   the same amount of investment in the assets is made for all the stages
- *   of the SDDPBlock. */
+ * - Its value is the sum of the cost of the investment, a piecewise-linear
+ *   function of the active ColVariable, and of the value of the operational
+ *   problem, which the Solver of the inner Block gives once the investment
+ *   has been written into it.
+ *
+ * Formally, let \f$ x \in \mathbb{R}^m \f$ be the vector of the investments,
+ * one per asset (if the bounds of the active ColVariable have been
+ * reformulated, \f$ x_i \f$ is the value of the i-th of them plus its lower
+ * bound, cf. reformulated_bounds()). Let also \f$ \bar x_i \f$ be the
+ * quantity of the i-th asset that is already installed, and \f$ c_i \f$ and
+ * \f$ d_i \f$ the costs of investing and of disinvesting one unit of it
+ * ("InstalledQuantity", "Cost" and "DisinvestmentCost" in serialize()). With
+ * these data, the InvestmentFunction is
+ * \f[
+ *   \mathcal{F}( x ) = \sum_{ i = 1 }^m \bigl( \, c_i \, ( x_i - \bar x_i
+ *     )^+ + d_i \, ( \bar x_i - x_i )^+ \, \bigr) + Q( x ) \; , \tag{1}
+ * \f]
+ * where \f$ ( a )^+ = \max \{ a , 0 \} \f$ and \f$ Q( x ) \f$ is the value of
+ * the operational problem with the investment \f$ x \f$, as follows.
+ * What an investment means is not known here: each asset names, in the
+ * instance, the method of the methods factory that writes \f$ x_i \f$ into
+ * the inner Block and the one that reads back the derivative of its value
+ * with respect to it [see "AssetSetter" in serialize()], both called on the
+ * UCBlock at the root of each UCBlock of the inner Block, which hands the
+ * value on to the unit or to the lines [see UCBlock::resize_unit()]. The
+ * methods that UCBlock registers write \f$ x_i \f$ in one of two ways:
+ *
+ * - as the scale factor of the UnitBlock [see UnitBlock::scale()], i.e.,
+ *   \f$ x_i \f$ is the number of identical copies of the unit, which share
+ *   its Variable. The contributions of the unit to the linking constraints
+ *   of the UCBlock and to the Objective are then those of one copy times
+ *   \f$ x_i \f$. This is UCBlock::replicate, which an instance that does
+ *   not name the methods gets for a unit whose class does not register
+ *   "<class>::resize", as a ThermalUnitBlock or a NuclearUnitBlock;
+ *
+ * - as the kappa constant of the asset, i.e., \f$ x_i \f$ multiplies its
+ *   capacity data. This is UCBlock::resize_unit for a unit and
+ *   UCBlock::resize_line for a line, which an instance that does not name
+ *   the methods gets for every other unit and for every line. The capacity
+ *   data are the minimum and maximum power of an IntermittentUnitBlock,
+ *   and therefore the reserve it can give [see
+ *   IntermittentUnitBlock::set_kappa()], the power, storage, converter and
+ *   reserve limits of a BatteryUnitBlock [see BatteryUnitBlock::set_kappa()],
+ *   and the two flow limits
+ *   \f$ \kappa_l C^v P^{mn}_l \le F_l \le \kappa_l C^v P^{mx}_l \f$ of a line
+ *   \f$ l \f$ in the NetworkBlock of each time instant [see
+ *   DCNetworkBlock::set_kappa()]. A line can be an asset of a NetworkBlock
+ *   whose class registers "<class>::resize" (DCNetworkBlock, ACNetworkBlock
+ *   and OTSNetworkBlock): with any other NetworkBlock, writing the investment
+ *   fails, and compute() returns kError with the value \f$ +\infty \f$
+ *   (\f$ -\infty \f$ for a maximization).
+ *
+ * In both cases \f$ x_i \f$ multiplies the capacity of the asset as a whole,
+ * the installed one included. The capacity data of the UnitBlock or of the
+ * line are those of one unit of the asset; for a kappa constant they are its
+ * maximum capacity times the profile of its availability (e.g., the maximum
+ * power of an intermittent unit is the installable capacity times the load
+ * factor at each instant). Only the part \f$ x_i - \bar x_i \f$ is charged in
+ * (1). Thus, \f$ x_i \in [ 0 , 1 ] \f$ is the fraction of the maximum
+ * capacity that is installed if the upper bound of the active ColVariable is
+ * 1, while \f$ x_i \in \{ 0 , 1 , \ldots , U_i \} \f$ is the number of copies
+ * of a unit if the ColVariable is integer with upper bound \f$ U_i \f$ (the
+ * maximum number of units). The bounds and the integrality are those of the
+ * InvestmentBlock ("LowerBound", "UpperBound" and "Integer" there), which by
+ * default leaves the ColVariable continuous and unbounded, and therefore the
+ * bounds (at least the lower one) usually have to be given in the data. Note
+ * that the cost of the investment is the piecewise-linear function in (1) of
+ * the new capacity, with a kink at the installed quantity, and an asset can
+ * also be reduced, at the price \f$ d_i \f$; with \f$ \bar x_i = 0 \f$ (the
+ * default) and \f$ x_i \ge 0 \f$, it is the linear cost \f$ c_i x_i \f$.
+ *
+ * The operational cost \f$ Q( x ) \f$ is the value that the (first) Solver
+ * registered to the inner Block gives once the investment has been written
+ * into it, i.e., what the Solver returns as the value of its solution (cf.
+ * Solver::get_var_value()), whatever the Solver is. Hence, it is the
+ * optimal value of the unit commitment problem if the Solver solves it
+ * exactly, and the optimal value of its continuous relaxation if the Solver
+ * solves that. If the Solver is a LagrangianDualSolver, \f$ Q( x ) \f$ is
+ * the value of the Lagrangian Dual, i.e., a lower bound on the optimal
+ * value, which (if the Objective of each unit is linear) is equal to that
+ * of the problem in which the feasible set of each unit is replaced by its
+ * convex hull. Precisely:
+ *
+ * - with a UCBlock, \f$ Q( x ) \f$ is the value given by its Solver;
+ *
+ * - with a TwoStageStochasticBlock, it is the value given by the Solver of
+ *   the TwoStageStochasticBlock, i.e., the expected operational cost over
+ *   its scenarios (whose probabilities are in the Objective of their
+ *   UCBlock);
+ *
+ * - with an SDDPBlock, the cuts of the future cost functions are first
+ *   computed by the SDDPSolver registered to the SDDPBlock, if any (after
+ *   removing the existing ones, if the investment has changed). Then the
+ *   policy they define is simulated over each of the \f$ N \f$ scenarios of
+ *   the SDDPBlock by an SDDPGreedySolver, and \f$ Q( x ) \f$ is the mean
+ *   \f$ \frac{1}{N} \sum_{ k = 1 }^N Q^k( x ) \f$ of the costs
+ *   \f$ Q^k( x ) \f$ of the simulations. This is an unbiased statistical
+ *   estimate of the expected operational cost of that policy, which for a
+ *   minimization is not below the optimal one, and it differs from the
+ *   lower bound given by the cuts.
+ *
+ * If intComputeLinearization is nonzero (the default), compute() also gives a
+ * linearization of \f$ \mathcal{F} \f$ at \f$ x \f$. Its coefficients are the
+ * derivative of the cost of the investment (\f$ c_i \f$ if
+ * \f$ x_i > \bar x_i \f$, and \f$ - d_i \f$ otherwise, which is a subgradient
+ * at the kink if \f$ c_i + d_i \ge 0 \f$) plus a linearization of \f$ Q \f$.
+ * The latter is what the getters named by the assets give [see
+ * "AssetLinearization" in serialize()]. Those that UCBlock registers read it
+ * from the dual values of the inner Block, i.e., from the multipliers
+ * \f$ y \f$ of its constraints that its Solver writes there [see
+ * RowConstraint::get_dual()], according to how the investment is written:
+ *
+ * - for an asset represented by a scale factor, the coefficient, given by
+ *   UCBlock::get_replicate_linearization(), is
+ *   \f[
+ *     f^1_i( \bar z_i ) + \bar y^\top g^1_i( \bar z_i ) \; , \tag{2}
+ *   \f]
+ *   where \f$ f^1_i \f$ is the Objective of one copy of the UnitBlock and
+ *   \f$ \bar z_i \f$ is its current solution if it has copies, and else a
+ *   minimizer of (2) over the feasible set of one copy (see (4) below).
+ *   The vector \f$ g^1_i \f$ holds the contributions of one copy to the
+ *   linking constraints of the UCBlock (the active and reactive node
+ *   injection constraints, the primary and secondary reserve, inertia and
+ *   pollutant budget ones, cf. UCBlock::generate_abstract_constraints()),
+ *   whose dual values are \f$ \bar y \f$; the fixed consumption of a unit
+ *   that is off is among the contributions to the active ones;
+ *
+ * - for a line \f$ l \f$, the coefficient, given by
+ *   UCBlock::get_resize_line_linearization() out of
+ *   DCNetworkBlock::get_resize_linearization(), is
+ *   \f[
+ *     \sum_t C^v \bigl( \, P^{mn}_l \mu^{mn}_{t,l} - P^{mx}_l
+ *     \mu^{mx}_{t,l} \, \bigr) \; , \tag{3}
+ *   \f]
+ *   where \f$ \mu^{mn}_{t,l} , \mu^{mx}_{t,l} \ge 0 \f$ are the multipliers
+ *   of the two sides of the flow limits of the line in the DCNetworkBlock
+ *   of instant \f$ t \f$ (at most one of the two is nonzero, and which one
+ *   is given by the sign of the dual value); a switchable line of an
+ *   OTSNetworkBlock adds the dual of the limit \f$ \min( 1 , \kappa_l ) \f$
+ *   of its switching while \f$ \kappa_l < 1 \f$ [see
+ *   OTSNetworkBlock::set_kappa()]. Formula (3) holds whatever the formulation
+ *   of the network and the susceptances of the lines, since the flow limits
+ *   bound the flow Variable of each line [see
+ *   DCNetworkBlock::generate_abstract_constraints()]. A line that has a
+ *   design variable \f$ x_l \f$ in the DCNetworkBlock has instead the flow
+ *   limits \f$ F_l - \kappa_l C^v P^{mx}_l x_l \le 0 \f$ (and the lower
+ *   one), in which \f$ \kappa_l \f$ multiplies a Variable: the optimal
+ *   value is then not a convex function of \f$ \kappa_l \f$, and
+ *   DCNetworkBlock::get_resize_linearization() refuses the line (as
+ *   IntermittentUnitBlock::get_kappa_linearization() and
+ *   BatteryUnitBlock::get_kappa_linearization() refuse a unit with a design
+ *   variable): compute() then returns kError, with no linearization;
+ *
+ * - for a BatteryUnitBlock or an IntermittentUnitBlock represented by its
+ *   kappa constant, the coefficient, given by
+ *   UCBlock::get_resize_unit_linearization(), is the one of
+ *   BatteryUnitBlock::get_kappa_linearization() and
+ *   IntermittentUnitBlock::get_kappa_linearization(), i.e., the sum of the
+ *   multipliers of the constraints of the unit whose right-hand sides kappa
+ *   multiplies, each times the datum it multiplies there.
+ *
+ * With a TwoStageStochasticBlock these coefficients are summed over the
+ * UCBlock of its scenarios (since the probabilities are in their dual
+ * values), and with an SDDPBlock they are averaged over the simulations as
+ * the value is. By the envelope theorem, (2) and (3) are subgradients of
+ * \f$ Q \f$ if \f$ Q \f$ is the optimal value of a convex problem and the
+ * dual values are optimal ones. Indeed, a kappa constant of an intermittent
+ * unit or of a line only enters right-hand sides of linear constraints, and
+ * the optimal value of a convex problem is a convex function of its
+ * right-hand sides. A BatteryUnitBlock with the binary variables
+ * \f$ u^{ch}_t \f$ has instead the rows
+ * \f$ p^-_t \le - \kappa P^{mn}_t u^{ch}_t \f$ and \f$ p^+_t \le \kappa
+ * P^{mx}_t ( 1 - u^{ch}_t ) \f$, in which \f$ \kappa \f$ multiplies a
+ * Variable; in their continuous relaxation, however, the change of variable
+ * \f$ w_t = \kappa u^{ch}_t \f$ turns them into
+ * \f$ p^-_t \le - P^{mn}_t w_t \f$,
+ * \f$ p^+_t \le P^{mx}_t ( \kappa - w_t ) \f$ and
+ * \f$ 0 \le w_t \le \kappa \f$, which are linear in
+ * \f$ ( p , w , \kappa ) \f$ jointly, and therefore the optimal value is
+ * again convex in \f$ \kappa \f$ (see
+ * BatteryUnitBlock::get_kappa_linearization() for the terms of these rows).
+ * A scale factor,
+ * instead, multiplies all the contributions of a unit, and the convexity of
+ * \f$ Q \f$ in \f$ x_i \f$ is that of a perspective: with \f$ Z_i \f$ the
+ * feasible set of one copy, convex if the unit is relaxed, \f$ x_i \f$
+ * copies contribute \f$ x_i f^1_i( z_i ) \f$ and \f$ x_i g^1_i( z_i ) \f$
+ * for some \f$ z_i \in Z_i \f$, i.e., with \f$ w_i = x_i z_i \f$, the
+ * perspective \f$ x_i f^1_i( w_i / x_i ) \f$ over the cone
+ * \f$ \{ ( w_i , x_i ) : x_i > 0 , \, w_i \in x_i Z_i \} \f$ (closed by
+ * \f$ w_i = 0 \f$ at \f$ x_i = 0 \f$ if \f$ Z_i \f$ is bounded), which is
+ * jointly convex in \f$ ( w_i , x_i ) \f$, while \f$ g^1_i \f$ is linear,
+ * as it is in the rows of the UCBlock. The optimal value of the inner Block
+ * is therefore the minimum over \f$ w \f$ of a function jointly convex in
+ * \f$ ( w , x ) \f$, a convex function of \f$ x \f$. In the Lagrangian Dual of
+ * the linking constraints, the contribution of the unit is
+ * \f[
+ *   x_i \, \varphi_i( y ) \; , \quad \varphi_i( y ) = \min \{ \,
+ *   f^1_i( z_i ) + y^\top g^1_i( z_i ) \; : \; z_i \in Z_i \, \} \; ,
+ *   \tag{4}
+ * \f]
+ * which is affine in \f$ x_i \f$ for each \f$ y \f$, and the rest of the dual
+ * function does not depend on \f$ x_i \f$. Hence, if the inner Block is
+ * solved as a convex problem (its continuous relaxation, or its Lagrangian
+ * Dual by a LagrangianDualSolver), then \f$ Q \f$ is the supremum over
+ * \f$ y \f$ of functions affine in \f$ x \f$, the one of an optimal
+ * \f$ \bar y \f$ at \f$ \bar x \f$ is below \f$ Q \f$ everywhere and equal to
+ * it at \f$ \bar x \f$, and \f$ \varphi_i( \bar y ) \f$ is the coefficient of
+ * \f$ x_i \f$ in a subgradient. If \f$ \bar x_i > 0 \f$, the solution
+ * \f$ \bar z_i \f$ of the unit is a minimizer in (4) (otherwise the copies
+ * could do better against \f$ \bar y \f$, and neither the primal nor the
+ * dual solution would be optimal), and (4) is (2). If \f$ \bar x_i = 0 \f$,
+ * instead, the unit weighs nothing in the inner Block, and its solution is
+ * arbitrary (typically the unit is off, and (2) is 0 even where building
+ * the unit pays, which stops a method that starts at 0 there): then
+ * the getter has to give \f$ \varphi_i( \bar y ) \f$, minimizing the
+ * Objective of (4) over a copy of the unit relaxed as in the inner Block
+ * [see UCBlock::get_replicate_linearization()]. Since
+ * \f$ x_i \ge 0 \f$, a lower estimate of \f$ \varphi_i( \bar y ) \f$ at
+ * \f$ \bar x_i = 0 \f$ (e.g., from a relaxation of the copy) still gives a
+ * linearization below \f$ Q \f$ over the domain, if a less tight one. The
+ * copies of a scaled unit are then exact for the convexified problem, while
+ * for the unit commitment problem they are a restriction, since all the
+ * copies of a unit take the same decisions. If the inner Block is solved
+ * as a mixed-integer problem, \f$ Q \f$ is typically not convex and the
+ * linearization may not be a subgradient. With an SDDPBlock the
+ * linearization is the mean of those of the simulations, a subgradient of
+ * the mean of their values for the current policy rather than of the
+ * expected cost. The cost of the investment in (1)
+ * is convex if and only if \f$ c_i + d_i \ge 0 \f$ for all \f$ i \f$. Thus,
+ * \f$ \mathcal{F} \f$ is convex if this holds and \f$ Q \f$ is convex;
+ * is_convex() checks the former, while the latter depends on the Solver of
+ * the inner Block and cannot be checked. The domain of \f$ \mathcal{F} \f$ is
+ * given by the bounds and the linear constraints of the InvestmentBlock. If
+ * \f$ x \f$ violates the latter, compute() gives the value \f$ +\infty \f$
+ * (\f$ -\infty \f$ for a maximization) without solving the inner Block; so it
+ * does if the inner Block is infeasible at \f$ x \f$. In this second case, if
+ * the Solver of the inner Block gives a certificate of the infeasibility (an
+ * unbounded dual direction), a vertical linearization is read from it as the
+ * diagonal ones are. This is only done if the getter of every asset is
+ * declared to read one ("AssetFeasibilityCut" in serialize()), which is
+ * right for kappa constants, whose certificate is valid away from the
+ * current investment when they enter right-hand sides only (intermittent
+ * units and lines; for a battery with binary variables, the continuous
+ * relaxation after the change of variable above): for a scale factor, which
+ * multiplies the columns of a unit, it may not be, and an instance that
+ * does not name the methods declares it for kappa constants only. With the
+ * integrality of the active
+ * ColVariable relaxed, minimizing \f$ \mathcal{F} \f$ over its domain is
+ * therefore a convex nondifferentiable problem, which a Solver for
+ * C05Function (e.g., BundleSolver) attached to the InvestmentBlock can solve.
+ * Also, one can evaluate the InvestmentFunction at a single investment, or at
+ * two of them to compare them, or use it only for its linearization, which
+ * gives the sensitivity of the total cost to the capacity of each asset.
+ *
+ * We do not model some features that a capacity expansion model may have. For
+ * instance, one InvestmentFunction has no worst case over a set
+ * \f$ \Upsilon \f$ of alternative models of the uncertainty (meta-scenarios),
+ * i.e., it does not give
+ * \f[
+ *   \min_x \; \Bigl\{ \, \sum_{ i = 1 }^m \bigl( c_i ( x_i - \bar x_i )^+ +
+ *   d_i ( \bar x_i - x_i )^+ \bigr) + \max_{ \upsilon \in \Upsilon }
+ *   Q_\upsilon( x ) \, \Bigr\} \; ,
+ * \f]
+ * with \f$ Q_\upsilon \f$ the expected operational cost under the model
+ * \f$ \upsilon \f$. One can obtain this with one InvestmentFunction
+ * \f$ \mathcal{F}_\upsilon \f$ per model, all of them on the same investment,
+ * and an outer problem minimizing a variable \f$ v \f$ subject to
+ * \f$ v \ge \mathcal{F}_\upsilon( x ) \f$ for all
+ * \f$ \upsilon \in \Upsilon \f$. Since the cost of the investment is the same
+ * in all of them, \f$ \max_\upsilon \mathcal{F}_\upsilon \f$ is the function
+ * above; it is convex if each \f$ \mathcal{F}_\upsilon \f$ is, and any convex
+ * combination of the linearizations of the \f$ \mathcal{F}_\upsilon \f$
+ * attaining the maximum is a subgradient of it. Also, an investment can only
+ * be made in the assets listed above, neither in lines of a network that is
+ * not a DCNetworkBlock (e.g., a distribution grid) nor in connections between
+ * networks. Finally, the investment is the same for all the stages and all
+ * the scenarios, and therefore it cannot depend on the time or on the
+ * realization of the uncertainty. */
 
 class InvestmentFunction : public C05Function , public Block {
 
@@ -513,8 +782,9 @@ class InvestmentFunction : public C05Function , public Block {
   *    the inner Block of this BendersBFunction.
   *
   * If a key that is not any of the above is provided, an exception is
-  * thrown. No pointer is kept by the InvestmentFunction, so the caller can
-  * (and is responsible to) delete any pointer provided.
+  * thrown. No pointer is kept by the InvestmentFunction, which keeps a clone
+  * of what it needs, so the caller can (and is responsible to) delete any
+  * pointer provided.
   *
   * If the given pointer to the ComputeConfig is nullptr, then the
   * Configuration of the InvestmentFunction is reset to its default. This
@@ -739,7 +1009,7 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param par The parameter to be set.
   *
-  * @return The value of the parameter. */
+  * @param value The value of the parameter. */
 
  void set_par( idx_type par , int value ) override;
 
@@ -753,7 +1023,7 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param par The parameter to be set.
   *
-  * @return The value of the parameter. */
+  * @param value The value of the parameter. */
 
  void set_par( idx_type par , double value ) override
  {
@@ -776,7 +1046,7 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param par The parameter to be set.
   *
-  * @return The value of the parameter. */
+  * @param value The value of the parameter. */
 
  void set_par( idx_type par , std::string && value ) override
  {
@@ -1017,7 +1287,7 @@ class InvestmentFunction : public C05Function , public Block {
 		       const std::string & sub_group_name = "" )
   const override;
 
-/**@} ----------------------------------------------------------------------*/
+/*--------------------------------------------------------------------------*/
 /*----------------- METHODS FOR MANAGING THE "IDENTITY" --------------------*/
 /*--------------------------------------------------------------------------*/
 /** @name Managing the "identity" of the InvestmentFunction
@@ -1229,16 +1499,11 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * The active variables of this InvestmentFunction may have "natural" lower
   * and upper bounds in the model in which they are defined. That is, for each
-  * active variable x, there may be l and u such that x must satisfy
-  *
-  *     l <= x <= u.
-  *
-  * These natural bounds, however, may have been reformulated such that x
-  * becomes a nonnegative variable satisfying
-  *
-  *     0 <= x <= u - l
-  *
-  * if the lower bound l is finite. This function informs the
+  * active variable \f$ x \f$, there may be \f$ l \f$ and \f$ u \f$ such
+  * that \f$ l \le x \le u \f$. These natural bounds, however, may have been
+  * reformulated such that \f$ x \f$ becomes a nonnegative variable
+  * satisfying \f$ 0 \le x \le u - l \f$, if the lower bound \f$ l \f$ is
+  * finite. This function informs the
   * InvestmentFunction whether the natural bounds on the active variables have
   * been reformulated.
   *
@@ -1261,7 +1526,7 @@ class InvestmentFunction : public C05Function , public Block {
  /** This function returns the lower bound for the value of the i-th active
   * variable of this InvestmentFunction.
   *
-  * @para i The index of an active variable of this InvestmentFunction.
+  * @param i The index of an active variable of this InvestmentFunction.
   *
   * @return the lower bound for the value of the i-th active variable of this
   *         InvestmentFunction. */
@@ -1422,8 +1687,8 @@ class InvestmentFunction : public C05Function , public Block {
  /// set the number of (replica) sub-Blocks of the InvestmentFunction
  /** Sets the number of identical sub-Blocks that this InvestmentFunction
   * holds. This is the multi-replica analogue of
-  * #set_num_sub_blocks_per_stage(), and is used by the new SDDPBlock
-  * parallel execution path: the InvestmentFunction holds \p n identical
+  * #set_num_sub_blocks_per_stage(), and is used by the parallel execution
+  * of the SDDPBlock: the InvestmentFunction holds \p n identical
   * SDDPBlocks as inner Blocks (one per OpenMP thread / MPI process), and
   * scenarios are partitioned across replicas. Setting this value when an
   * inner Block is already present is illegal: if non-null Blocks are
@@ -1534,24 +1799,24 @@ class InvestmentFunction : public C05Function , public Block {
   *   ..., NumAssets - 1}. The i-th element of this vector provides the amount
   *   of the i-th asset that is currently installed in the system and,
   *   therefore, that is not subject to investment costs. This variable is
-  *   optional. If it is not provided, then we assume that
-  *   InstalledQuantity[i] = 0 for all i in {0, ..., NumAssets - 1}.
+  *   optional. If it is not provided, then InstalledQuantity[i] = 0 for all
+  *   i in {0, ..., NumAssets - 1}.
   *
-  * Let x[i] represent the value of the i-th active Variable of this
-  * InvestmentFunction. If x[i] is greater than InstalledQuantity[i], then the
-  * i-th asset is being subject to investment. If x[i] is less than
-  * InstalledQuantity[i], then the i-th asset is being subject to
-  * disinvestment. Because the cost of investment is typically different from
-  * the cost of disinvestment, the fixed (des)investment cost is composed by
-  * two parts: the one associated with an investment and the one associated
-  * with a disinvestment. The fixed cost associated with the i-th asset is
-  * given by
-  *
-  *   c[i] * ( x[i] - InstalledQuantity[i] ) if x[i] > InstalledQuantity[i],
-  *
-  * and
-  *
-  *   d[i] * ( InstalledQuantity[i] - x[i] ) if x[i] <= InstalledQuantity[i].
+  * Let \f$ x_i \f$ be the value of the i-th active Variable of this
+  * InvestmentFunction (plus its lower bound, if the bounds are reformulated
+  * [see reformulated_bounds()]) and \f$ \bar x_i \f$ =
+  * InstalledQuantity[i]. If \f$ x_i > \bar x_i \f$, then the i-th asset is
+  * subject to investment, and if \f$ x_i < \bar x_i \f$, to disinvestment.
+  * Because the cost of investment is typically different from the cost of
+  * disinvestment, the fixed (dis)investment cost of the i-th asset is
+  * \f[
+  *   \begin{cases}
+  *     c_i \, ( x_i - \bar x_i ) & \text{if } x_i > \bar x_i \; , \\
+  *     d_i \, ( \bar x_i - x_i ) & \text{if } x_i \le \bar x_i \; ,
+  *   \end{cases}
+  * \f]
+  * with \f$ c_i \f$ = Cost[i] and \f$ d_i \f$ = DisinvestmentCost[i] [see
+  * (1) in the class comments].
   *
   * - The one-dimensional variable "Cost", of type netCDF::NcDouble(), which
   *   is either a scalar or indexed over "NumAssets", containing the fixed
@@ -1606,20 +1871,18 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// returns the value of the InvestmentFunction
- /** This method returns an approximation to the value of this
-  * InvestmentFunction associated with the most recent call to compute(). The
-  * returned value depends on the sense of the Objective of the sub-Block. If
-  * the sense of the Objective of the sub-Block is "minimization", then this
-  * method returns a valid upper bound on the optimal objective function value
-  * of the sub-Block (see Solver::get_ub()). If the sense of the Objective of
-  * the sub-Block is "maximization", then this method returns a valid upper
-  * bound on the optimal objective function value of the sub-Block (see
-  * Solver::get_lb()).
-  *
-  * Notice that if compute() has never been invoked, then the value returned
-  * by this method is meaningless. Moreover, if this InvestmentFunction does
-  * not have a sub-Block or its sub-Block does not have a Solver attached to
-  * it, then an exception is thrown. */
+ /** Returns the value \f$ \mathcal{F}( x ) \f$ in (1) of the class comments
+  * computed by the last call to compute(), i.e., the cost of the investment
+  * plus the operational cost \f$ Q( x ) \f$, which is the value that the
+  * Solver of the inner Block gives for its solution [see
+  * Solver::get_var_value()], or the mean of the values of the simulations with
+  * an SDDPBlock; whether it is an optimal value, a lower bound or an estimate
+  * depends on that Solver [see the class comments]. If compute() has not been
+  * called yet, or the last call found the investment outside the domain (a
+  * linear constraint of the InvestmentBlock violated, or the inner Block
+  * infeasible), or it found no solution, the value is \f$ +\infty \f$ if the
+  * Objective of the inner Block is a minimization one, and \f$ -\infty \f$
+  * otherwise. */
 
  FunctionValue get_value( void ) override;
 
@@ -1646,20 +1909,26 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// returns true only if this InvestmentFunction is convex
- /** This method returns true only if this InvestmentFunction is convex. If
-  * this InvestmentFunction has no sub-Block or the sense of the Objective of
-  * its sub-Block is maximization, then this method returns false. Otherwise,
-  * it returns true. */
+ /** Returns true if this InvestmentFunction has an inner Block, the sense of
+  * the Objective of the inner Block is not maximization (an inner Block
+  * whose Objective is not there yet counts as a minimization one), and
+  * \f$ c_i + d_i \ge 0 \f$ for every asset \f$ i \f$, i.e., the cost of the
+  * investment in (1) of the class comments is convex; false otherwise. The
+  * convexity of the operational cost \f$ Q \f$ is also needed, which holds
+  * if the inner Block is solved as a convex problem (e.g., its continuous
+  * relaxation, or its Lagrangian Dual) and cannot be checked here [see the
+  * class comments]. */
 
  bool is_convex( void ) override;
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
  /// returns true only if this InvestmentFunction is concave
- /** This method returns false. Over a sub-Block whose Objective is a
-  * minimization the InvestmentFunction is convex [see is_convex()]; over a
-  * maximization its value would be concave, but the cost of the investment,
-  * convex, is added to it [see add_linear_term()], so that the sum is
-  * neither convex nor concave. */
+ /** Returns true if this InvestmentFunction has an inner Block, the sense of
+  * the Objective of the inner Block is maximization, and
+  * \f$ c_i + d_i \le 0 \f$ for every asset \f$ i \f$, i.e., the cost of the
+  * investment in (1) of the class comments is concave; false otherwise. As
+  * for is_convex(), the concavity of the operational cost cannot be checked
+  * here. */
 
  bool is_concave( void ) override;
 
@@ -1719,10 +1988,10 @@ class InvestmentFunction : public C05Function , public Block {
   *    equal to - #dblAAccMlt), and the sum of the coefficients of the
   *    diagonal linearizations must be approximately equal to 1:
   *
-  *    abs( 1 - sum coefficients of diagonal linearizations ) <=
-  *                                                         K * #dblAAccMlt
-  *
-  *    where K is the number of linearizations being combined.
+  *    \f$ | 1 - \sum_{ j \in D } \lambda_j | \le K \epsilon \f$, where
+  *    \f$ \lambda_j \f$ are the coefficients, \f$ D \f$ is the set of the
+  *    diagonal linearizations being combined, \f$ K \f$ is the number of
+  *    linearizations being combined and \f$ \epsilon \f$ is #dblAAccMlt.
   *
   * In the first case, the resulting linearization is a vertical one, while in
   * the second case it is a diagonal linearization. If none of the above two
@@ -1814,7 +2083,7 @@ class InvestmentFunction : public C05Function , public Block {
 
   if( v_Block.size() == 1 ) {
    // single-Block mode: get the i-th solver registered on the single
-   // inner Block (legacy behavior)
+   // inner Block
    if( i >= v_Block.front()->get_registered_solvers().size() )
     return( nullptr );
    return( dynamic_cast< T * >(
@@ -1963,16 +2232,11 @@ class InvestmentFunction : public C05Function , public Block {
  ///< indicates whether the bounds on the active variables were reformulated
  /**< The active variables of this InvestmentFunction may have natural lower
   * and upper bounds in the model in which they are defined. That is, for each
-  * active variable x, there may be l and u such that x must satisfy
-  *
-  *     l <= x <= u.
-  *
-  * These natural bounds, however, may have been reformulated such that x
-  * becomes a nonnegative variable satisfying
-  *
-  *     0 <= x <= u - l
-  *
-  * if the lower bound l is finite. This bool variable thus indicates whether
+  * active variable \f$ x \f$, there may be \f$ l \f$ and \f$ u \f$ such
+  * that \f$ l \le x \le u \f$. These natural bounds, however, may have been
+  * reformulated such that \f$ x \f$ becomes a nonnegative variable
+  * satisfying \f$ 0 \le x \le u - l \f$, if the lower bound \f$ l \f$ is
+  * finite. This bool variable thus indicates whether
   * the natural bounds on the active variables have been reformulated. */
 
  bool f_has_value = false;
@@ -1993,11 +2257,13 @@ class InvestmentFunction : public C05Function , public Block {
 
  FunctionValue f_farkas_value = 0;
  ///< the value of the infeasibility certificate at the current point
- /**< The certificate reads F( x ) = w d + sum_j r_j b_j( x ), with w the dual
-  * ray, r the Farkas-consistent reduced costs and b the bounds; the inner
-  * Block is infeasible at x exactly when F( x ) > 0, and F( x ) <= 0 is the
-  * cut. F is affine in the design, so the cut is written as usual as
-  * alpha + g x <= 0 with g the coefficients and alpha = F( x ) - g x. */
+ /**< The certificate reads \f$ \Phi( x ) = w^\top d + \sum_j r_j b_j( x )
+  * \f$, with \f$ w \f$ the dual ray, \f$ r \f$ the Farkas-consistent reduced
+  * costs and \f$ b \f$ the bounds; the inner Block is infeasible at \f$ x
+  * \f$ exactly when \f$ \Phi( x ) > 0 \f$, and \f$ \Phi( x ) \le 0 \f$ is
+  * the cut. \f$ \Phi \f$ is affine in the design, so the cut is written as
+  * usual as \f$ \alpha + g^\top x \le 0 \f$, with \f$ g \f$ the
+  * coefficients and \f$ \alpha = \Phi( x ) - g^\top x \f$. */
 
  Index f_num_sub_blocks_per_stage = 1;
  ///< number of sub-Blocks per stage in SDDPBlock (single-Block mode)
@@ -2697,19 +2963,14 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * This function is useful because the model to which this variable belongs
   * may have been reformulated as follows. This active variable, let us call
-  * it x, may be subject to lower and upper bounds, so that it must satisfy
-  *
-  *     l <= x <= u
-  *
-  * in the model in which it is defined. However, this model may have been
-  * reformulated in such a way that, if the lower bound l is finite, this
-  * variable becomes a nonnegative variable which must then satisfy
-  *
-  *     0 <= x <= u - l.
-  *
-  * Thus, if the model have been reformulated in this way, l is finite
-  * (actually, not minus infinity), and \p actual is false, then this function
-  * returns x + l. Otherwise, it returns the value of x. */
+  * it \f$ x \f$, may be subject to lower and upper bounds, so that it must
+  * satisfy \f$ l \le x \le u \f$ in the model in which it is defined.
+  * However, this model may have been reformulated in such a way that, if the
+  * lower bound \f$ l \f$ is finite, this variable becomes a nonnegative
+  * variable which must then satisfy \f$ 0 \le x \le u - l \f$. Thus, if the
+  * model has been reformulated in this way, \f$ l \f$ is finite (actually,
+  * not minus infinity), and \p actual is false, then this function returns
+  * \f$ x + l \f$; otherwise, it returns the value of \f$ x \f$. */
 
  double get_var_value( Index i , bool actual = true ) const
  {
@@ -2818,8 +3079,9 @@ class InvestmentFunction : public C05Function , public Block {
   * for d < 0, on (asset variable, baseline variable) respectively. Omitting
   * the mirrored entry would be a SILENT bug: the cut looks valid but is not
   * a subgradient. At the kink d == 0 the else branch yields ( -c- , +c- ),
-  * inside the subdifferential [ -c- , c+ ] since the costs are >= 0 (format
-  * precondition). */
+  * inside the subdifferential [ -c- , c+ ], which is not empty when
+  * c+ + c- >= 0, the condition for the cost to be convex [see
+  * is_convex()]. */
 
  void add_linear_term( double & value ,
                        std::vector< double > & linearization ) const

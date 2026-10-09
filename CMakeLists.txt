@@ -42,12 +42,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # ----- Settings ------------------------------------------------------------ #
 # This creates an ENABLE_TESTING option (default: ON) and enables the testing
-# using the ctest executable, only where the local test suite is: it is not
-# in the repository [see test/README.md].
+# using the ctest executable.
 # See: https://cmake.org/cmake/help/latest/manual/ctest.1.html
-if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt)
-    include(CTest)
-endif ()
+include(CTest)
 
 # Sets the default build type (if none was specified).
 # See: https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html
@@ -163,7 +160,7 @@ target_link_libraries(${modName} PUBLIC
 add_library(${modNamespace}::${modName} ALIAS ${modName})
 
 # ----- Subdirectories ------------------------------------------------------ #
-if (BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt)
+if (BUILD_TESTING)
     add_subdirectory(test)
 endif ()
 

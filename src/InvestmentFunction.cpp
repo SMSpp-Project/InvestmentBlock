@@ -39,6 +39,7 @@
 #include "SMSTypedefs.h"
 #include "UCBlock.h"
 
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <functional>
@@ -125,14 +126,6 @@ InvestmentFunction::InvestmentFunction
  v_asset_type = std::move( asset_type );
  v_cost = std::move( cost );
  v_disinvestment_cost = std::move( disinvestment_cost );
-
- // convexity precondition, same as in deserialize(): with a negative cost
- // the (dis)investment term is not convex and the subgradient at the kink
- // is silently invalid
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
-  if( ( get_cost( i ) < 0 ) || ( get_disinvestment_cost( i ) < 0 ) )
-   throw( std::invalid_argument( "InvestmentFunction: Cost and "
-                                 "DisinvestmentCost must be >= 0" ) );
 
  f_violated_constraint = { Inf< Index >() , eLHS };
 
@@ -329,18 +322,6 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                               v_disinvestment_cost ) )
    v_disinvestment_cost.resize( num_assets , 0 );
 
-  // Convexity precondition of the format: the transition cost
-  // max( c+ d , -c- d ) is convex iff c+ + c- >= 0; the format requires the
-  // stronger (and natural) c+ >= 0 and c- >= 0, failing loud.
-  for( Index i = 0 ; i < num_assets ; ++i )
-   if( ( get_cost( i ) < 0 ) || ( get_disinvestment_cost( i ) < 0 ) )
-    throw( std::logic_error( "InvestmentFunction::deserialize: 'Cost' and "
-                             "'DisinvestmentCost' must be >= 0 (convexity "
-                             "precondition of the format), but asset " +
-                             std::to_string( i ) + " has ( " +
-                             std::to_string( get_cost( i ) ) + " , " +
-                             std::to_string( get_disinvestment_cost( i ) ) +
-                             " )." ) );
 
   // Deserialize the amount of assets currently installed in the system
 
@@ -424,8 +405,8 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
   }
  else if( f_num_sub_blocks <= 1 ) {
 
-  // Single-Block path (legacy): create one inner Block, which may be either
-  // an SDDPBlock or a UCBlock.
+  // Single-Block path: create one inner Block, which may be either an
+  // SDDPBlock or a UCBlock.
 
   auto inner_block = Block::new_Block( inner_block_group , this );
 
@@ -1162,8 +1143,8 @@ int InvestmentFunction::compute( bool changedvars ) {
  if( v_Block.size() > 1 )
   return( compute_SDDPBlock_replicas( changedvars ) );
 
- // Legacy single-Block path: lock the (only) inner Block then dispatch
- // based on its concrete type.
+ // Single-Block path: lock the (only) inner Block then dispatch based on
+ // its concrete type.
 
  bool owned = v_Block.front()->is_owned_by( f_id );
  if( ( ! owned ) && ( ! v_Block.front()->lock( f_id ) ) )
@@ -1497,14 +1478,9 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
   if( status != SDDPSolver::kOK ) {
 
-   switch( status ) {
-    case( SDDPSolver::kStopIter ):
-     f_solver_status = SDDPSolver::kStopIter;
-    case( SDDPSolver::kCurveCross ):
-    case( SDDPSolver::kError ):
-    default:
-     f_solver_status = kError;
-   }
+   // whatever the reason (an iteration limit included), the simulation is
+   // not run, hence there is no value to report
+   f_solver_status = kError;
 
    unlend_identity();
    return( f_solver_status );
@@ -2002,17 +1978,40 @@ Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_convex( void ) {
- // the value of a minimization is convex in the investment, and so is the
- // cost of the investment [see add_linear_term()]; the value of a
- // maximization is concave, and with that cost neither convex nor concave
- return( ( ! v_Block.empty() ) && v_Block.front() &&
-         ( get_inner_block_objective_sense() != Objective::eMax ) );
+bool InvestmentFunction::is_convex( void )
+{
+ // the operational cost is a convex function of the investment if it is a
+ // minimum, and if the inner problem is convex, which cannot be checked here
+ if( v_Block.empty() || ( ! v_Block.front() ) ||
+     ( get_inner_block_objective_sense() == Objective::eMax ) )
+  return( false );
+
+ // c ( x - x_bar )^+ + d ( x_bar - x )^+ is convex if and only if c + d >= 0
+ // for every asset, the costs being per asset and not per Variable
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+  if( get_cost( i ) + get_disinvestment_cost( i ) < 0 )
+   return( false );
+
+ return( true );
  }
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentFunction::is_concave( void ) { return( false ); }
+bool InvestmentFunction::is_concave( void )
+{
+ // symmetric to is_convex(): the operational cost has to be a maximum, and
+ // c ( x - x_bar )^+ + d ( x_bar - x )^+ is concave if and only if
+ // c + d <= 0
+ if( v_Block.empty() || ( ! v_Block.front() ) ||
+     ( get_inner_block_objective_sense() != Objective::eMax ) )
+  return( false );
+
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+  if( get_cost( i ) + get_disinvestment_cost( i ) > 0 )
+   return( false );
+
+ return( true );
+ }
 
 /*--------------------------------------------------------------------------*/
 
@@ -2487,8 +2486,8 @@ InvestmentFunction::get_benders_function( Index stage ,
                                           Index sub_block_index ) const {
 
  // In the multi-replica path (v_Block.size() > 1) sub_block_index is the
- // index of the SDDPBlock replica; in the legacy single-Block path it is
- // the index of the sub-Block per stage within the (single) SDDPBlock.
+ // index of the SDDPBlock replica; in the single-Block path it is the
+ // index of the sub-Block per stage within the (single) SDDPBlock.
 
  SDDPBlock * sddp_block = nullptr;
  BendersBlock * benders_block = nullptr;
