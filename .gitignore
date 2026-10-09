@@ -4,8 +4,8 @@
 
 # --- Project-specific ---------------------------------------
 data/nc4
-data/nc4.tgz
-data/.extracted
+data/nc4*.tgz
+data/.extracted*
 
 # --- C/C++ build artifacts ----------------------------------
 *.o

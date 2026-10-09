@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 
 cd ../..
-bash upload-to-package-registry InvestmentBlock/data/nc4.tgz
+# the archive goes out as the version that CMakeLists.txt downloads, which
+# new data have to raise first [see DATA_VERSION there]
+bash upload-to-package-registry InvestmentBlock/data/nc4.tgz \
+     "$(sed -n 's/^set(DATA_VERSION \(.*\))$/\1/p' InvestmentBlock/CMakeLists.txt)"

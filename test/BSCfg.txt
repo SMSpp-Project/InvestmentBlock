@@ -1,0 +1,79 @@
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - BSCfg.txt - - - - - - - - - - - - - - - - -
+#
+# The BlockSolverConfig of the inner UCBlock of the InvestmentFunction of
+# the module test: a :MILPSolver that solves its continuous relaxation by
+# the simplex method, whose dual values give the linearization. The
+# instances of the test are small Linear Programs whose optimum is not
+# degenerate at the investment where the linearization is checked.
+#
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+BlockSolverConfig  # exact type of the Configuration object
+
+0  # the BlockSolverConfig is not a "differential" one
+
+1  # number of (the names of) Solver in this BlockSolverConfig
+
+# now all the names of the Solver - - - - - - - - - - - - - - - - - - - - - -
+HiGHSMILPSolver  # name of 1st Solver
+#GRBMILPSolver   # name of 1st Solver
+#CPXMILPSolver   # name of 1st Solver
+
+1  # number of ComputeConfig in this BlockSolverConfig
+
+# now all the ComputeConfig
+# 1st ComputeConfig - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+ComputeConfig  # exact type of the ComputeConfig object
+
+0  # f_diff == 0 ==> all non-provided parameters are set to the default value
+   # f_diff == 1 ==> all non-provided parameters are not changed
+
+3  # number of integer parameters
+
+# now all the integer parameters
+intLogVerb                    0  # LogVerb, log verbosity of the MILPSolver
+intRelaxIntVars               1  # the continuous relaxation is solved
+intThrowReducedCostException  0  # the bounds of the relaxed binary
+                                 # Variable have no OneVarConstraint to
+                                 # take their reduced cost, which the
+                                 # linearization does not need
+
+1  # number of double parameters
+
+# now all the double parameters
+dblRelAcc                  1e-9  # relative accuracy required to solution
+
+1  # number of string parameters
+
+# now all the string parameters
+solver                  simplex  # a vertex, whose dual values are a
+                                 # basic solution
+
+0  # number of vector-of-int parameters
+
+# now all the vector-of-int parameters
+# [none]
+
+0  # number of vector-of-double parameters
+
+# now all the vector-of-double parameters
+# [none]
+
+0  # number of vector-of-string parameters
+
+# now all the vector-of-string parameters
+# [none]
+
+# pointer to the "extra" Configuration
+* # [none]
+
+# end of 1st ComputeConfig  - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# end of BlockSolverConfig  - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - END BSCfg.txt - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

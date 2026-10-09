@@ -73,23 +73,23 @@ namespace SMSpp_di_unipi_it
 /*--------------------------- GENERAL NOTES --------------------------------*/
 /*--------------------------------------------------------------------------*/
 /// a Block whose FRealObjective has a InvestmentFunction
-/** An InvestmentBlock is a Block that has the following characteristics. It
- * has a vector of ColVariable, each of which represents the investment in a
- * particular asset. The number of ColVariable is thus the number of assets
- * that are subject to investment. The Objective of the InvestmentBlock is an
- * FRealObjective whose Function is a InvestmentFunction. The active Variable
- * of this InvestmentFunction are the ones defined in this InvestmentBlock.
+/** An InvestmentBlock is a Block with a vector of ColVariable, each of which
+ * represents the investment in a particular asset, and therefore the number
+ * of ColVariable is the number of assets that are subject to investment. Its
+ * Objective is an FRealObjective whose Function is an InvestmentFunction, and
+ * the active Variable of this InvestmentFunction are the ones defined in this
+ * InvestmentBlock.
  *
- * The InvestmentBlock can have explicit box constraints and "implicit" linear
- * constraints on its set of ColVariable. The box constraints, if present, are
+ * An InvestmentBlock can have explicit box constraints and "implicit" linear
+ * constraints on its set of ColVariable. If present, the box constraints are
  * in the form of a vector of BoxConstraint, whose size is the number of
- * assets subject to investment and its i-th element is the box constraint
+ * assets subject to investment and whose i-th element is the box constraint
  * associated with the i-th (asset and) ColVariable of this InvestmentBlock.
  *
- * We refer to the linear constraints as "implicit" because they are not
- * represented by Constraint. These linear constraints are handled by the
- * InvestmentFunction (which is part of the Objective of the
- * InvestmentBlock). They help define the domain of the InvestmentFunction. An
+ * We refer to the linear constraints as "implicit" since they are not
+ * represented by Constraint; indeed, they are handled by the
+ * InvestmentFunction (which is part of the Objective of the InvestmentBlock),
+ * and they help define the domain of the InvestmentFunction. Hence, an
  * investment that does not satisfy all of these linear constraints has an
  * InvestmentFunction value which is +infinity (if the sense of the Objective
  * of the InvestmentBlock is minimization) or -infinity (if the sense of the
@@ -147,16 +147,26 @@ public:
   *   that LowerBound[i] = LowerBound[0] for all i in {0, ..., NumAssets -
   *   1}. The i-th element of this vector provides the lower bound on the i-th
   *   ColVariable of this InvestmentBlock. This variable is optional. If it is
-  *   not provided, then we assume that LowerBound[i] = 0 for all i in {0,
-  *   ..., NumAssets - 1}.
+  *   not provided, then LowerBound[i] = \f$ -\infty \f$ for all i in {0,
+  *   ..., NumAssets - 1}, i.e., the ColVariable have no lower bound.
   *
   * - The variable "UpperBound", of type netCDF::NcDouble(), which is either a
   *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
   *   that UpperBound[i] = UpperBound[0] for all i in {0, ..., NumAssets -
   *   1}. The i-th element of this vector provides the upper bound on the i-th
   *   ColVariable of this InvestmentBlock. This variable is optional. If it is
-  *   not provided, then we assume that UpperBound[i] = +inf for all i in {0,
+  *   not provided, then UpperBound[i] = \f$ +\infty \f$ for all i in {0,
   *   ..., NumAssets - 1}.
+  *
+  * - The variable "Integer", of type netCDF::NcInt(), which is either a
+  *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
+  *   that Integer[i] = Integer[0] for all i in {0, ..., NumAssets - 1}. If
+  *   Integer[i] is nonzero, the i-th ColVariable of this InvestmentBlock is
+  *   integer, e.g., the number of modules of a modular asset. This variable
+  *   is optional. If it is not provided, then we assume that every
+  *   ColVariable is continuous. The lower bound of an integer ColVariable has
+  *   to be integer if the bounds are reformulated [see
+  *   generate_abstract_constraints()].
   *
   * - The dimension "ObjectiveSense", which indicates the sense of the
   *   Objective of this InvestmentBlock. If it is zero, then the Objective is
@@ -168,16 +178,20 @@ public:
   *
   * - A description of the InvestmentFunction.
   *
-  * The linear constraints are assumed to have the following form:
-  *
-  *     l_i <= a_i ' x <= u_i, for i in {0, ..., NumConstraints - 1},
-  *
-  * where x denotes the variables of this InvestmentBlock, a_i is the vector
-  * of coefficients of the i-th constraint, a_i'x is the inner product between
-  * a_i and x, and l_i and u_i are the lower and upper bounds determining the
-  * i-th linear constraint. We denote by A the matrix of coefficients, whose
-  * i-th row is a_i. The following dimension and variables describe the
-  * constraints:
+  * The linear constraints are assumed to have the form
+  * \f[
+  *   l_i \le a_i^\top x \le u_i \qquad i \in \{ 0 , \ldots ,
+  *   \mathrm{NumConstraints} - 1 \} \; ,
+  * \f]
+  * where \f$ x \f$ denotes the variables of this InvestmentBlock,
+  * \f$ a_i \f$ is the vector of coefficients of the i-th constraint, and
+  * \f$ l_i \f$ and \f$ u_i \f$ are its lower and upper bounds; we denote by
+  * \f$ A \f$ the matrix of coefficients, whose i-th row is \f$ a_i \f$.
+  * They are the domain of the InvestmentFunction: when they are violated
+  * (by more than a relative tolerance), the InvestmentFunction gives the
+  * value \f$ +\infty \f$ (for a minimization) without solving its inner
+  * Block [see InvestmentFunction::compute()]. The following dimension and
+  * variables describe the constraints:
   *
   * - The dimension "NumConstraints", containing the number of linear
   *   constraints. This variable is optional. If it is not provided, then it
@@ -194,14 +208,14 @@ public:
   * - The variable "Constraints_LowerBound", of type netCDF::NcDouble() and
   *   indexed over the dimension "NumConstraints", containing the lower bound
   *   of the linear constraints. This variable is optional. If it is not
-  *   provided, then it is assumed that Constraints_LowerBound[i] = -inf for
-  *   each i in {0, ..., NumConstraints - 1}.
+  *   provided, then it is assumed that Constraints_LowerBound[i] =
+  *   \f$ -\infty \f$ for each i in {0, ..., NumConstraints - 1}.
   *
   * - The variable "Constraints_UpperBound", of type netCDF::NcDouble() and
   *   indexed over the dimension "NumConstraints", containing the upper bound
   *   of the linear constraints. This variable is optional. If it is not
-  *   provided, then it is assumed that Constraints_UpperBound[i] = +inf for
-  *   each i in {0, ..., NumConstraints - 1}.
+  *   provided, then it is assumed that Constraints_UpperBound[i] =
+  *   \f$ +\infty \f$ for each i in {0, ..., NumConstraints - 1}.
   *
   * @param group A netCDF::NcGroup holding the required data. */
 
@@ -242,23 +256,22 @@ public:
  /** This function generates the abstract constraints of the InvestmentBlock,
   * which consists in lower and upper bounds on the values of the variables.
   *
-  * If no lower bound has been provided, then -inf is the lower bound for each
-  * variable. If no upper bound has been provided, then +inf is the upper
-  * bound for each variable.
+  * If no lower bound has been provided, then \f$ -\infty \f$ is the lower
+  * bound for each variable. If no upper bound has been provided, then
+  * \f$ +\infty \f$ is the upper bound for each variable.
   *
   * If lower and upper bounds have not been provided, then the variables are
-  * free and no constraint is generated. Otherwise, for each variable x[ i ],
-  * the following constraints are generated
-  *
-  *     lower_bound[ i ] <= x[ i ] <= upper_bound[ i ].
+  * free and no constraint is generated. Otherwise, for each variable
+  * \f$ x_i \f$, with lower and upper bounds \f$ l_i \f$ and \f$ u_i \f$, the
+  * BoxConstraint \f$ l_i \le x_i \le u_i \f$ is generated.
   *
   * The given Configuration \p stcc or the Configuration for the static
   * constraints present in the BlockConfig of this InvestmentBlock can be used
   * to indicate that the bound constraints must be reformulated as
-  * follows. For each i, if lower_bound[ i ] is finite, the above constraint
-  * can be replaced by
-  *
-  *     0 <= x[ i ] <= upper_bound[ i ] - lower_bound[ i ].
+  * follows: for each i, if \f$ l_i \f$ is finite, the above constraint is
+  * replaced by \f$ 0 \le x_i \le u_i - l_i \f$, i.e., \f$ x_i \f$ becomes
+  * the investment minus its lower bound [see
+  * InvestmentFunction::reformulated_bounds()].
   *
   * If \p stcc is not nullptr and it is a SimpleConfiguration< int >, or if
   * f_BlockConfig->f_static_constraints_Configuration is not nullptr and it is
@@ -327,7 +340,7 @@ public:
   * solution, if the corresponding Variable/InvestmentFunction have not
   * been constructed yet: this throws an exception, unless emptys = true, in
   * which case the InvestmentBlockSolution object is only prepped for
-  * getting a solution, but it is not really getting one now.
+  * getting a solution, but it is not really getting one yet.
   *
   * Note that, although the method clearly returns a InvestmentBlockSolution,
   * formally the return type is Solution *. This is because it is not
@@ -411,6 +424,11 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
+ /// returns, for each Variable, nonzero if it is integer; empty if none is
+
+ const std::vector< int > & get_integer() const { return v_integer; }
+
+/*--------------------------------------------------------------------------*/
  /// returns the box constraints on the Variable
 
  const std::vector< BoxConstraint > & get_constraints() const {
@@ -473,7 +491,7 @@ public:
   * the i-th Variable will be given by std::next( it , i ), for each i in {0,
   * ..., get_number_variables() - 1}.
   *
-  * @param values The vector containing the values of the Variable. */
+  * @param it The iterator to the value of the first Variable. */
 
  template< class Iterator >
  void set_variable_values( Iterator it ) {
@@ -491,15 +509,15 @@ public:
  /** This function returns true if and only if the solution encoded in the
   * current value of the ColVariable of this InvestmentBlock is approximately
   * feasible considering a given tolerance. The tolerance can be provided by
-  * either \p fsbc or by #f_BlockConfig->f_is_feasible_Configuration and it is
+  * either \p fsbc or by f_BlockConfig->f_is_feasible_Configuration and it is
   * determined as follows:
   *
   *   - If \p fsbc is not a nullptr and it is a pointer to a
   *     SimpleConfiguration< double >, then the tolerance is the value present
   *     in that SimpleConfiguration.
   *
-  *   - Otherwise, if both #f_BlockConfig and
-  *     #f_BlockConfig->f_is_feasible_Configuration are not nullptr and the
+  *   - Otherwise, if both f_BlockConfig and
+  *     f_BlockConfig->f_is_feasible_Configuration are not nullptr and the
   *     latter is a pointer to a SimpleConfiguration< double >, then the
   *     tolerance is the value present in that SimpleConfiguration.
   *
@@ -522,13 +540,11 @@ public:
   * BoxConstraint::abs_viol() for details about the absolute violation of a
   * BoxConstraint.
   *
-  * Otherwise, the solutions is considered to be feasible if and only if, for
-  * each ColVariable i,
-  *
-  *     l_i - tolerance <= x_i <= u_i + tolerance
-  *
-  * where x_i is the value of the i-th ColVariable and l_i and u_i are the
-  * lower and upper bounds on that variable.
+  * Otherwise, the solution is considered to be feasible if and only if, for
+  * each ColVariable i, \f$ l_i - \epsilon \le x_i \le u_i + \epsilon \f$,
+  * where \f$ x_i \f$ is the value of the i-th ColVariable, \f$ l_i \f$ and
+  * \f$ u_i \f$ are the lower and upper bounds on that variable, and
+  * \f$ \epsilon \f$ is the tolerance.
   *
   * Notice that, if none of the BoxConstraint is relaxed, these two checks are
   * identical. However, if some bounds are violated and the corresponding
@@ -602,6 +618,8 @@ protected:
 
  std::vector< double > v_lower_bound;  ///< lower bound on the Variable
  std::vector< double > v_upper_bound;  ///< upper bound on the Variable
+
+ std::vector< int > v_integer;  ///< nonzero if the Variable is integer
 
  /// Box constraints on the Variable
  std::vector< BoxConstraint > v_constraints;

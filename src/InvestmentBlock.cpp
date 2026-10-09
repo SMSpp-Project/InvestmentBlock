@@ -77,6 +77,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  ::deserialize( group , "UpperBound" , num_assets , v_upper_bound ,
                 true , true );
 
+ ::deserialize( group , "Integer" , num_assets , v_integer , true , true );
+
  f_objective_sense = Objective::eMin;
  if( deserialize_dim( group , "ObjectiveSense" , f_objective_sense ) &&
      ( ! f_objective_sense ) )
@@ -100,6 +102,24 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     throw( std::logic_error( "InvestmentBlock::deserialize: the 'UpperBound' "
 			     "netCDF variable, if provided, must have size 0,"
 			     " 1, or 'NumAssets'." ) );
+  }
+
+ if( ! v_integer.empty() ) {
+  if( v_integer.size() == 1 )
+   v_integer.resize( num_assets , v_integer.front() );
+  else
+   if( v_integer.size() != num_assets )
+    throw( std::logic_error( "InvestmentBlock::deserialize: the 'Integer' "
+			     "netCDF variable, if provided, must have size 0,"
+			     " 1, or 'NumAssets'." ) );
+
+  for( Index i = 0 ; i < num_assets ; ++i )
+   if( v_integer[ i ] )
+    v_variables[ i ].is_integer( true , eNoMod );
+
+  if( std::find_if( v_integer.begin() , v_integer.end() ,
+                    []( int b ) { return( b != 0 ); } ) == v_integer.end() )
+   v_integer.clear();
   }
 
  auto investment_function = new InvestmentFunction();
@@ -183,6 +203,15 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( ! v_lower_bound.empty() ) {
   assert( v_lower_bound.size() == v_constraints.size() );
   for( Index i = 0 ; i < v_constraints.size() ; ++i ) {
+   // shifting an integer Variable by its lower bound keeps it integer only
+   // if the bound is
+   if( f_reformulate_bounds && ( i < v_integer.size() ) && v_integer[ i ] &&
+       std::isfinite( v_lower_bound[ i ] ) &&
+       ( v_lower_bound[ i ] != std::floor( v_lower_bound[ i ] ) ) )
+    throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
+			     " the lower bound of an integer Variable must be"
+			     " integer for the bounds to be reformulated" ) );
+
    if( f_reformulate_bounds && ( v_lower_bound[ i ] > -Inf< double >() ) ) {
     assert( v_lower_bound[ i ] != Inf< double >() );
     v_constraints[ i ].set_lhs( 0.0 );
@@ -265,6 +294,9 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
 
  ::serialize( group , "UpperBound" , netCDF::NcDouble() , NumAssets ,
               v_upper_bound );
+
+ if( ! v_integer.empty() )
+  ::serialize( group , "Integer" , netCDF::NcInt() , NumAssets , v_integer );
 
  if( auto function = objective.get_function() )
   static_cast< InvestmentFunction * >( function )->serialize( group );

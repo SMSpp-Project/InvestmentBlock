@@ -44,9 +44,10 @@ include $(UCBckDIR)/lib/makefile
 SDDPBkSDR = $(InvsBkSDR)/../SDDPBlock
 include $(SDDPBkSDR)/makefile-s
 
-# define input macros for TwoStageStochasticBlock makefile, then include it
+# define input macros for TwoStageStochasticBlock makefile, then include it;
+# the makefile-s version, since the SMS++ stuff is already there
 TSSBkSDR = $(InvsBkSDR)/../TwoStageStochasticBlock
-include $(TSSBkSDR)/makefile-c
+include $(TSSBkSDR)/makefile-s
 
 # include the makefile requiring all external modules in input
 include $(InvsBkSDR)/makefile
