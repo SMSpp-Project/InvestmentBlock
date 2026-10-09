@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the asset type 2 (`AssetType`), the converter of a `BatteryUnitBlock`,
+  whose investment is the kappa of the converter
+  (`BatteryUnitBlock::set_converter_kappa()`) with its own cost, bounds and
+  linearization: with an asset of type 0 on the same battery the storage
+  and the converter are sized apart, while a battery with no asset of type
+  2 is resized as a whole by its kappa, as before
+
+- the key `UnitBlockSolverConfig` of the extra Configuration of
+  `InvestmentFunction`, the BlockSolverConfig of the copy of a scaled unit
+  with no copies that the linearization solves; if absent, with a UCBlock
+  as inner Block its BlockSolverConfig is used
+
+- `test/`, the unit test of the module (`InvestmentBlock_unit_test`): the
+  curvature `InvestmentFunction` declares, and, with a :MILPSolver in the
+  build, its linearization against the finite differences of its value for
+  a line of a meshed network and for a scaled unit giving reactive power
+
 - the netCDF variable `Integer`, scalar or per asset, which makes the
   ColVariable of the assets where it is nonzero integer, e.g., the number of
   modules of a modular asset; a `BundleSolver` with `intIntVars` 1 keeps
@@ -20,6 +37,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   network the archive of UCBlock has with the design in the units
 
 ### Changed
+
+- `InvestmentFunction` throws when the asset is a line that has a design
+  variable in the `DCNetworkBlock`, whose kappa multiplies that variable,
+  instead of giving it a zero linearization; the documentation states the
+  convexity of a battery in its kappa through the continuous relaxation
+
+- the class comments of InvestmentFunction.h write the function (cost of
+  the investment plus operational cost), how each asset enters the inner
+  Block, the linearization and when it is a subgradient, its convexity and
+  domain, and what a capacity expansion model may have that it has not (a
+  worst case over models of the uncertainty, for which they give the
+  formulation with one InvestmentFunction per model); the doc says the
+  defaults the code has, `InstalledQuantity` 0 and no bounds on the
+  ColVariable of the InvestmentBlock, and all its formulae are in LaTeX
 
 - the data archive is downloaded by version: `DATA_VERSION` in CMakeLists.txt
   names the version of the Package Registry to read, and the archive and the
@@ -55,6 +86,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and on ELF, where naming the symbol is not enough, the library as a whole
 
 ### Fixed
+
+- the linearization of a unit represented by its scale factor with no
+  copies: the operational part of the coefficient was read from the
+  solution of the unit, in which it weighs nothing, and was 0 (the unit
+  being off) also where building it pays, so that a method starting at 0
+  copies stopped there; it is the value at the dual values of a copy of the
+  unit solved alone, relaxed as in the inner Block, by the Solver of
+  `UnitBlockSolverConfig`, which is a subgradient
+
+- the linearization with respect to a line no longer asserts that the
+  network is HVDC, which aborted builds with assertions on any network with
+  susceptances, the derivative of the flow limits being the same there
+
+- the linearization with respect to a unit represented by its scale counts
+  the reactive node injection constraints, which also carry the scaled
+  reactive power of the unit and were left out
+
+- `is_convex()` and `is_concave()` look at the inner Block, which has to
+  be there and minimize (maximize), and at the cost of investing plus that
+  of disinvesting in each asset, `c + d`, which has to be nonnegative
+  (nonpositive) for the investment cost to be convex (concave); they
+  returned `true` and `false` whatever the InvestmentFunction
 
 - on macOS a program linking the module lost the classes the module
   registers in the factories when the linker dropped the library, as it
