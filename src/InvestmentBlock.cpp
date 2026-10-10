@@ -52,8 +52,7 @@ InvestmentBlock::~InvestmentBlock()
   delete block;
  v_Block.clear();
 
- for( auto & constraint : v_constraints )
-  constraint.clear();
+ Constraint::clear( v_constraints );
 
  objective.clear();
  }
@@ -325,15 +324,7 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
  if( useabstract && ( ! v_constraints.empty() ) ) {
   // Use the set of Constraint to decide whether the current solution is
   // feasible.
-  for( auto & constraint : v_constraints ) {
-   if( constraint.is_relaxed() )
-    continue;
-   constraint.compute();
-   if( constraint.abs_viol() > tolerance )
-    return( false );
-   }
-
-  return( true );
+  return( RowConstraint::is_feasible( v_constraints , tolerance , false ) );
   }
 
  // Check the "physical representation"
