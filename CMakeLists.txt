@@ -164,69 +164,78 @@ if (BUILD_TESTING)
     add_subdirectory(test)
 endif ()
 
-# ----- Custom commands and targets ----------------------------------------- #
-
-# The version of the archive in the Package Registry. A published version is
-# never replaced: new data go out under a new version, written here first [see
-# data/upload-nc4], and the archive and the marker of its extraction carry it
-# in their name, so that a tree holding the data of an older version (a cache
-# of the CI, or a clone that has been extracted before) downloads and extracts
-# again instead of taking them for the current ones.
+# ----- Data ---------------------------------------------------------------- #
+# The instances the tests read are, for each <fmt> of DATA_FORMATS, the
+# archive <fmt>.tgz in the GitLab Package Registry of the project
+# DATA_PROJECT, extracted into data/<fmt>. Nothing of this is built with the
+# module: extract_<DATA_PREFIX>_<fmt> downloads the archive (by building
+# download_<DATA_PREFIX>_<fmt>) and extracts it, and it is built when the
+# tests that read the instances are run, by a test that sets up the fixture
+# <DATA_PREFIX>_<fmt>_extracted they require.
+#
+# A published version is never replaced: new data go out under a new
+# version, written here first [see the upload scripts in data/], and the
+# archive and the marker of its extraction carry it in their name, so that a
+# tree holding the data of an older version (a cache of the CI, or a clone
+# that has been extracted before) downloads and extracts again instead of
+# taking them for the current ones.
 set(DATA_VERSION 2026-09-26)
+set(DATA_PROJECT 45125867)
+set(DATA_PREFIX investment)
+set(DATA_FORMATS nc4)
 
-# Download nc4.tgz from GitLab Package Registry if it doesn't exist
-set(DATA_URL "https://gitlab.com/api/v4/projects/45125867/packages/generic/nc4/${DATA_VERSION}/nc4.tgz")
-set(DATA_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/data/nc4-${DATA_VERSION}.tgz)
-set(DATA_MARKER ${CMAKE_CURRENT_SOURCE_DIR}/data/.extracted-${DATA_VERSION})
-set(DATA_SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/download_investment_nc4.cmake)
+foreach (fmt ${DATA_FORMATS})
+    set(url "https://gitlab.com/api/v4/projects/${DATA_PROJECT}/packages/\
+generic/${fmt}/${DATA_VERSION}/${fmt}.tgz")
+    set(archive ${CMAKE_CURRENT_SOURCE_DIR}/data/${fmt}-${DATA_VERSION}.tgz)
+    set(script
+        ${CMAKE_CURRENT_BINARY_DIR}/download_${DATA_PREFIX}_${fmt}.cmake)
+    # the marker of the extraction, on which what is made from the instances
+    # depends too
+    set(DATA_MARKER_${fmt}
+        ${CMAKE_CURRENT_SOURCE_DIR}/data/.extracted-${fmt}-${DATA_VERSION})
 
-file(WRITE ${DATA_SCRIPT} "
-file(DOWNLOAD \"${DATA_URL}\" \"${DATA_ARCHIVE}\" SHOW_PROGRESS STATUS _status)
+    file(WRITE ${script} "
+file(DOWNLOAD \"${url}\" \"${archive}\" SHOW_PROGRESS STATUS _status)
 list(GET _status 0 _code)
 list(GET _status 1 _message)
 if(NOT _code EQUAL 0)
   # what is on disk is whatever the server answered with, and leaving it there
   # would let the build take it for the archive: the next attempt has to
   # download again rather than fail while extracting it
-  file(REMOVE \"${DATA_ARCHIVE}\")
-  message(FATAL_ERROR \"cannot download ${DATA_URL}: \${_message}\")
+  file(REMOVE \"${archive}\")
+  message(FATAL_ERROR \"cannot download ${url}: \${_message}\")
 endif()
-file(SIZE \"${DATA_ARCHIVE}\" _size)
+file(SIZE \"${archive}\" _size)
 if(_size LESS 1024)
-  file(REMOVE \"${DATA_ARCHIVE}\")
-  message(FATAL_ERROR \"${DATA_ARCHIVE} came down with \${_size} bytes, so the \
+  file(REMOVE \"${archive}\")
+  message(FATAL_ERROR \"${archive} came down with \${_size} bytes, so the \
 server answered but not with the archive: try again later\")
 endif()
 ")
 
-add_custom_command(
-        OUTPUT ${DATA_ARCHIVE}
-        COMMAND ${CMAKE_COMMAND} -E echo "Downloading nc4.tgz from GitLab Package Registry..."
-        COMMAND ${CMAKE_COMMAND} -P ${DATA_SCRIPT}
-        COMMENT "Downloading nc4.tgz"
-        VERBATIM
-)
+    add_custom_command(
+            OUTPUT ${archive}
+            COMMAND ${CMAKE_COMMAND} -P ${script}
+            COMMENT "Downloading ${fmt}.tgz from the GitLab Package Registry"
+            VERBATIM)
+    add_custom_target(download_${DATA_PREFIX}_${fmt} DEPENDS ${archive})
 
-add_custom_target(download_investment_nc4
-        DEPENDS ${DATA_ARCHIVE})
-
-# Custom command to extract the nc4.tgz archive if the marker of this version
-# does not exist
-add_custom_command(
-        OUTPUT ${DATA_MARKER}
-        COMMAND tar xzf ${DATA_ARCHIVE}
-        COMMAND echo > ${DATA_MARKER}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data
-        COMMENT "Extracting nc4.tgz"
-        VERBATIM
-        DEPENDS download_investment_nc4)
-
-# Create custom targets to run the data extraction
-add_custom_target(extract_investment_nc4
-        DEPENDS ${DATA_MARKER})
-
-# Ensure that extract_investment_nc4 is executed after the download
-add_dependencies(extract_investment_nc4 download_investment_nc4)
+    add_custom_command(
+            OUTPUT ${DATA_MARKER_${fmt}}
+            COMMAND ${CMAKE_COMMAND} -E tar xzf ${archive}
+            COMMAND ${CMAKE_COMMAND} -E touch ${DATA_MARKER_${fmt}}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data
+            COMMENT "Extracting ${fmt}.tgz"
+            VERBATIM
+            DEPENDS ${archive})
+    add_custom_target(extract_${DATA_PREFIX}_${fmt}
+                      DEPENDS ${DATA_MARKER_${fmt}})
+    # the archive is the output of a command in both targets: it has to be
+    # downloaded once, before it is extracted
+    add_dependencies(extract_${DATA_PREFIX}_${fmt}
+                     download_${DATA_PREFIX}_${fmt})
+endforeach ()
 
 # ----- Install instructions ------------------------------------------------ #
 # The following commands are used when installing the library
