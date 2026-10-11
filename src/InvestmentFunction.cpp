@@ -26,6 +26,7 @@
 #include "Observer.h"
 #include "OneVarConstraint.h"
 #include "RBlockConfig.h"
+#include "ConversionUnitBlock.h"
 #include "IntermittentUnitBlock.h"
 #include "LinearFunction.h"
 #include "InvestmentFunction.h"
@@ -3153,11 +3154,12 @@ void InvestmentFunction::update_linearization_unit_blocks
   * groups, depending on how the investment is represented.
   *
   * The first group is formed by the UnitBlocks whose scale factors represent
-  * the investment: every ThermalUnitBlock, and a BatteryUnitBlock or an
-  * IntermittentUnitBlock when "ReplicateBatteryUnits" or
-  * "ReplicateIntermittentUnits" is nonzero. For these UnitBlocks, the
-  * linearization is impacted by their objective function (as they are
-  * scaled) and the linking constraints in the UCBlock.
+  * the investment: every ThermalUnitBlock and ConversionUnitBlock, and a
+  * BatteryUnitBlock or an IntermittentUnitBlock when
+  * "ReplicateBatteryUnits" or "ReplicateIntermittentUnits" is nonzero. For
+  * these UnitBlocks, the linearization is impacted by their objective
+  * function (as they are scaled) and the linking constraints in the
+  * UCBlock.
   *
   * The second group is formed by the UnitBlocks whose kappa constants
   * represent the investment: a BatteryUnitBlock or an IntermittentUnitBlock
@@ -3201,7 +3203,8 @@ void InvestmentFunction::update_linearization_unit_blocks
 					sub_block_index ) );
    };
 
-  if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
+  if( dynamic_cast< const ThermalUnitBlock * >( block ) ||
+      dynamic_cast< const ConversionUnitBlock * >( block ) ) {
    v_linearization[ var_index ] += scaled();
   }
   else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
@@ -3246,7 +3249,8 @@ void InvestmentFunction::update_linearization_unit_blocks
 
   auto block = ucblock->get_unit_block( block_index );
 
-  if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
+  if( dynamic_cast< const ThermalUnitBlock * >( block ) ||
+      dynamic_cast< const ConversionUnitBlock * >( block ) ) {
    linearization[ var_index ] +=
     compute_scale_linearization( block_index , stage , sub_block_index );
   }
@@ -3592,7 +3596,8 @@ void InvestmentFunction::update_linearization
 
 void InvestmentFunction::update_unit_block( UnitBlock * block ,
                                             double investment ) {
- if( dynamic_cast< const ThermalUnitBlock * >( block ) ) {
+ if( dynamic_cast< const ThermalUnitBlock * >( block ) ||
+     dynamic_cast< const ConversionUnitBlock * >( block ) ) {
   block->scale( investment );
  }
  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {

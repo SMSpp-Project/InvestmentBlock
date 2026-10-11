@@ -80,7 +80,8 @@ namespace SMSpp_di_unipi_it
  * - Its active ColVariable are the investments that can be made in certain
  *   assets, where the i-th one is the investment in the i-th asset. An asset
  *   is either a UnitBlock of the UCBlock where the investment takes place (a
- *   ThermalUnitBlock, a BatteryUnitBlock or an IntermittentUnitBlock),
+ *   ThermalUnitBlock, a ConversionUnitBlock, a BatteryUnitBlock or an
+ *   IntermittentUnitBlock),
  *   identified by its index there, or the converter of a BatteryUnitBlock,
  *   identified by the index of the unit, or a line of its network,
  *   identified by its index in the NetworkData [see serialize()].
@@ -119,7 +120,9 @@ namespace SMSpp_di_unipi_it
  *   \f$ x_i \f$ is the number of identical copies of the unit, which share
  *   its Variable. The contributions of the unit to the linking constraints
  *   of the UCBlock and to the Objective are then those of one copy times
- *   \f$ x_i \f$. This is the case of a ThermalUnitBlock, and of a
+ *   \f$ x_i \f$. This is the case of a ThermalUnitBlock and of a
+ *   ConversionUnitBlock (whose copies share one commitment, see
+ *   ConversionUnitBlock), and of a
  *   BatteryUnitBlock or an IntermittentUnitBlock if the attribute
  *   "ReplicateBatteryUnits" or "ReplicateIntermittentUnits", respectively,
  *   is nonzero;

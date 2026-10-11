@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- an investment in a `ConversionUnitBlock` is represented by its scale
+  factor, as for a `ThermalUnitBlock`, where the unit was refused as
+  unrecognized; the unit test checks its linearization
+
 ### Changed
 
 - the instances of `data/` are downloaded and extracted by the targets

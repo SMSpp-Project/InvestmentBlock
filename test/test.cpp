@@ -32,6 +32,9 @@
  *   against the dual values; the cutting plane method that starts at 0 has
  *   to leave 0 and reach the optimum;
  *
+ * - an investment in a ConversionUnitBlock represented by its scale factor,
+ *   with its two generators on two nodes, at one copy and at no copy;
+ *
  * - an investment in the storage and in the converter of a BatteryUnitBlock
  *   as two assets (types 0 and 2), whose optimum has a storage twice the
  *   converter: the value at the optimum, the coefficients where one of the
@@ -361,6 +364,53 @@ static netCDF::NcGroup battery_bus( bool two )
  }
 
 /*--------------------------------------------------------------------------*/
+/// an electric node 0 with demand 50 and a heat node 1 with demand 25, not
+/// connected (their line has capacity 0), a SlackUnitBlock with cost 50 on
+/// node 0 and one with cost 30 on node 1, and a ConversionUnitBlock with its
+/// electricity e in [ 0 , 10 u ] on node 0 and its heat h = e / 2 on node
+/// 1, at cost 10 per unit of e. The asset is the conversion unit,
+/// represented by its scale, at the price c per copy: each copy saves
+/// 40 * 10 + 30 * 5 = 550, hence for c = 100 the value is 3250 - 450 x up
+/// to x = 5, where both demands are covered, and 1000 + 100 ( x - 5 )
+/// beyond
+
+static netCDF::NcGroup conversion_nodes( double c )
+{
+ netCDF::NcGroup u;
+ auto g = investment( 0 , 0 , c , 0 , u );
+
+ u.addDim( "TimeHorizon" , 1 );
+ u.addDim( "NumberUnits" , 3 );
+ auto ng = u.addDim( "NumberElectricalGenerators" , 4 );
+ auto nn = u.addDim( "NumberNodes" , 2 );
+ auto nl = u.addDim( "NumberLines" , 1 );
+ auto th = u.getDim( "TimeHorizon" );
+
+ put_uint( u , "GeneratorNode" , ng , { 0 , 1 , 0 , 1 } );
+ put( u , "ActivePowerDemand" , { nn , th } , { 50 , 25 } );
+ put_uint( u , "StartLine" , nl , { 0 } );
+ put_uint( u , "EndLine" , nl , { 1 } );
+ put( u , "MinPowerFlow" , nl , { 0 } );
+ put( u , "MaxPowerFlow" , nl , { 0 } );
+
+ auto t = u.addGroup( "UnitBlock_0" );
+ t.putAtt( "type" , "ConversionUnitBlock" );
+ auto gg = t.addDim( "NumberGenerators" , 2 );
+ auto nr = t.addDim( "NumberOperatingRows" , 1 );
+ put( t , "MinPower" , { th , gg } , { 0 , 0 } );
+ put( t , "MaxPower" , { th , gg } , { 10 , 5 } );
+ put( t , "OperatingMatrix" , { nr , gg } , { -0.5 , 1 } );
+ put( t , "OperatingLHS" , { th , nr } , { 0 } );
+ put( t , "OperatingRHS" , { th , nr } , { 0 } );
+ put( t , "LinearTerm" , { th , gg } , { 10 , 0 } );
+ put_int( t , "InitUpDownTime" , 1 );
+
+ slack( u.addGroup( "UnitBlock_1" ) , 100 , 50 );
+ slack( u.addGroup( "UnitBlock_2" ) , 100 , 30 );
+ return( g );
+ }
+
+/*--------------------------------------------------------------------------*/
 /// the InvestmentBlock of the group g, configured by IBOCfg.txt, and its
 /// InvestmentFunction in f
 
@@ -580,6 +630,32 @@ static void test_scaled_zero_copies( void )
  }
 
 /*--------------------------------------------------------------------------*/
+/// the linearization with respect to the scale of a ConversionUnitBlock,
+/// whose two generators are on two nodes: at one copy against the finite
+/// differences, at no copy the value of a copy solved alone, - 550, and the
+/// cutting plane method from 0 has to reach the optimum 1000 at 5
+
+static void test_scaled_conversion( void )
+{
+ InvestmentFunction * f;
+ auto ib = load( conversion_nodes( 100 ) , f );
+ check_linearization( f , 1 , 0.05 , 2800 , "the scale of a conversion "
+		      "unit" );
+ double g;
+ const auto v = value( f , 0 , g );
+ check( close( v , 3250 ) , "conversion, no copies: value " +
+	std::to_string( v ) + " instead of 3250" );
+ check( close( g , -550 ) , "conversion, no copies: linearization " +
+	std::to_string( g ) + " instead of -550" );
+ double x;
+ const auto best = cutting_plane( f , 0 , 10 , x );
+ check( close( best , 1000 ) && close( x , 5 ) , "conversion: the cutting "
+	"plane method from 0 stops at " + std::to_string( x ) + " with " +
+	std::to_string( best ) + " instead of 5 with 1000" );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
 /// the storage and the converter of a battery as two assets: at the optimum
 /// ( 100 , 50 ) the value is 5250, the linearizations where the converter
 /// binds ( 60 , 20 ) and where the storage does ( 30 , 40 ) are the costs
@@ -641,6 +717,7 @@ int main( void )
    test_scaled_reactive();
    test_scaled_zero_copies();
    test_battery_two_assets();
+   test_scaled_conversion();
   #else
    std::cout << "no :MILPSolver in the build: the linearizations are not "
              << "checked" << std::endl;
