@@ -843,7 +843,8 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
  f_blocks_are_updated = false;
  generator_node_map.clear(); // the generator map must be rebuilt
 
- if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
+ if( ( ! f_Observer ) ||
+     ( ! f_Observer->issue_mod( issueMod , Function::eModFVars ) ) )
   return;
 
  // Now issue the Modification.
@@ -882,7 +883,7 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
 
   // Now issue the Modification.
   // An InvestmentFunction is strongly quasi-additive.
-  if( f_Observer && f_Observer->issue_mod( issueMod ) )
+  if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) )
    f_Observer->add_Modification( std::make_shared< C05FunctionModVarsRngd >
                                  ( this , std::move( vars ) , range , 0 ,
                                    Observer::par2concern( issueMod ) ) ,
@@ -925,7 +926,7 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
                               v_disinvestment_cost_it.second );
  };
 
- if( f_Observer && f_Observer->issue_mod( issueMod ) ) {
+ if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) ) {
   // Somebody is there: meanwhile, prepare data for the Modification
 
   Vec_p_Var vars( range.second - range.first );
@@ -994,7 +995,7 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
 
   // Now issue the Modification: note that the subset is empty.
   // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
-  if( f_Observer && f_Observer->issue_mod( issueMod ) )
+  if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) )
    f_Observer->add_Modification( std::make_shared< C05FunctionModVarsSbst >
                                  ( this , std::move( vars ) , Subset() , true ,
                                    0 , Observer::par2concern( issueMod ) ) ,
@@ -1022,7 +1023,7 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
   compact( v_x , indices );
  };
 
- if( f_Observer && f_Observer->issue_mod( issueMod ) ) {
+ if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) ) {
   Vec_p_Var vars( indices.size() );
   auto its = vars.begin();
   for( auto nm : indices )
@@ -2098,7 +2099,8 @@ void InvestmentFunction::store_linearization( Index name , ModParam issueMod )
  global_pool.store( get_linearization_constant() , v_linearization , name ,
                     f_diagonal_linearization_required );
 
- if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
+ if( ( ! f_Observer ) ||
+     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
   return;
 
  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
@@ -2117,7 +2119,8 @@ void InvestmentFunction::store_combination_of_linearizations
  global_pool.store_combination_of_linearizations( coefficients , name ,
                                                   AAccMlt );
 
- if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
+ if( ( ! f_Observer ) ||
+     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
   return;
 
  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
@@ -2134,7 +2137,8 @@ void InvestmentFunction::delete_linearization( const Index name ,
                                                ModParam issueMod ) {
  global_pool.delete_linearization( name );
 
- if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
+ if( ( ! f_Observer ) ||
+     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
   return;
 
  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
@@ -2150,7 +2154,8 @@ void InvestmentFunction::delete_linearizations( Subset && which , bool ordered ,
                                                 ModParam issueMod ) {
  global_pool.delete_linearizations( which , ordered );
 
- if( ( ! f_Observer ) || ( ! f_Observer->issue_mod( issueMod ) ) )
+ if( ( ! f_Observer ) ||
+     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
   return;
 
  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
