@@ -781,6 +781,21 @@ class InvestmentFunction : public C05Function , public Block {
   * - "BlockSolverConfig": a pointer to a BlockSolverConfig to be applied to
   *    the inner Block of this BendersBFunction.
   *
+  * - "UnitBlockSolverConfig": a pointer to the BlockSolverConfig of the
+  *    copy of a unit with no copies, which the derivative with respect to the
+  *    number of copies solves alone [see
+  *    UCBlock::get_replicate_linearization()]. This InvestmentFunction does not use it: it gives a clone of it to
+  *    every UCBlock of the inner Block, as the extra Configuration of its
+  *    BlockConfig, where the UCBlock reads it. The Solver is applied to an
+  *    AbstractBlock that holds the copy as its sub-Block, hence it has to
+  *    handle a Block with sub-Block (e.g., a :MILPSolver), and it has to
+  *    solve the copy as the unit is solved in the inner Block (e.g., its
+  *    continuous relaxation, if that is what the inner Block is solved for).
+  *    If it is not given, the UCBlock uses a clone of the Solver registered
+  *    with it, i.e., the unit is solved by the same Solver, with the same
+  *    parameters, that solves it in the inner Block; with any other inner
+  *    Block it has to be given, if a scaled UnitBlock can have no copies.
+  *
   * If a key that is not any of the above is provided, an exception is
   * thrown. No pointer is kept by the InvestmentFunction, which keeps a clone
   * of what it needs, so the caller can (and is responsible to) delete any
@@ -803,7 +818,10 @@ class InvestmentFunction : public C05Function , public Block {
   * pointer to the BlockConfig (if provided) in the extra Configuration is
   * nullptr, then (2) above is performed. If the pointer to the
   * BlockSolverConfig (if provided) in the extra Configuration is nullptr,
-  * then (3) above is performed.
+  * then (3) above is performed, and the BlockSolverConfig given with
+  * "UnitBlockSolverConfig" is taken back from the UCBlock as well. If the
+  * pointer to the "UnitBlockSolverConfig" (if provided) is nullptr, only the
+  * latter is done.
   *
   * @param scfg a pointer to a ComputeConfig. */
 
@@ -2208,6 +2226,9 @@ class InvestmentFunction : public C05Function , public Block {
   * apply() uses is per-Block. Empty if the inner Blocks have not been
   * BlockSolverConfig-ured. */
 
+ bool f_unit_BSC_given = false;
+ ///< true if a "UnitBlockSolverConfig" was given to the UCBlock
+
  bool f_blocks_are_updated = false;
  ///< indicates whether the sub-Blocks are updated
 
@@ -2863,6 +2884,18 @@ class InvestmentFunction : public C05Function , public Block {
  /// reset the BlockSolverConfig of the inner Block to the default one
 
  void set_default_inner_Block_BlockSolverConfig();
+
+/*--------------------------------------------------------------------------*/
+ /// gives \p bsc to every UCBlock of the inner Block, or takes it back
+ /** Gives a clone of \p bsc to every UCBlock of the inner Block as the
+  * extra Configuration of its BlockConfig, which is where
+  * UCBlock::get_replicate_linearization() reads the BlockSolverConfig of the
+  * copy of a unit with no copies. If \p bsc is nullptr, what was given is
+  * taken back by giving each UCBlock an empty BlockSolverConfig, which it
+  * reads as none: nothing is done if nothing was given. A UCBlock that is not
+  * there is an error when something is given, and is skipped otherwise. */
+
+ void set_unit_BlockSolverConfig( const BlockSolverConfig * bsc );
 
 /*--------------------------------------------------------------------------*/
  /// remove the Solver that this InvestmentFunction registered in the Blocks

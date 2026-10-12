@@ -475,6 +475,40 @@ void InvestmentFunction::set_default_inner_Block_BlockConfig() {
 
 void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
  unconfigure_inner_Block_Solver();
+ set_unit_BlockSolverConfig( nullptr );
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::set_unit_BlockSolverConfig
+( const BlockSolverConfig * bsc ) {
+ if( ( ! bsc ) && ( ! f_unit_BSC_given ) )
+  return;
+
+ const auto num_stages = get_number_stages();
+
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+  for( Index stage = 0 ; stage < num_stages ; ++stage ) {
+   const auto ucblock = get_ucblock( stage , i );
+   if( ! ucblock ) {
+    if( ! bsc )
+     continue;
+    throw( std::logic_error( "InvestmentFunction::set_unit_BlockSolverConfig: "
+                             "the inner Block has no UCBlock in stage " +
+                             std::to_string( stage ) + " of sub-Block " +
+                             std::to_string( i ) ) );
+    }
+
+   // a differential BlockConfig with only the extra part: the other
+   // Configuration of the UCBlock are left as they are
+   auto config = new BlockConfig( true );
+   config->f_extra_Configuration = bsc ? bsc->clone()
+                                       : new BlockSolverConfig();
+   config->apply( ucblock );
+   delete config;
+   }
+
+ f_unit_BSC_given = bsc != nullptr;
 }
 
 /*--------------------------------------------------------------------------*/
@@ -579,9 +613,24 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
              "BlockSolverConfig" ) );
     }
    else
-    // An invalid key has been provided.
-    throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
-				  "invalid key: " + key ) );
+    if( key == "UnitBlockSolverConfig" ) {
+     if( ! config ) {
+      if( ! scfg->diff() )
+       set_unit_BlockSolverConfig( nullptr );
+      }
+     else
+      if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) )
+       set_unit_BlockSolverConfig( bsc );
+      else
+       throw( std::invalid_argument(
+	      "InvestmentFunction::set_ComputeConfig: the Configuration "
+	      "associated with key \"UnitBlockSolverConfig\" is not a "
+	      "BlockSolverConfig" ) );
+     }
+    else
+     // An invalid key has been provided.
+     throw( std::invalid_argument( "InvestmentFunction::set_ComputeConfig: "
+				   "invalid key: " + key ) );
   }
  }
 

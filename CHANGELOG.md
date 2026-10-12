@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the key "UnitBlockSolverConfig" of `InvestmentFunction::set_ComputeConfig()`,
+  the `BlockSolverConfig` of the copy of a unit with no copies, which the
+  derivative by copies of a `UCBlock` minimises (`UCBlock` documents it);
+  `InvestmentFunction` gives a clone of it to every `UCBlock` of the inner
+  Block, as the extra Configuration of its `BlockConfig`, and takes it back
+  when the `BlockSolverConfig` of the inner Block is reset. Without it a
+  `UCBlock` inner Block solves the copy by the Solver registered with it;
+  any other inner Block needs it when an asset can have no copies
+
 - an investment in a `ConversionUnitBlock` is represented by its scale
   factor, as for a `ThermalUnitBlock`, where the unit was refused as
   unrecognized; the unit test checks its linearization
