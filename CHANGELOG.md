@@ -182,6 +182,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `InvestmentFunction` no longer looks at the class of its inner Block while
+  it computes, but for an `SDDPBlock`: when the inner Block is set it keeps
+  an `AbstractPath` to each Block the investment is written into and read
+  back from (each leaf of a `TwoStageStochasticBlock` or
+  `MultiStageStochasticBlock`, else the inner Block itself), the Solver is
+  the first one registered with the inner Block, and the names the instance
+  does not give are worked out of the classes of the units then, not at the
+  first `compute()`, and are not written by `serialize()`. A name
+  "<class>::<method>" is called only on a Block of that class, and otherwise
+  the first `compute()` fails, where a Block of another class was cast to
+  `UCBlock` and refused
+
 - the instances of `data/` are downloaded and extracted by the targets
   `download_investment_<fmt>` and `extract_investment_<fmt>`, written as
   in every module that keeps its instances in the Package Registry, and

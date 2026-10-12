@@ -126,6 +126,7 @@ InvestmentFunction::InvestmentFunction
  v_asset_type = std::move( asset_type );
  v_cost = std::move( cost );
  v_disinvestment_cost = std::move( disinvestment_cost );
+ set_asset_names();   // the inner Block came before the assets
 
  f_violated_constraint = { Inf< Index >() , eLHS };
 
@@ -251,7 +252,16 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  if( ! deserialize_dim( group , "NumConstraints" , num_constraints ) )
   num_constraints = 0;
 
- // Deserialize the assets
+ // Deserialize the assets; names worked out for an inner Block read before
+ // are not those of the instance [see set_asset_names()]
+
+ if( f_derived_names ) {
+  v_asset_setter_name.clear();
+  v_asset_linearization_name.clear();
+  }
+ if( f_derived_cuts )
+  v_asset_feasibility_cut.clear();
+ f_derived_names = f_derived_cuts = false;
 
  if( num_assets ) {
 
@@ -498,22 +508,22 @@ void InvestmentFunction::set_unit_BlockSolverConfig
 
  for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
   for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-   const auto ucblock = get_ucblock( stage , i );
-   if( ! ucblock ) {
+   const auto piece = get_piece( stage , i );
+   if( ! piece ) {
     if( ! bsc )
      continue;
     throw( std::logic_error( "InvestmentFunction::set_unit_BlockSolverConfig: "
-                             "the inner Block has no UCBlock in stage " +
+                             "the inner Block has no Block in stage " +
                              std::to_string( stage ) + " of sub-Block " +
                              std::to_string( i ) ) );
     }
 
    // a differential BlockConfig with only the extra part: the other
-   // Configuration of the UCBlock are left as they are
+   // Configuration of the Block are left as they are
    auto config = new BlockConfig( true );
    config->f_extra_Configuration = bsc ? bsc->clone()
                                        : new BlockSolverConfig();
-   config->apply( ucblock );
+   config->apply( piece );
    delete config;
    }
 
@@ -1093,15 +1103,19 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ,
  ::serialize( group , "AssetType" , netCDF::NcUint() , NumAssets ,
               v_asset_type );
 
- ::serialize( group , "AssetSetter" , NumAssets , v_asset_setter_name );
- ::serialize( group , "AssetLinearization" , NumAssets ,
-              v_asset_linearization_name );
+ // the names worked out of the classes are not written [see
+ // set_asset_names()], so that the instance is written as it was read
+ if( ! f_derived_names ) {
+  ::serialize( group , "AssetSetter" , NumAssets , v_asset_setter_name );
+  ::serialize( group , "AssetLinearization" , NumAssets ,
+               v_asset_linearization_name );
+  }
 
  if( ! v_asset_signature.empty() )
   ::serialize( group , "AssetSignature" , netCDF::NcUint() , NumAssets ,
                v_asset_signature );
 
- if( ! v_asset_feasibility_cut.empty() )
+ if( ( ! v_asset_feasibility_cut.empty() ) && ( ! f_derived_cuts ) )
   ::serialize( group , "AssetFeasibilityCut" , netCDF::NcUint() , NumAssets ,
                v_asset_feasibility_cut );
 
@@ -1217,8 +1231,16 @@ int InvestmentFunction::compute( bool changedvars ) {
   ~Unlock() { if( block ) block->unlock( id ); }
   } unlock{ owned ? nullptr : v_Block.front() , f_id };
 
+ // the pieces of the inner Block, set with it [see set_pieces()], say that
+ // the same computation serves all but an SDDPBlock: fix the investment in
+ // each piece, solve the inner Block and read value and linearization off
+ // its Solver. What a TwoStageStochasticBlock adds is only that its pieces
+ // are its leaves, and that the value it returns is already the expected one
+ // over the scenarios
  int status;
- if( get_sddp_block() ) {
+ if( ! v_pieces.empty() )
+  status = compute_UCBlock( changedvars , owned );
+ else if( get_sddp_block() ) {
   status = compute_SDDPBlock( changedvars , owned );
 #ifdef USE_MPI
   // only rank 0 simulates [see compute_SDDPBlock()], and every other rank
@@ -1234,13 +1256,6 @@ int InvestmentFunction::compute( bool changedvars ) {
   boost::mpi::broadcast( world , v_linearization , 0 );
 #endif
   }
- else if( get_ucblock() || get_tssb_block() )
-  // the same computation serves both: fix the investment in the inner
-  // Block, solve it and read value and linearization off its Solver. What a
-  // TwoStageStochasticBlock adds is only that the investment is written into
-  // each scenario, which update_blocks() takes care of, and that the value
-  // it returns is already the expected one over the scenarios
-  status = compute_UCBlock( changedvars , owned );
  else
   throw( std::invalid_argument( "InvestmentFunction::compute: "
                                 "invalid inner Block." ) );
@@ -1255,7 +1270,7 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  // Since the inner Solver may need to lock the inner Block, the
  // InvestmentFunction lends its identity to the inner Solver.
 
- auto solver = get_ucblock_solver( 0 , 0 );
+ auto solver = get_inner_solver();
  assert( solver );
 
  void * solver_id = solver->id();
@@ -2460,43 +2475,31 @@ void InvestmentFunction::add_Modification( sp_Mod mod ,
 /*--------------------------------------------------------------------------*/
 
 int InvestmentFunction::get_inner_block_objective_sense() const {
- if( const auto inner_block = get_ucblock( 0 , 0 ) )
-  return( inner_block->get_objective_sense() );
- // an inner Block with no UCBlock is an error that compute() reports at the
- // worst value, whose sign is asked here: the inner Block answers for its
- // sub-Blocks, so that the report does not fail in turn
  if( v_Block.empty() || ( ! v_Block.front() ) )
   return( Objective::eUndef );
+ if( const auto piece = get_piece( 0 , 0 ) )
+  return( piece->get_objective_sense() );
+ // an inner Block with no piece is an error that compute() reports at the
+ // worst value, whose sign is asked here: the inner Block answers for its
+ // sub-Blocks, so that the report does not fail in turn
  return( v_Block.front()->get_objective_sense() );
 }
 
 /*--------------------------------------------------------------------------*/
 
-UCBlock * InvestmentFunction::get_ucblock( Index stage , Index i ) const {
- if( auto ucblock = get_ucblock() )
-  return( ucblock );
- // in a TwoStageStochasticBlock the here-and-now Variable live in the Block
- // the first-stage AbstractPath are resolved against, which for a plain one
- // is the scenario sub-Block itself and for a nested one is the sub-Block
- // the nesting descends to
- if( const auto tssb = get_tssb_block() )
-  // every leaf of the scenario structure carries its own copy of the units
-  // the investment scales, and a nested one has more leaves than scenarios
-  return( dynamic_cast< UCBlock * >( tssb->get_leaf_block( i ) ) );
+Block * InvestmentFunction::get_piece( Index stage , Index i ) const {
+ if( ! v_pieces.empty() )
+  return( i < v_pieces.size() ?
+          v_pieces[ i ].get_element< Block >( v_Block.front() ) : nullptr );
+ if( ! get_sddp_block() )
+  return( nullptr );
  if( v_Block.size() > 1 )
   assert( i < v_Block.size() );
  else
   assert( i < f_num_sub_blocks_per_stage );
  auto benders_function = get_benders_function( stage , i );
  assert( benders_function );
- return( dynamic_cast< UCBlock * >( benders_function->get_inner_block() ) );
-}
-
-/*--------------------------------------------------------------------------*/
-
-UCBlock * InvestmentFunction::get_ucblock() const {
- assert( ! v_Block.empty() );
- return( dynamic_cast< UCBlock * >( v_Block.front() ) );
+ return( benders_function->get_inner_block() );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2504,13 +2507,6 @@ UCBlock * InvestmentFunction::get_ucblock() const {
 SDDPBlock * InvestmentFunction::get_sddp_block() const {
  assert( ! v_Block.empty() );
  return( dynamic_cast< SDDPBlock * >( v_Block.front() ) );
-}
-
-/*--------------------------------------------------------------------------*/
-
-TwoStageStochasticBlock * InvestmentFunction::get_tssb_block() const {
- assert( ! v_Block.empty() );
- return( dynamic_cast< TwoStageStochasticBlock * >( v_Block.front() ) );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2523,23 +2519,99 @@ SDDPBlock * InvestmentFunction::get_sddp_block( Index i ) const {
 
 /*--------------------------------------------------------------------------*/
 
-CDASolver * InvestmentFunction::get_ucblock_solver( Index stage ,
-                                                    Index i ) const {
- // for a TwoStageStochasticBlock the Solver to drive is the one of the
- // TwoStageStochasticBlock itself, which solves all the scenarios at once,
- // not the one of any single scenario
- if( const auto tssb = get_tssb_block() ) {
-  if( ! tssb->get_registered_solvers().empty() )
-   return( dynamic_cast< CDASolver * >
-           ( tssb->get_registered_solvers().front() ) );
+CDASolver * InvestmentFunction::get_inner_solver( void ) const {
+ if( v_Block.empty() || ( ! v_Block.front() ) ||
+     v_Block.front()->get_registered_solvers().empty() )
   return( nullptr );
+ return( dynamic_cast< CDASolver * >
+         ( v_Block.front()->get_registered_solvers().front() ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::set_pieces( void ) {
+ v_pieces.clear();
+
+ // the one place that looks at the class of the inner Block: every leaf of
+ // a TwoStageStochasticBlock carries its own copy of the assets, and a
+ // nested one has more leaves than scenarios; an SDDPBlock, or more than one
+ // inner Block, is reached by its class [see get_piece()]
+ if( ( v_Block.size() == 1 ) && v_Block.front() &&
+     ( ! dynamic_cast< SDDPBlock * >( v_Block.front() ) ) ) {
+  const auto inner = v_Block.front();
+  if( const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( inner ) )
+   for( Index l = 0 ; l < tssb->get_number_leaves() ; ++l )
+    v_pieces.emplace_back( tssb->get_leaf_block( l ) , inner );
+  else
+   v_pieces.emplace_back( inner , inner );
   }
 
- if( auto ucblock = get_ucblock( stage , i ) )
-  if( ! ucblock->get_registered_solvers().empty() )
-   return( dynamic_cast< CDASolver * >
-           ( ucblock->get_registered_solvers().front() ) );
- return( nullptr );
+ set_asset_names();
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::set_asset_names( void ) {
+
+ // names worked out for another inner Block are worked out again
+ if( f_derived_names ) {
+  v_asset_setter_name.clear();
+  v_asset_linearization_name.clear();
+  if( f_derived_cuts )
+   v_asset_feasibility_cut.clear();
+  f_derived_names = f_derived_cuts = false;
+  }
+
+ const auto num_assets = v_asset_indices.size();
+ if( ( ! num_assets ) || ( ! v_asset_setter_name.empty() ) ||
+     v_Block.empty() || ( ! v_Block.front() ) )
+  return;
+ const auto piece = get_piece( 0 , 0 );
+ if( ! piece )
+  return;
+
+ /* An instance written before the assets named their methods says only
+  * their type: a unit is then resized if its class offers it, and
+  * replicated otherwise, which is what such an instance has always meant.
+  * The units of a UCBlock are its first sub-Blocks. A name left empty, that
+  * of a unit the piece has not, makes the first compute() fail [see
+  * resolve_asset_methods()]. */
+
+ v_asset_setter_name.resize( num_assets );
+ v_asset_linearization_name.resize( num_assets );
+ f_derived_cuts = v_asset_feasibility_cut.empty();
+ if( f_derived_cuts )
+  v_asset_feasibility_cut.assign( num_assets , 1 );
+
+ for( Index i = 0 ; i < num_assets ; ++i ) {
+
+  // a line; else a unit, or the second size of a unit, which takes the
+  // names of its first, the unit being the same
+  if( v_asset_type[ i ] == eLine ) {
+   v_asset_setter_name[ i ] = "UCBlock::resize_line";
+   v_asset_linearization_name[ i ] = "UCBlock::get_resize_line_linearization";
+   continue;
+   }
+
+  if( v_asset_indices[ i ] >= piece->get_number_nested_Blocks() )
+   continue;
+  const auto & cls =
+   piece->get_nested_Block( v_asset_indices[ i ] )->classname();
+
+  if( Block::get_method_fs< Block::MF_dbl_it , Block::Range >
+       ( cls + "::resize" ) ) {
+   v_asset_setter_name[ i ] = "UCBlock::resize_unit";
+   v_asset_linearization_name[ i ] = "UCBlock::get_resize_unit_linearization";
+   }
+  else {
+   v_asset_setter_name[ i ] = "UCBlock::replicate";
+   v_asset_linearization_name[ i ] = "UCBlock::get_replicate_linearization";
+   if( f_derived_cuts )
+    v_asset_feasibility_cut[ i ] = 0;
+   }
+  }
+
+ f_derived_names = true;
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2593,7 +2665,7 @@ void InvestmentFunction::reset_linearization() {
 Function::FunctionValue
 InvestmentFunction::compute_farkas_value( Index stage ,
                                           Index sub_block_index ) {
- auto block = get_ucblock( stage , sub_block_index );
+ auto block = get_piece( stage , sub_block_index );
  if( ! block )
   return( 0 );
 
@@ -2656,10 +2728,10 @@ void InvestmentFunction::add_asset_linearization
 ( Index stage , Index sub_block_index , std::vector< double > & linearization ,
   bool direction ) {
 
- const auto ucblock = get_ucblock( stage , sub_block_index );
+ const auto ucblock = get_piece( stage , sub_block_index );
  if( ! ucblock )
   throw( std::logic_error( "InvestmentFunction::update_linearization: the "
-                           "inner Block has no UCBlock in stage " +
+                           "inner Block has no Block in stage " +
                            std::to_string( stage ) + " of sub-Block " +
                            std::to_string( sub_block_index ) ) );
 
@@ -2729,7 +2801,7 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
  // Asking the type again would leave out any other inner Block, a
  // TwoStageStochasticBlock in particular, for which both casts are null
  auto * solver = v_greedy_solvers.empty()
-                 ? get_ucblock_solver( 0 , sub_block_index )
+                 ? get_inner_solver()
                  : get_solver< CDASolver >( v_greedy_solvers[
 						      sub_block_index ] );
 
@@ -2855,58 +2927,19 @@ void InvestmentFunction::resolve_asset_methods( void ) {
   }
 
  // the names of the two methods of each asset, and whether its getter gives
- // a feasibility cut: those of the instance, or worked out below
+ // a feasibility cut: those of the instance, or worked out of the classes of
+ // the units when the inner Block was set [see set_asset_names()]
 
- auto setter_name = v_asset_setter_name;
- auto linearization_name = v_asset_linearization_name;
- auto feasibility_cut = v_asset_feasibility_cut;
+ const auto & setter_name = v_asset_setter_name;
+ const auto & linearization_name = v_asset_linearization_name;
+ const auto & feasibility_cut = v_asset_feasibility_cut;
 
- if( setter_name.empty() && num_assets ) {
-
-  /* An instance written before the assets named their methods says only
-   * their type: a unit is then resized if its class offers it, and
-   * replicated otherwise, which is what such an instance has always meant.
-   * Being the conversion of the instance to the names, this is the one place
-   * here that looks at the class of a unit, and only to choose a name. */
-
-  setter_name.resize( num_assets );
-  linearization_name.resize( num_assets );
-  const bool cuts_given = ! feasibility_cut.empty();
-  if( ! cuts_given )
-   feasibility_cut.assign( num_assets , 1 );
-
-  for( Index i = 0 ; i < num_assets ; ++i ) {
-
-   // a line; else a unit, or the second size of a unit, which takes the
-   // names of its first, the unit being the same
-   if( v_asset_type[ i ] == eLine ) {
-    setter_name[ i ] = "UCBlock::resize_line";
-    linearization_name[ i ] = "UCBlock::get_resize_line_linearization";
-    continue;
-    }
-
-   const auto ucblock = get_ucblock( 0 , 0 );
-   if( ! ucblock )
-    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
-                             "asset " + std::to_string( i ) + " names no "
-                             "method, and the inner Block has no UCBlock "
-                             "to work it out of" ) );
-   const auto & cls =
-    ucblock->get_unit_block( v_asset_indices[ i ] )->classname();
-
-   if( Block::get_method_fs< Block::MF_dbl_it , Block::Range >
-        ( cls + "::resize" ) ) {
-    setter_name[ i ] = "UCBlock::resize_unit";
-    linearization_name[ i ] = "UCBlock::get_resize_unit_linearization";
-    }
-   else {
-    setter_name[ i ] = "UCBlock::replicate";
-    linearization_name[ i ] = "UCBlock::get_replicate_linearization";
-    if( ! cuts_given )
-     feasibility_cut[ i ] = 0;
-    }
-   }
-  }
+ for( Index i = 0 ; i < num_assets ; ++i )
+  if( ( i >= setter_name.size() ) || setter_name[ i ].empty() )
+   throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                            "asset " + std::to_string( i ) + " names no "
+                            "method, and none could be worked out of the "
+                            "class of its unit in the inner Block" ) );
 
  // the two assets of a pair name the same methods
 
@@ -3014,6 +3047,23 @@ void InvestmentFunction::resolve_asset_methods( void ) {
  for( auto & g : v_asset_groups )
   g.ordered = std::is_sorted( g.indices.begin() , g.indices.end() );
 
+ // a name is that of a method of a class, "<class>::<method>", which the
+ // methods factory calls on any Block it is given as if it were of that
+ // class: it is called only on the pieces of that class [see get_piece()]
+ for( const auto & g : v_asset_groups )
+  for( const auto & name : { g.setter_name , g.linearization_name } ) {
+   const auto cls = name.substr( 0 , name.find( "::" ) );
+   for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+    for( Index stage = 0 ; stage < get_number_stages() ; ++stage )
+     if( const auto piece = get_piece( stage , i ) ;
+         piece && ( piece->classname() != cls ) )
+      throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: '"
+                               + name + "' is a method of " + cls + ", and "
+                               "the Block of sub-Block " + std::to_string( i )
+                               + " in stage " + std::to_string( stage ) +
+                               " is a " + piece->classname() ) );
+   }
+
  f_methods_resolved = true;
 
 } // end( InvestmentFunction::resolve_asset_methods )
@@ -3058,10 +3108,10 @@ void InvestmentFunction::update_blocks() {
  for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
   for( Index stage = 0 ; stage < num_stages ; ++stage ) {
 
-   const auto ucblock = get_ucblock( stage , i );
+   const auto ucblock = get_piece( stage , i );
    if( ! ucblock )
     throw( std::logic_error( "InvestmentFunction::update_blocks: the inner "
-                             "Block has no UCBlock in stage " +
+                             "Block has no Block in stage " +
                              std::to_string( stage ) + " of sub-Block " +
                              std::to_string( i ) ) );
 
@@ -3094,13 +3144,8 @@ void InvestmentFunction::update_blocks() {
 /*--------------------------------------------------------------------------*/
 
 Index InvestmentFunction::get_number_investment_sub_blocks( void ) const {
- if( get_ucblock() )
-  return( 1 );
- if( const auto tssb = get_tssb_block() )
-  // the investment is the same in every leaf, being here-and-now, but it has
-  // to be written into each of them, and their number is not the number of
-  // scenarios once a scenario carries a subtree of its own
-  return( tssb->get_number_leaves() );
+ if( ! v_pieces.empty() )
+  return( v_pieces.size() );
  return( f_num_sub_blocks_per_stage );
 }  // end( InvestmentFunction::get_number_investment_sub_blocks )
 
@@ -3141,6 +3186,8 @@ Index InvestmentFunction::get_number_scenarios() const {
 Index InvestmentFunction::get_number_stages() const {
  if( v_Block.empty() )
   return( 0 );
+ if( ! v_pieces.empty() )
+  return( 1 );
  if( const auto sddp_block = get_sddp_block() )
   return( sddp_block->get_time_horizon() );
  return( 1 );

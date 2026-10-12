@@ -26,6 +26,8 @@
 
 #include <functional>
 
+#include "AbstractPath.h"
+
 #include "Block.h"
 
 #include "C05Function.h"
@@ -45,12 +47,7 @@ namespace SMSpp_di_unipi_it
 
  class SDDPBlock;              // forward declaration of SDDPBlock
 
- class TwoStageStochasticBlock;   // forward declaration of
-                                  // TwoStageStochasticBlock
-
  class SDDPSolver;             // forward declaration of SDDPSolver
-
- class UCBlock;                // forward declaration of UClock
 
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
@@ -950,6 +947,7 @@ class InvestmentFunction : public C05Function , public Block {
    block->set_f_Block( this );
 
   send_nuclear_modification();
+  set_pieces();
   }
 
 /*--------------------------------------------------------------------------*/
@@ -1000,6 +998,7 @@ class InvestmentFunction : public C05Function , public Block {
     block->set_f_Block( this );
 
   send_nuclear_modification();
+  set_pieces();
   }
 
 /*--------------------------------------------------------------------------*/
@@ -1786,11 +1785,13 @@ class InvestmentFunction : public C05Function , public Block {
   *   "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization",
   *   "UCBlock::replicate" and "UCBlock::get_replicate_linearization", or
   *   "UCBlock::resize_line" and "UCBlock::get_resize_line_linearization".
-  *   This InvestmentFunction does not know what they do. The assets with the
-  *   same setter are written with one call, and read back with one call.
-  *   The two variables are optional, and go together: if they are not
-  *   provided, the names are worked out the first time the inner Block is
-  *   written, from "AssetType": a line is "UCBlock::resize_line", and a unit
+  *   These Blocks are reached by the paths set with the inner Block [see
+  *   set_pieces()], and a name "<class>::<method>" is called only on a Block
+  *   of that class. This InvestmentFunction does not know what they do. The
+  *   assets with the same setter are written with one call, and read back
+  *   with one call. The two variables are optional, and go together: if they
+  *   are not provided, the names are worked out when the inner Block is set,
+  *   from "AssetType": a line is "UCBlock::resize_line", and a unit
   *   is "UCBlock::resize_unit" if its class registers "<classname>::resize",
   *   and "UCBlock::replicate" otherwise; the second size of a unit takes the
   *   names of its first.
@@ -2418,6 +2419,17 @@ class InvestmentFunction : public C05Function , public Block {
  bool f_methods_resolved = false;
  ///< whether v_asset_groups has been filled
 
+ std::vector< AbstractPath > v_pieces;
+ ///< the paths, relative to the inner Block, to the Blocks the investment is
+ ///< written into and its linearization read from [see set_pieces()]
+
+ bool f_derived_names = false;
+ ///< whether the names of the methods of the assets are worked out of their
+ ///< classes rather than given [see set_asset_names()]
+
+ bool f_derived_cuts = false;
+ ///< whether AssetFeasibilityCut is worked out with the names
+
  std::vector< double > v_linearization;
  ///< linearization associated with the most recent call to compute()
 
@@ -2831,43 +2843,21 @@ class InvestmentFunction : public C05Function , public Block {
  void send_nuclear_modification( const Observer::ChnlName chnl = 0 );
 
 /*--------------------------------------------------------------------------*/
- /// return a pointer to the Solver of the UCBlock associated with \p stage
- /** This function returns a pointer to the Solver of the UCBlock associated
-  * with the given \p stage in the \p i-th sub-Block..
-  *
-  * @param stage A stage.
-  *
-  * @param i The index of a sub-Block.
-  *
-  * @return A pointer to the Solver of the UCBlock associated with the given
-  *         \p stage in the \p i-th sub-Block. */
+ /// the Solver of the inner Block, the first one registered there
+ /** Returns the first Solver registered in the inner Block, which solves it
+  * as a whole (all the scenarios at once, for a TwoStageStochasticBlock), as
+  * a CDASolver, or nullptr if there is none or it is not one. */
 
- CDASolver * get_ucblock_solver( Index stage , Index i ) const;
+ CDASolver * get_inner_solver( void ) const;
 
 /*--------------------------------------------------------------------------*/
- /// returns a pointer to the UCBlock associated with the given \p stage
- /** This function returns a pointer to the UCBlock associated with
-  * the given \p stage in the \p i-th sub-Block.
-  *
-  * @param stage A stage.
-  *
-  * @param i The index of a sub-Block.
-  *
-  * @return A pointer to the UCBlock associated with the given \p stage in the
-  *         \p i-th sub-Block. */
+ /// the Block of the \p i-th piece, in the given \p stage
+ /** Returns the Block into which the investment is written, and from which
+  * its linearization is read, of the \p i-th piece of the inner Block [see
+  * v_pieces], or, for an SDDPBlock, the one of the given \p stage in its
+  * \p i-th sub-Block. */
 
- UCBlock * get_ucblock( Index stage , Index i ) const;
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the UCBlock (if any)
- /** If the inner Block of this function is an UCBlock, it returns a pointer
-  * to it. Otherwise, it returns nullptr.
-  *
-  * @return A pointer to the UCBlock of this InvestmentFunction. If the inner
-  *         Block of this InvestmentFunction is not an UCBlock, it return
-  *         nullptr. */
-
- UCBlock * get_ucblock( void ) const;
+ Block * get_piece( Index stage , Index i ) const;
 
 /*--------------------------------------------------------------------------*/
  /// returns a pointer to the SDDPBlock (if any)
@@ -2881,20 +2871,36 @@ class InvestmentFunction : public C05Function , public Block {
  SDDPBlock * get_sddp_block( void ) const;
 
 /*--------------------------------------------------------------------------*/
- /// the inner Block of this function, if it is a TwoStageStochasticBlock
- /** If the inner Block of this function is a TwoStageStochasticBlock, it
-  * returns a pointer to it. Otherwise, it returns nullptr.
-  *
-  * A TwoStageStochasticBlock as the inner Block is the "Benders form" of a
-  * two-stage stochastic problem: the here-and-now Variable are the ones of
-  * this InvestmentFunction, hence they exist in a single copy and outside
-  * the scenarios, rather than being replicated in each of them and tied by
-  * the non-anticipativity Constraint of the extensive form.
-  *
-  * @return A pointer to the TwoStageStochasticBlock of this
-  *         InvestmentFunction, or nullptr if the inner Block is not one. */
+ /// sets the pieces of the inner Block, and the names they need
+ /** Sets v_pieces as the inner Block is: a path to each leaf of a
+  * TwoStageStochasticBlock (or MultiStageStochasticBlock), to the inner
+  * Block itself for any other one, none for an SDDPBlock, or more than one
+  * inner Block, whose sub-Blocks are reached by their class. Then it works
+  * out the names of the methods of the assets, if the instance gives none
+  * [see set_asset_names()]. It is where the class of the inner Block is
+  * known, when the inner Block is set, so that compute() does not have
+  * to. */
 
- TwoStageStochasticBlock * get_tssb_block( void ) const;
+ void set_pieces( void );
+
+/*--------------------------------------------------------------------------*/
+ /// works out the names of the methods of the assets the instance does not
+ /// name
+ /** If the instance gives no "AssetSetter", the names are worked out of
+  * the class of each asset, and kept in v_asset_setter_name and
+  * v_asset_linearization_name: "UCBlock::resize_line" and
+  * "UCBlock::get_resize_line_linearization" for a line, and for a unit
+  * "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization" if
+  * its class registers "<class>::resize", "UCBlock::replicate" and
+  * "UCBlock::get_replicate_linearization" otherwise, with no feasibility
+  * cut if the instance does not say; the second size of a unit takes the
+  * names of its first. The class of unit u is that of the u-th sub-Block of
+  * the first piece, where a UCBlock has its units. Does nothing until both
+  * the assets and the inner Block are there, and works the names out again
+  * whenever the inner Block changes; serialize() writes only the names the
+  * instance gave. */
+
+ void set_asset_names( void );
 
 /*--------------------------------------------------------------------------*/
  /// the number of sub-Blocks that carry the investment
