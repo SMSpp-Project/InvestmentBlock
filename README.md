@@ -71,13 +71,21 @@ the following:
   depends on the type of asset it is associated with.
 
   * Investing an amount x in a `ThermalUnitBlock` means that the unit is
-    scaled (see `ThermalUnitBlock::scale()`) by x.
+    scaled (see `ThermalUnitBlock::scale()`) by x. With no copies (x = 0)
+    the derivative is the minimum over one copy of the unit against the
+    current duals, solved by the `BlockSolverConfig` given with the key
+    "UnitBlockSolverConfig" of `InvestmentFunction::set_ComputeConfig()`, or
+    else by the Solver of the inner `UCBlock`.
 
   * For `BatteryUnitBlock` and `IntermittentUnitBlock`, two types of
     investments can be made. Considering an investment of an amount x, the
     unit may either be scaled by x (according to `UnitBlock::scale()`) or
     have its minimum and maximum power and storage levels scaled by x
-    using `set_kappa()`.
+    using `set_kappa()`. A `BatteryUnitBlock` sized this way has two sizes,
+    its storage and its converter: one asset sizes the two together, while
+    an asset of type 0 and one of type 2 on the same unit size them apart,
+    and are written to the unit together (see "AssetType" in
+    `InvestmentFunction`).
 
   * Investing an amount x in a transmission line means that its minimum and
     maximum power flow are scaled by x using `set_kappa()`.

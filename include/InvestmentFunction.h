@@ -385,9 +385,12 @@ class InvestmentFunction : public C05Function , public Block {
  *  @{ */
 
  /// public enum representing the types of assets
- /** Public enum representing the types of assets. */
+ /** Public enum representing the types of assets: a UnitBlock, a
+  * transmission line, and the second size of a UnitBlock that has two,
+  * which goes with an asset of type eUnitBlock on the same unit [see
+  * "AssetType" in deserialize()]. */
 
- enum AssetType { eUnitBlock = 0 , eLine = 1 };
+ enum AssetType { eUnitBlock = 0 , eLine = 1 , eSecondSize = 2 };
 
  /// public enum representing the sides of the linear constraints
  /** Public enum representing the sides of the linear constraints. */
@@ -1762,7 +1765,12 @@ class InvestmentFunction : public C05Function , public Block {
   * - The one-dimensional variable "AssetType", of type netCDF::Uint(), which
   *   is either a scalar or indexed over "NumAssets", indicating the type of
   *   the i-th asset. For a UnitBlock, the type is 0, and for a transmission
-  *   line, the type is 1. If it is a scalar, then we assume that AssetType[i]
+  *   line, the type is 1. A UnitBlock with two sizes, as a BatteryUnitBlock
+  *   with its storage and its converter, can be two assets: the first size
+  *   is the asset of type 0 and the second one an asset of type 2 with the
+  *   same index; the two are written together, the unit being handed the
+  *   two values, and an asset of type 2 with no asset of type 0 on the same
+  *   unit is refused. If it is a scalar, then we assume that AssetType[i]
   *   = AssetType[0] for all i in {0, ..., NumAssets - 1}. This variable is
   *   optional. If it is not provided, then we assume that AssetType[i] = 0
   *   for each i in {0, ..., NumAssets - 1}.
@@ -1784,14 +1792,21 @@ class InvestmentFunction : public C05Function , public Block {
   *   provided, the names are worked out the first time the inner Block is
   *   written, from "AssetType": a line is "UCBlock::resize_line", and a unit
   *   is "UCBlock::resize_unit" if its class registers "<classname>::resize",
-  *   and "UCBlock::replicate" otherwise.
+  *   and "UCBlock::replicate" otherwise; the second size of a unit takes the
+  *   names of its first.
   *
   * - The variable "AssetSignature", of type netCDF::NcUint, which is either
   *   a scalar or indexed over "NumAssets", saying with which parameters the
-  *   two methods of the i-th asset are registered. 0 is the only value today:
-  *   the setter takes ( MF_dbl_it , Subset && , bool ) and the getter
-  *   ( MF_dbl_msp , c_Subset & , bool ); any other value is refused. This
-  *   variable is optional. If it is not provided, then it is 0 everywhere.
+  *   two methods of the i-th asset are registered. With 0 the setter takes
+  *   ( MF_dbl_it , Subset && , bool ) and the getter ( MF_dbl_msp ,
+  *   c_Subset & , bool ); with 1, the value of the two assets of a pair
+  *   (types 0 and 2 on the same unit), the setter takes ( MF_dbl_sp ,
+  *   MF_dbl_sp , Subset && , bool ) and the getter ( MF_dbl_msp , MF_dbl_msp ,
+  *   c_Subset & , bool ), the first value of each pair for the asset of type
+  *   0 and the second for that of type 2. The two assets of a pair have the
+  *   same setter, getter and AssetFeasibilityCut. Any other value, or one
+  *   that does not match the pairs, is refused. This variable is optional.
+  *   If it is not provided, then it is 1 for the pairs and 0 elsewhere.
   *
   * - The variable "AssetFeasibilityCut", of type netCDF::NcUint, which is
   *   either a scalar or indexed over "NumAssets": 1 if the getter of the
@@ -2372,17 +2387,27 @@ class InvestmentFunction : public C05Function , public Block {
   std::string setter_name;         ///< the name of the setter
   std::string linearization_name;  ///< the name of the getter
 
-  Block::FunctionType< Block::MF_dbl_it , Block::Subset && , bool > * setter;
+  Block::FunctionType< Block::MF_dbl_it , Block::Subset && , bool > * setter =
+   nullptr;
   ///< writes the investment
 
   Block::QueryType< Block::MF_dbl_msp , Block::c_Subset & , bool > *
-   linearization;
+   linearization = nullptr;
   ///< reads the derivative back
+
+  Block::FunctionType< Block::MF_dbl_sp , Block::MF_dbl_sp , Block::Subset && ,
+                       bool > * pair_setter = nullptr;
+  ///< writes the two sizes of the units of a group of pairs, else nullptr
+
+  Block::QueryType< Block::MF_dbl_msp , Block::MF_dbl_msp ,
+                    Block::c_Subset & , bool > * pair_linearization = nullptr;
+  ///< reads the two derivatives back, for a group of pairs, else nullptr
 
   bool feasibility_cut;
   ///< whether the getter gives a feasibility cut [see AssetFeasibilityCut]
 
   Subset assets;   ///< the assets of the group, among those of this Function
+  Subset second_assets;  ///< in a group of pairs, the second size of each
   Subset indices;  ///< their indices in "Assets", what the methods are given
   bool ordered;    ///< whether indices is sorted
   };
@@ -2776,9 +2801,16 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * Called once, the first time the Blocks are updated, before the first
   * solve: a name that the methods factory does not have makes it throw,
-  * naming the asset. */
+  * naming the asset. The assets of type 0 and 2 on the same unit form a pair
+  * and go in a group of their own, written and read back with the two-span
+  * forms of their methods [see "AssetSignature" in serialize()]. */
 
  void resolve_asset_methods( void );
+
+/*--------------------------------------------------------------------------*/
+ /// the asset of type 0 on the unit of the asset j, or Inf< Index >()
+
+ Index first_size_of( Index j ) const;
 
 /*--------------------------------------------------------------------------*/
  /// writes the current values of the x variables into the inner Block

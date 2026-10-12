@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the type of asset 2, the second size of a unit that has two, for a
+  `BatteryUnitBlock` its converter: an asset of type 0 and one of type 2 on
+  the same unit form a pair, written and read back together through the
+  forms with two spans of their names, with `AssetSignature` 1, the first
+  value for the asset of type 0. A type 2 with no type 0 on its unit is
+  refused at load; a pair whose two assets name different methods, an
+  `AssetSignature` that does not match the pairs, and a pair on a unit
+  whose class has no form with two spans make the first `compute()` fail
+
 - the key "UnitBlockSolverConfig" of `InvestmentFunction::set_ComputeConfig()`,
   the `BlockSolverConfig` of the copy of a unit with no copies, which the
   derivative by copies of a `UCBlock` minimises (`UCBlock` documents it);

@@ -285,10 +285,10 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
   deserialize_one_each( group , "AssetSignature" , num_assets ,
                         v_asset_signature );
   for( const auto signature : v_asset_signature )
-   if( signature )
+   if( ( signature != 0 ) && ( signature != 1 ) )
     throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
                              "AssetSignature: " + std::to_string( signature )
-                             + "; 0 is the only one there is." ) );
+                             + "; it is 0 or 1." ) );
 
   deserialize_one_each( group , "AssetFeasibilityCut" , num_assets ,
                         v_asset_feasibility_cut );
@@ -306,6 +306,15 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
             ( "InvestmentFunction::deserialize: asset with index " +
               std::to_string( v_asset_indices[ i ] ) + " and type " +
               std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
+
+  // the second size of a unit goes with its first [see AssetType]
+  for( Index j = 0 ; j < v_asset_indices.size() ; ++j )
+   if( ( v_asset_type[ j ] == eSecondSize ) &&
+       ( first_size_of( j ) == Inf< Index >() ) )
+    throw( std::logic_error( "InvestmentFunction::deserialize: asset " +
+                             std::to_string( j ) + " is the second size of "
+                             "unit " + std::to_string( v_asset_indices[ j ] ) +
+                             ", which has no asset of type 0." ) );
 
   // Deserialize the lower bound on the active variables
 
@@ -2669,6 +2678,7 @@ void InvestmentFunction::add_asset_linearization
   * when it does not, the assets that it says to be replicated give none. */
 
  std::vector< double > answer;
+ std::vector< double > second_answer;
 
  for( const auto & group : v_asset_groups ) {
 
@@ -2681,8 +2691,20 @@ void InvestmentFunction::add_asset_linearization
                             "direction." ) );
 
   answer.resize( group.indices.size() );
-  std::invoke( *group.linearization , ucblock , Block::MF_dbl_msp( answer ) ,
-               group.indices , group.ordered );
+  if( group.pair_linearization ) {
+   // the two sizes of each unit, the second to the asset of type 2
+   second_answer.resize( group.indices.size() );
+   std::invoke( *group.pair_linearization , ucblock ,
+                Block::MF_dbl_msp( answer ) ,
+                Block::MF_dbl_msp( second_answer ) , group.indices ,
+                group.ordered );
+   for( Index k = 0 ; k < group.second_assets.size() ; ++k )
+    linearization[ asset_var( group.second_assets[ k ] ) ] +=
+     second_answer[ k ];
+   }
+  else
+   std::invoke( *group.linearization , ucblock , Block::MF_dbl_msp( answer ) ,
+                group.indices , group.ordered );
 
   for( Index k = 0 ; k < group.assets.size() ; ++k )
    linearization[ asset_var( group.assets[ k ] ) ] += answer[ k ];
@@ -2792,10 +2814,40 @@ void InvestmentFunction::resolve_asset_methods( void ) {
  const auto num_assets = v_asset_indices.size();
 
  for( Index i = 0 ; i < num_assets ; ++i )
-  if( ( v_asset_type[ i ] != eUnitBlock ) && ( v_asset_type[ i ] != eLine ) )
+  if( ( v_asset_type[ i ] != eUnitBlock ) && ( v_asset_type[ i ] != eLine ) &&
+      ( v_asset_type[ i ] != eSecondSize ) )
    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
                             "invalid type of asset " + std::to_string( i ) +
                             ": " + std::to_string( v_asset_type[ i ] ) ) );
+
+ // the pairs: the second size of a unit (type 2) and its first (type 0)
+
+ std::vector< Index > second( num_assets , Inf< Index >() );
+ for( Index j = 0 ; j < num_assets ; ++j )
+  if( v_asset_type[ j ] == eSecondSize ) {
+   const auto i = first_size_of( j );
+   if( i == Inf< Index >() )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "asset " + std::to_string( j ) + " is the "
+                             "second size of unit " +
+                             std::to_string( v_asset_indices[ j ] ) + ", "
+                             "which has no asset of type 0" ) );
+   second[ i ] = j;
+   }
+
+ // the signature of each asset is that of the pairs
+ for( Index i = 0 ; i < num_assets ; ++i ) {
+  const int expected = ( ( second[ i ] != Inf< Index >() ) ||
+                         ( v_asset_type[ i ] == eSecondSize ) ) ? 1 : 0;
+  if( ( ! v_asset_signature.empty() ) &&
+      ( v_asset_signature[ i ] != expected ) )
+   throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                            "asset " + std::to_string( i ) + " has "
+                            "AssetSignature " +
+                            std::to_string( v_asset_signature[ i ] ) + ", "
+                            "while it is " + std::to_string( expected ) +
+                            ( expected ? " in a pair" : " alone" ) ) );
+  }
 
  // the names of the two methods of each asset, and whether its getter gives
  // a feasibility cut: those of the instance, or worked out below
@@ -2820,6 +2872,8 @@ void InvestmentFunction::resolve_asset_methods( void ) {
 
   for( Index i = 0 ; i < num_assets ; ++i ) {
 
+   // a line; else a unit, or the second size of a unit, which takes the
+   // names of its first, the unit being the same
    if( v_asset_type[ i ] == eLine ) {
     setter_name[ i ] = "UCBlock::resize_line";
     linearization_name[ i ] = "UCBlock::get_resize_line_linearization";
@@ -2849,21 +2903,45 @@ void InvestmentFunction::resolve_asset_methods( void ) {
    }
   }
 
+ // the two assets of a pair name the same methods
+
+ for( Index j = 0 ; j < num_assets ; ++j )
+  if( v_asset_type[ j ] == eSecondSize ) {
+   const auto i = first_size_of( j );
+   const bool cut_i = feasibility_cut.empty() || feasibility_cut[ i ];
+   const bool cut_j = feasibility_cut.empty() || feasibility_cut[ j ];
+   if( ( setter_name[ j ] != setter_name[ i ] ) ||
+       ( linearization_name[ j ] != linearization_name[ i ] ) ||
+       ( cut_j != cut_i ) )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "assets " + std::to_string( i ) + " and " +
+                             std::to_string( j ) + " are the two sizes of "
+                             "unit " + std::to_string( v_asset_indices[ i ] )
+                             + ", and name different methods" ) );
+   }
+
  // the assets naming the same methods go together, and are written and read
- // back with one call each [see update_blocks()]
+ // back with one call each [see update_blocks()]; a pair, by its asset of
+ // type 0, goes with the pairs naming the same methods
 
  v_asset_groups.clear();
 
  for( Index i = 0 ; i < num_assets ; ++i ) {
 
+  if( v_asset_type[ i ] == eSecondSize )
+   continue;  // it goes with its first
+
   const bool cut = feasibility_cut.empty() || feasibility_cut[ i ];
+  const bool pair = ( second[ i ] != Inf< Index >() );
 
   auto group = std::find_if( v_asset_groups.begin() , v_asset_groups.end() ,
                              [ & ]( const AssetGroup & g ) {
                               return( ( g.setter_name == setter_name[ i ] ) &&
                                       ( g.linearization_name ==
                                         linearization_name[ i ] ) &&
-                                      ( g.feasibility_cut == cut ) );
+                                      ( g.feasibility_cut == cut ) &&
+                                      ( ( g.pair_setter != nullptr ) ==
+                                        pair ) );
                               } );
 
   if( group == v_asset_groups.end() ) {
@@ -2873,30 +2951,58 @@ void InvestmentFunction::resolve_asset_methods( void ) {
    g.linearization_name = linearization_name[ i ];
    g.feasibility_cut = cut;
 
-   g.setter = Block::get_method_fs< Block::MF_dbl_it , Block::Subset && ,
-                                    bool >( g.setter_name );
-   if( ! g.setter )
-    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
-                             "asset " + std::to_string( i ) + " is written "
-                             "by '" + g.setter_name + "', which the methods "
-                             "factory does not have as a setter taking a "
-                             "Subset." ) );
+   if( pair ) {
+    g.pair_setter = Block::get_method_fs< Block::MF_dbl_sp , Block::MF_dbl_sp ,
+                                          Block::Subset && , bool >
+                     ( g.setter_name );
+    if( ! g.pair_setter )
+     throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                              "assets " + std::to_string( i ) + " and " +
+                              std::to_string( second[ i ] ) + " are written "
+                              "by '" + g.setter_name + "', which the methods "
+                              "factory does not have as a setter taking two "
+                              "spans and a Subset." ) );
 
-   g.linearization = Block::get_query_fs< Block::MF_dbl_msp ,
-                                          Block::c_Subset & , bool >
-                      ( g.linearization_name );
-   if( ! g.linearization )
-    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
-                             "asset " + std::to_string( i ) + " is read by '"
-                             + g.linearization_name + "', which the methods "
-                             "factory does not have as a getter taking a "
-                             "Subset." ) );
+    g.pair_linearization = Block::get_query_fs< Block::MF_dbl_msp ,
+                                                Block::MF_dbl_msp ,
+                                                Block::c_Subset & , bool >
+                            ( g.linearization_name );
+    if( ! g.pair_linearization )
+     throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                              "assets " + std::to_string( i ) + " and " +
+                              std::to_string( second[ i ] ) + " are read by '"
+                              + g.linearization_name + "', which the methods "
+                              "factory does not have as a getter taking two "
+                              "spans and a Subset." ) );
+    }
+   else {
+    g.setter = Block::get_method_fs< Block::MF_dbl_it , Block::Subset && ,
+                                     bool >( g.setter_name );
+    if( ! g.setter )
+     throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                              "asset " + std::to_string( i ) + " is written "
+                              "by '" + g.setter_name + "', which the methods "
+                              "factory does not have as a setter taking a "
+                              "Subset." ) );
+
+    g.linearization = Block::get_query_fs< Block::MF_dbl_msp ,
+                                           Block::c_Subset & , bool >
+                       ( g.linearization_name );
+    if( ! g.linearization )
+     throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                              "asset " + std::to_string( i ) + " is read by '"
+                              + g.linearization_name + "', which the methods "
+                              "factory does not have as a getter taking a "
+                              "Subset." ) );
+    }
 
    v_asset_groups.push_back( std::move( g ) );
    group = std::prev( v_asset_groups.end() );
    }
 
   group->assets.push_back( i );
+  if( pair )
+   group->second_assets.push_back( second[ i ] );
   group->indices.push_back( v_asset_indices[ i ] );
   }
 
@@ -2909,6 +3015,16 @@ void InvestmentFunction::resolve_asset_methods( void ) {
 
 /*--------------------------------------------------------------------------*/
 
+Block::Index InvestmentFunction::first_size_of( Index j ) const {
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+  if( ( v_asset_type[ i ] == eUnitBlock ) &&
+      ( v_asset_indices[ i ] == v_asset_indices[ j ] ) )
+   return( i );
+ return( Inf< Index >() );
+} // end( InvestmentFunction::first_size_of )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentFunction::update_blocks() {
 
  // the Modification issued while writing the investment are this Function's
@@ -2918,12 +3034,18 @@ void InvestmentFunction::update_blocks() {
  // the names are resolved once, the first time the investment is written
  resolve_asset_methods();
 
- // the investment in the assets of each group, in the order of the group
+ // the investment in the assets of each group, in the order of the group,
+ // and in a group of pairs that in their second sizes
  std::vector< std::vector< double > > investment( v_asset_groups.size() );
+ std::vector< std::vector< double > > second_investment(
+                                                     v_asset_groups.size() );
  for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
   investment[ g ].reserve( v_asset_groups[ g ].assets.size() );
   for( const auto asset : v_asset_groups[ g ].assets )
    investment[ g ].push_back( get_var_value( asset_var( asset ) , false ) );
+  for( const auto asset : v_asset_groups[ g ].second_assets )
+   second_investment[ g ].push_back( get_var_value( asset_var( asset ) ,
+                                                    false ) );
   }
 
  const auto num_stages = get_number_stages();
@@ -2941,9 +3063,16 @@ void InvestmentFunction::update_blocks() {
    for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
     const auto & group = v_asset_groups[ g ];
     try {
-     std::invoke( *group.setter , ucblock , investment[ g ].cbegin() ,
-                  Subset( group.indices ) , group.ordered , eNoBlck ,
-                  eNoBlck );
+     if( group.pair_setter )
+      std::invoke( *group.pair_setter , ucblock ,
+                   Block::MF_dbl_sp( investment[ g ] ) ,
+                   Block::MF_dbl_sp( second_investment[ g ] ) ,
+                   Subset( group.indices ) , group.ordered , eNoBlck ,
+                   eNoBlck );
+     else
+      std::invoke( *group.setter , ucblock , investment[ g ].cbegin() ,
+                   Subset( group.indices ) , group.ordered , eNoBlck ,
+                   eNoBlck );
      }
     catch( const std::exception & e ) {
      throw( std::logic_error( "InvestmentFunction::update_blocks: writing "
