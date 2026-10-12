@@ -105,6 +105,19 @@ the following:
   same amount of investment in the assets is made for all the stages of the
   `SDDPBlock`.
 
+An inner Block in *design mode*, i.e., one whose units and lines carry the
+design Variable of their investment, as a `TwoStageStochasticBlock` written
+to be solved as a whole, is converted when the `InvestmentBlock` is read:
+each design becomes an asset with the investment cost and the bounds of the
+design, integer where the design is, and the unit loses its investment cost,
+so that the investment is decided once, by the `InvestmentBlock`. A
+`DesignNetworkBlock` gives way to the `NetworkBlock` of its time instants,
+and the first-stage paths of the stochastic Block to the designs are dropped.
+The conversion happens in a copy in memory of the netCDF group, and no file
+changes. It applies to an inner Block at the root of an `InvestmentBlock`
+that declares no asset, whose designs are all first-stage; anything else in
+design mode is refused (see `InvestmentBlock::deserialize()`).
+
 
 ## Getting started
 

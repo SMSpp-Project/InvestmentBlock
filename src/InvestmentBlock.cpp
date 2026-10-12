@@ -44,6 +44,8 @@
 
 #include <iostream>
 
+#include <numeric>
+
 #include <set>
 
 /*--------------------------------------------------------------------------*/
@@ -249,6 +251,504 @@ static bool has_scenarios( const netCDF::NcGroup & g )
   if( ! has_scenarios( g.getGroup( "Block_" + std::to_string( l ) ) ) )
    return( false );
  return( n > 0 );
+ }
+
+/*--------------------------------------------------------------------------*/
+/*------------------- FILE-LOCAL: THE DESIGN MODE --------------------------*/
+/*--------------------------------------------------------------------------*/
+
+// An inner Block in design mode decides the investment itself, with the
+// design Variable of its units and lines, and pays it in its own Objective,
+// whereas under an InvestmentBlock the investment is the ColVariable of the
+// InvestmentBlock. Such an instance is converted before any Block is built,
+// in a copy of its group in memory: each design becomes an asset with the
+// cost and the bounds of the design, sized as the class of the asset is
+// [see InvestmentFunction::resolve_asset_methods()], the units lose their
+// investment cost, a DesignNetworkBlock gives way to the NetworkBlock of its
+// time instants, and the first-stage paths to the designs are dropped. These
+// functions are the only ones here that know the format of the classes of
+// the assets.
+
+// the investment cost and the bounds of a design in the group of a unit
+static const std::set< std::string > design_fields = {
+ "InvestmentCost" , "MinCapacityDesign" , "MaxCapacityDesign" ,
+ "BatteryInvestmentCost" , "BatteryMinCapacityDesign" ,
+ "BatteryMaxCapacityDesign" , "ConverterInvestmentCost" ,
+ "ConverterMinCapacityDesign" , "ConverterMaxCapacityDesign" };
+
+/*--------------------------------------------------------------------------*/
+
+namespace {
+
+// one design of the inner Block as an asset of this InvestmentBlock
+
+struct DesignAsset {
+ Block::Index index;   // of the unit in its UCBlock, or of the line
+ int type;             // an InvestmentFunction::AssetType
+ double cost;
+ double lower;
+ double upper;
+ int integer;
+ bool operator==( const DesignAsset & ) const = default;
+ };
+
+/*--------------------------------------------------------------------------*/
+
+// the designs found in a Block, as assets, and the number of its design
+// Variable, together with the group of the Block that its first-stage paths,
+// if any, are resolved against
+
+struct Designs {
+ std::vector< DesignAsset > assets;
+ Block::Index number = 0;
+ netCDF::NcGroup leaf;
+ };
+
+}  // end( unnamed namespace )
+
+/*--------------------------------------------------------------------------*/
+
+// the scalar variable name of g, def if g does not have it
+
+static double scalar( const netCDF::NcGroup & g , const std::string & name ,
+                      double def )
+{
+ ::deserialize( g , def , name );
+ return( def );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// the "type" attribute of g, the empty string if it has none
+
+static std::string type_of( const netCDF::NcGroup & g )
+{
+ std::string type;
+ if( auto att = g.getAtt( "type" ) ; ! att.isNull() )
+  att.getValues( type );
+ return( type );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// whether the group g describes, or holds, a unit or a network in design
+// mode: a unit with an investment cost, a DesignNetworkBlock
+
+static bool has_design( const netCDF::NcGroup & g )
+{
+ const auto type = type_of( g );
+ if( type == "DesignNetworkBlock" )
+  return( true );
+ if( ( type == "IntermittentUnitBlock" ) || ( type == "ThermalUnitBlock" ) ||
+     ( type == "NuclearUnitBlock" ) || ( type == "ConversionUnitBlock" ) )
+  return( scalar( g , "InvestmentCost" , 0 ) != 0 );
+ if( type == "BatteryUnitBlock" )
+  return( ( scalar( g , "BatteryInvestmentCost" , 0 ) != 0 ) ||
+          ( scalar( g , "ConverterInvestmentCost" , 0 ) != 0 ) );
+
+ for( const auto & sub : g.getGroups() )
+  if( has_design( sub.second ) )
+   return( true );
+ return( false );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// copies into dst the attributes, dimensions, variables and sub-groups of
+// src, but those named in skip
+
+static void copy_group( const netCDF::NcGroup & src , netCDF::NcGroup dst ,
+                        const std::set< std::string > & skip = {} )
+{
+ for( const auto & att : src.getAtts() )
+  netCDF::ncCheck( nc_copy_att( src.getId() , NC_GLOBAL ,
+                                att.first.c_str() , dst.getId() ,
+                                NC_GLOBAL ) , __FILE__ , __LINE__ );
+ for( const auto & [ name , dim ] : src.getDims() )
+  if( ! skip.count( name ) )
+   dst.addDim( name , dim.isUnlimited() ? 0 : dim.getSize() );
+ for( const auto & [ name , var ] : src.getVars() ) {
+  if( skip.count( name ) )
+   continue;
+  if( var.getType() != netCDF::ncString ) {
+   netCDF::ncCheck( nc_copy_var( src.getId() , var.getId() , dst.getId() ) ,
+                    __FILE__ , __LINE__ );
+   continue;
+   }
+  // nc_copy_var() does not copy strings
+  std::vector< netCDF::NcDim > dims;
+  std::size_t size = 1;
+  for( const auto & dim : var.getDims() ) {
+   dims.push_back( dst.getDim( dim.getName() ,
+                               netCDF::NcGroup::ParentsAndCurrent ) );
+   size *= dim.getSize();
+   }
+  auto copy = dst.addVar( name , netCDF::ncString , dims );
+  for( const auto & att : var.getAtts() )
+   netCDF::ncCheck( nc_copy_att( src.getId() , var.getId() ,
+                                 att.first.c_str() , dst.getId() ,
+                                 copy.getId() ) , __FILE__ , __LINE__ );
+  std::vector< char * > strings( size );
+  if( size ) {
+   var.getVar( strings.data() );
+   copy.putVar( const_cast< const char ** >( strings.data() ) );
+   nc_free_string( size , strings.data() );
+   }
+  }
+ for( const auto & [ name , sub ] : src.getGroups() )
+  if( ! skip.count( name ) )
+   copy_group( sub , dst.addGroup( name ) );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// the asset of the design of a unit or a line of cost c between lo and hi, a
+// negative hi meaning an integer design up to - hi; the asset is fixed at hi,
+// with both bounds there, if the bounds leave no choice, or if the design
+// costs nothing and widens a line only, where hi is always the best
+
+static DesignAsset design_asset( Block::Index index , int type , double c ,
+                                 double lo , double hi , bool widening )
+{
+ const int integer = ( hi < 0 );
+ hi = std::abs( hi );
+ lo = std::max( lo , 0.0 );
+ if( ( lo >= hi ) || ( ( c == 0 ) && widening ) )
+  return( DesignAsset{ index , type , c , hi , hi , 0 } );
+ return( DesignAsset{ index , type , c , lo , hi , integer } );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// the designs of the UCBlock described by uc. The asset sets the datum that
+// the design multiplies, the kappa constant or the scale factor: the unit has
+// to have it at 1. A BatteryUnitBlock has two sizes, the storage and the
+// converter, which are a pair of assets [see InvestmentFunction::AssetType],
+// a size with no design being fixed at its datum; the converter with neither
+// a design nor a "ConverterMaxPower" follows the storage design, and the
+// battery is then one asset sizing both. The design of a line is binary if
+// its maximum is negative [see DesignNetworkBlock]
+
+static Designs ucblock_designs( const netCDF::NcGroup & uc )
+{
+ Designs d;
+ d.leaf = uc;
+ Block::Index units = 0;
+ deserialize_dim( uc , "NumberUnits" , units , false );
+
+ for( Block::Index i = 0 ; i < units ; ++i ) {
+  const auto g = uc.getGroup( "UnitBlock_" + std::to_string( i ) );
+  const auto type = type_of( g );
+  if( ! has_design( g ) )
+   continue;
+
+  const auto refuse = [ & ]( const std::string & why ) {
+   throw( std::logic_error( "InvestmentBlock::deserialize: UnitBlock_" +
+                            std::to_string( i ) + ", a " + type + " in "
+                            "design mode, " + why ) );
+   };
+  for( const char * datum : { "Scale" , "Kappa" , "ConverterKappa" } )
+   if( scalar( g , datum , 1 ) != 1 )
+    refuse( "has a " + std::string( datum ) + " other than 1, which the "
+            "investment would overwrite" );
+
+  if( type == "IntermittentUnitBlock" ) {
+   ++d.number;
+   d.assets.push_back( design_asset( i , InvestmentFunction::eUnitBlock ,
+                                     scalar( g , "InvestmentCost" , 0 ) ,
+                                     scalar( g , "MinCapacityDesign" , 0 ) ,
+                                     scalar( g , "MaxCapacityDesign" , 1 ) ,
+                                     false ) );
+   }
+  else if( ( type == "ThermalUnitBlock" ) || ( type == "NuclearUnitBlock" ) ) {
+   ++d.number;   // the design is binary
+   d.assets.push_back( design_asset( i , InvestmentFunction::eUnitBlock ,
+                                     scalar( g , "InvestmentCost" , 0 ) ,
+                                     0 , -1 , false ) );
+   }
+  else if( type == "BatteryUnitBlock" ) {
+   const auto size = [ & ]( int kind , const std::string & prefix ) {
+    const double c = scalar( g , prefix + "InvestmentCost" , 0 );
+    if( ! c )
+     return( DesignAsset{ i , kind , 0 , 1 , 1 , 0 } );
+    ++d.number;
+    return( design_asset( i , kind , c ,
+                          scalar( g , prefix + "MinCapacityDesign" , 0 ) ,
+                          scalar( g , prefix + "MaxCapacityDesign" , 1 ) ,
+                          false ) );
+    };
+   d.assets.push_back( size( InvestmentFunction::eUnitBlock , "Battery" ) );
+   if( scalar( g , "ConverterInvestmentCost" , 0 ) ||
+       ( ! g.getVar( "ConverterMaxPower" ).isNull() ) )
+    d.assets.push_back( size( InvestmentFunction::eSecondSize ,
+                              "Converter" ) );
+   }
+  else
+   refuse( "which is not converted: whether copies of the unit, or its "
+           "resizing, give the problem of its design is not known" );
+  }
+
+ for( const auto & [ name , g ] : uc.getGroups() ) {
+  if( type_of( g ) != "DesignNetworkBlock" )
+   continue;
+  Block::Index networks = 0;
+  if( ( name != "NetworkBlock_0" ) ||
+      ( ! deserialize_dim( uc , "NumberNetworks" , networks ) ) ||
+      ( networks != 1 ) )
+   throw( std::logic_error( "InvestmentBlock::deserialize: the "
+          "DesignNetworkBlock " + name + " is not the only NetworkBlock of "
+          "its UCBlock, which the conversion of the design mode requires" ) );
+
+  Block::Index n = 0 , lines = 0;
+  deserialize_dim( g , "NumberDesignLines" , n , false );
+  deserialize_dim( uc , "NumberLines" , lines , false );
+  // the m values of name in h, a scalar repeated, def if it is not there
+  const auto values = []( const netCDF::NcGroup & h , const char * name ,
+                          Block::Index m , double def ) {
+   std::vector< double > v;
+   if( ! ::deserialize( h , name , m , v , true , true ) )
+    v.assign( m , def );
+   else if( v.size() == 1 )
+    v.assign( m , v[ 0 ] );
+   return( v );
+   };
+  const auto cost = values( g , "InvestmentCost" , n , 0 );
+  const auto lo = values( g , "MinCapacityDesign" , n , 0 );
+  const auto hi = values( g , "MaxCapacityDesign" , n , 1 );
+  const auto fmin = values( uc , "MinPowerFlow" , lines , 0 );
+  const auto fmax = values( uc , "MaxPowerFlow" , lines , 0 );
+  std::vector< Block::Index > line;
+  if( ! ::deserialize( g , "DesignLines" , n , line , true , true ) ) {
+   line.resize( n );
+   std::iota( line.begin() , line.end() , 0 );
+   }
+
+  d.number += n;
+  for( Block::Index p = 0 ; p < n ; ++p )
+   d.assets.push_back( design_asset( line[ p ] , InvestmentFunction::eLine ,
+                                     cost[ p ] , lo[ p ] ,
+                                     hi[ p ] < 0 ? -1 : hi[ p ] ,
+                                     ( fmin[ line[ p ] ] <= 0 ) &&
+                                     ( fmax[ line[ p ] ] >= 0 ) ) );
+  }
+
+ return( d );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// writes into dst the UCBlock described by uc with its designs d converted:
+// the units without their investment cost and bounds, a battery with its
+// "ConverterKappa", so that its converter rows exist whatever its sizes, and
+// the DesignNetworkBlock replaced by the NetworkBlock of its time instants;
+// one that it does not hold is a DCNetworkBlock, which the UCBlock has to
+// make too
+
+static void convert_ucblock( const netCDF::NcGroup & uc ,
+                             netCDF::NcGroup dst , const Designs & d )
+{
+ std::set< std::string > skip;
+ for( const auto & a : d.assets )
+  if( a.type != InvestmentFunction::eLine )
+   skip.insert( "UnitBlock_" + std::to_string( a.index ) );
+ const auto design_network = uc.getGroup( "NetworkBlock_0" );
+ const bool network = ( type_of( design_network ) == "DesignNetworkBlock" );
+ if( network ) {
+  if( ! uc.getVar( "NetworkConstantTerms" ).isNull() )
+   throw( std::logic_error( "InvestmentBlock::deserialize: a UCBlock with a "
+          "DesignNetworkBlock and 'NetworkConstantTerms' is not converted" ) );
+  skip.insert( { "NumberNetworks" , "NetworkBlock_0" } );
+  }
+
+ copy_group( uc , dst , skip );
+
+ for( const auto & a : d.assets )
+  if( a.type == InvestmentFunction::eUnitBlock ) {
+   const auto name = "UnitBlock_" + std::to_string( a.index );
+   auto g = dst.addGroup( name );
+   copy_group( uc.getGroup( name ) , g , design_fields );
+   if( ( type_of( g ) == "BatteryUnitBlock" ) &&
+       g.getVar( "ConverterKappa" ).isNull() )
+    ::serialize( g , "ConverterKappa" , netCDF::NcDouble() , 1.0 );
+   }
+
+ if( network ) {
+  Block::Index n = 0 , found = 0;
+  deserialize_dim( design_network , "NumberSubNetwork" , n , false );
+  dst.addDim( "NumberNetworks" , n );
+  for( ; found < n ; ++found ) {   // read up to the first missing one
+   const auto name = "NetworkBlock_" + std::to_string( found );
+   const auto sub = design_network.getGroup( name );
+   if( sub.isNull() )
+    break;
+   copy_group( sub , dst.addGroup( name ) );
+   }
+  std::string classname;
+  if( ( found < n ) && ::deserialize( uc , classname , "NetworkBlockClassname" )
+      && ( classname != "DCNetworkBlock" ) )
+   throw( std::logic_error( "InvestmentBlock::deserialize: the "
+          "DesignNetworkBlock makes DCNetworkBlock where its UCBlock makes " +
+          classname + ", and it is not converted" ) );
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// writes into dst, out of the group paths of the first-stage paths of a
+// TwoStageStochasticBlock, those that do not reach a design, read in the
+// Block described by d.leaf in design mode; each of the d.number designs
+// has to be first-stage, since one that is not is decided in each scenario,
+// which no asset can be
+
+static void drop_design_paths( const netCDF::NcGroup & paths ,
+                               const Designs & d , netCDF::NcGroup dst ,
+                               const std::string & where )
+{
+ std::vector< std::unique_ptr< AbstractPath > > all;
+ AbstractPath::vector_deserialize( paths , all );
+
+ std::unique_ptr< Block > leaf( Block::new_Block( d.leaf , nullptr ) );
+ if( ! leaf )
+  throw( std::logic_error( "InvestmentBlock::deserialize: the Block of the "
+                           "scenarios of " + where + " could not be built" ) );
+ leaf->generate_abstract_variables();
+
+ std::vector< bool > to_design( all.size() , false );
+ std::set< const ColVariable * > first_stage;
+ for( const auto & [ v , k ] : reached( all , leaf.get() ) )
+  if( v && is_design( v ) ) {
+   to_design[ k ] = true;
+   first_stage.insert( v );
+   }
+
+ if( first_stage.size() != d.number )
+  throw( std::logic_error( "InvestmentBlock::deserialize: " + where +
+         " makes first-stage " + std::to_string( first_stage.size() ) +
+         " of its " + std::to_string( d.number ) + " design Variable: a "
+         "design that is not first-stage is decided in each scenario, which "
+         "no asset is" ) );
+
+ std::vector< std::unique_ptr< AbstractPath > > kept;
+ for( Block::Index k = 0 ; k < all.size() ; ++k )
+  if( ! to_design[ k ] )
+   kept.push_back( std::move( all[ k ] ) );
+ if( ! paths.isNull() ) {
+  auto group = dst.addGroup( "StaticAbstractPath" );
+  AbstractPath::serialize( kept , group );
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// writes into dst the inner Block described by src with its designs
+// converted, and returns them. A UCBlock holds them; a StochasticBlock, a
+// TwoStageStochasticBlock and a MultiStageStochasticBlock hold UCBlock, which
+// all have to have the same designs, and the first-stage paths of the latter
+// two are dropped where they reach a design. Designs anywhere else are
+// refused
+
+static Designs convert_inner( const netCDF::NcGroup & src ,
+                              netCDF::NcGroup dst )
+{
+ const auto type = type_of( src );
+
+ if( type == "UCBlock" ) {
+  auto d = ucblock_designs( src );
+  convert_ucblock( src , dst , d );
+  return( d );
+  }
+
+ if( type == "StochasticBlock" ) {
+  copy_group( src , dst , { "Block" } );
+  return( convert_inner( src.getGroup( "Block" ) , dst.addGroup( "Block" ) ) );
+  }
+
+ if( type == "TwoStageStochasticBlock" ) {
+  copy_group( src , dst , { "StochasticBlock" , "StaticAbstractPath" } );
+  auto d = convert_inner( src.getGroup( "StochasticBlock" ) ,
+                          dst.addGroup( "StochasticBlock" ) );
+  drop_design_paths( src.getGroup( "StaticAbstractPath" ) , d , dst , type );
+  return( d );
+  }
+
+ if( type == "MultiStageStochasticBlock" ) {
+  Block::Index n = 0;
+  deserialize_dim( src , "NumberSubBlocks" , n , false );
+  std::set< std::string > skip = { "StaticAbstractPath" };
+  for( Block::Index l = 0 ; l < n ; ++l )
+   skip.insert( "Block_" + std::to_string( l ) );
+  copy_group( src , dst , skip );
+
+  Designs d;
+  for( Block::Index l = 0 ; l < n ; ++l ) {
+   const auto name = "Block_" + std::to_string( l );
+   auto d_l = convert_inner( src.getGroup( name ) , dst.addGroup( name ) );
+   if( ! l )
+    d = std::move( d_l );
+   else
+    if( d_l.assets != d.assets )
+     throw( std::logic_error( "InvestmentBlock::deserialize: " + name +
+                              " of the " + type + " has designs other than "
+                              "those of Block_0" ) );
+   }
+  drop_design_paths( src.getGroup( "StaticAbstractPath" ) , d , dst , type );
+  return( d );
+  }
+
+ if( has_design( src ) )
+  throw( std::logic_error( "InvestmentBlock::deserialize: a " + type +
+                           " holds designs, which are not converted" ) );
+ copy_group( src , dst );
+ return( Designs() );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// writes into dst the InvestmentBlock described by group with its inner
+// Block in design mode converted: each design is an asset, its fields at the
+// root. The designs have no ColVariable of the root to be bound to but new
+// ones, so they are converted only in the inner Block at the root of a group
+// that declares no asset
+
+static void convert_design_mode( const netCDF::NcGroup & group ,
+                                 netCDF::NcGroup dst )
+{
+ if( ! group.getGroup( "Component_0" ).isNull() )
+  throw( std::logic_error( "InvestmentBlock::deserialize: an inner Block in "
+         "design mode is converted only at the root, not in a Component_<k>, "
+         "whose designs would be bound to no ColVariable of the root" ) );
+ Block::Index num_assets = 0;
+ deserialize_dim( group , "NumAssets" , num_assets );
+ if( num_assets )
+  throw( std::logic_error( "InvestmentBlock::deserialize: the inner Block is "
+         "in design mode, and the root declares assets too: the designs are "
+         "converted only into the assets of a root that declares none" ) );
+
+ copy_group( group , dst , { "InnerBlock" , "NumAssets" , "Assets" ,
+                             "AssetType" , "Cost" , "LowerBound" ,
+                             "UpperBound" , "Integer" } );
+ const auto d = convert_inner( group.getGroup( "InnerBlock" ) ,
+                               dst.addGroup( "InnerBlock" ) );
+
+ const auto dim = dst.addDim( "NumAssets" , d.assets.size() );
+ std::vector< Block::Index > index;
+ std::vector< int > type , integer;
+ std::vector< double > cost , lower , upper;
+ for( const auto & a : d.assets ) {
+  index.push_back( a.index );
+  type.push_back( a.type );
+  cost.push_back( a.cost );
+  lower.push_back( a.lower );
+  upper.push_back( a.upper );
+  integer.push_back( a.integer );
+  }
+ ::serialize( dst , "Assets" , netCDF::NcUint() , dim , index );
+ ::serialize( dst , "AssetType" , netCDF::NcInt() , dim , type );
+ ::serialize( dst , "Cost" , netCDF::NcDouble() , dim , cost );
+ ::serialize( dst , "LowerBound" , netCDF::NcDouble() , dim , lower );
+ ::serialize( dst , "UpperBound" , netCDF::NcDouble() , dim , upper );
+ if( std::count( integer.begin() , integer.end() , 1 ) )
+  ::serialize( dst , "Integer" , netCDF::NcInt() , dim , integer );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -495,10 +995,9 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
 
  // the scenarios can be solved one at a time only if they share nothing: a
  // first-stage AbstractPath, of the root or of an inner Block, ties them, and
- // what it reaches says why they stay together. Designs could be separated,
- // but only once they are the assets of this InvestmentBlock: as they are,
- // each scenario would choose its own. The paths are counted, not their
- // group, which serialize() always writes
+ // what it reaches says why they stay together; a path to a design is not
+ // there any more [see convert_design_mode()]. The paths are counted, not
+ // their group, which serialize() always writes
  bool tied = ! tssb->get_paths_to_static_here_and_now_vars().empty();
  if( inner_type == "MultiStageStochasticBlock" )
   for( auto sub : tssb->get_nested_Blocks() )
@@ -506,9 +1005,7 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
                     get_paths_to_static_here_and_now_vars().empty() );
  if( tied ) {
   std::string why;
-  if( is_separable( tssb , & why ) )
-   why = "its first stage is made of the designs of assets, which would "
-         "first have to become the assets of this InvestmentBlock";
+  is_separable( tssb , & why );
   return( whole( why ) );
   }
 
@@ -656,6 +1153,17 @@ InvestmentBlock::~InvestmentBlock()
 
 void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 {
+ // an inner Block in design mode is converted first, into a copy of the
+ // group in memory, which is read in its place [see convert_design_mode()]
+ if( has_design( group ) ) {
+  netCDF::NcFile copy;
+  copy.create( "InvestmentBlock_design_mode.nc" ,
+               NC_NETCDF4 | NC_DISKLESS | NC_CLOBBER );
+  convert_design_mode( group , copy );
+  deserialize( copy );
+  return;
+  }
+
  Index num_assets = 0;
 
  if( ! deserialize_dim( group , "NumAssets" , num_assets ) )

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the conversion of an inner Block in design mode when the InvestmentBlock is
+  read, in a copy of its netCDF group in memory: each design of an
+  `IntermittentUnitBlock`, a `ThermalUnitBlock`, a `NuclearUnitBlock`, a
+  `BatteryUnitBlock` or a `DesignNetworkBlock` becomes an asset with its
+  investment cost, its bounds and its integrality, the battery a pair of
+  assets with its `ConverterKappa` (or one asset, when its converter follows
+  the storage design), the units lose their investment cost, the
+  `DesignNetworkBlock` gives way to the `NetworkBlock` of its time instants,
+  and the first-stage paths of a `TwoStageStochasticBlock` or
+  `MultiStageStochasticBlock` to the designs are dropped. It applies to the
+  inner Block at the root of a file that declares no asset; refused at load
+  are a design in a `Component_<k>` or beside declared assets, a design that
+  is not first-stage, a `ConversionUnitBlock` in design mode, and a design on
+  a unit whose `Scale`, `Kappa` or `ConverterKappa` is not 1
+
 - the type of asset 2, the second size of a unit that has two, for a
   `BatteryUnitBlock` its converter: an asset of type 0 and one of type 2 on
   the same unit form a pair, written and read back together through the
