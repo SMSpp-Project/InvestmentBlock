@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- an investment in a `ConversionUnitBlock` is represented by its scale
+  factor, as for a `ThermalUnitBlock`, where the unit was refused as
+  unrecognized; the unit test checks its linearization
+
 - `ScenarioDecomposition` (netCDF), an optional dimension of the root: 0
   keeps a TwoStageStochasticBlock or MultiStageStochasticBlock inner Block
   whole, 1, the default, separates it into components when its scenarios
@@ -142,6 +146,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `set_variable_bounds()` on InvestmentBlock, plus accessors for the
   programmatic construction path
+
+### Changed
+
+- the instances of `data/` are downloaded and extracted by the targets
+  `download_investment_<fmt>` and `extract_investment_<fmt>`, written as
+  in every module that keeps its instances in the Package Registry, and
+  the marker of the extraction carries the format in its name, so that a
+  tree extracted before extracts once more
+
+## [0.3.0] - 2026-10-09
+
+### Added
 
 - the asset type 2 (`AssetType`), the converter of a `BatteryUnitBlock`,
   whose investment is the kappa of the converter
@@ -482,8 +498,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First test release
 
-[Unreleased]: https://gitlab.com/smspp/investmentblock/-/compare/0.2.0...develop
+[Unreleased]: https://gitlab.com/smspp/investmentblock/-/compare/0.3.0...develop
+[0.3.0]: https://gitlab.com/smspp/investmentblock/-/compare/0.2.0...0.3.0
 [0.2.0]: https://gitlab.com/smspp/investmentblock/-/compare/0.1.1...0.2.0
 [0.1.1]: https://gitlab.com/smspp/investmentblock/-/compare/0.1.0...0.1.1
 [0.1.0]: https://gitlab.com/smspp/investmentblock/-/tags/0.1.0
-
