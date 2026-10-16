@@ -50,6 +50,7 @@
 #include "Block.h"
 #include "ColVariable.h"
 #include "FRealObjective.h"
+#include "FRowConstraint.h"
 #include "InvestmentFunction.h"
 #include "OneVarConstraint.h"
 #include "Solution.h"
@@ -336,7 +337,10 @@ public:
   *   InvestmentFunction::set_asset_baseline_variable_indices()]; with no
   *   "AssetVarIndex" the i-th asset is sized by the i-th ColVariable. The
   *   component is bound to the ColVariable of its assets and of their
-  *   baselines only.
+  *   baselines only. Its "MaxInvestment" and "MaxDisinvestment" become rows
+  *   of this InvestmentBlock, one for each pair of ColVariable and baseline,
+  *   and two components giving the same pair different limits are refused
+  *   [see add_variation_constraints()].
   *
   * - At the root "NumAssets", "LowerBound", "UpperBound", "Integer" and
   *   "ScenarioDecomposition", as above, and the group "ScenarioGenerator"
@@ -913,6 +917,13 @@ protected:
  /// Box constraints on the Variable
  std::vector< BoxConstraint > v_constraints;
 
+ /// the limits on the change of a design Variable over its baseline
+ /** One row for each pair of a design Variable and its baseline that a
+  * component limits [see InvestmentFunction::set_variation_limits()]:
+  * -MaxDisinvestment <= x - b <= MaxInvestment, the baseline b being another
+  * design Variable or the InstalledQuantity of the asset. */
+ std::vector< FRowConstraint > v_variation_constraints;
+
 /*--------------------------------------------------------------------------*/
 /*--------------------- PRIVATE PART OF THE CLASS --------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -936,6 +947,27 @@ protected:
   * @param k its index, for the error messages. */
 
  void wire_component_actives( InvestmentFunction * f , Index k );
+
+/*--------------------------------------------------------------------------*/
+ /// adds the bounds of the design Variable to the static Constraint
+ /** Makes v_constraints out of LowerBound and UpperBound, reformulated as
+  * the BlockConfig, or \p stcc, asks [see generate_abstract_constraints()],
+  * and adds them to the static Constraint; does nothing if there is no
+  * bound. */
+
+ void add_bound_constraints( Configuration * stcc );
+
+/*--------------------------------------------------------------------------*/
+ /// adds the limits of the components on the change of the design Variable
+ /** Makes v_variation_constraints out of the MaxInvestment and
+  * MaxDisinvestment of the components, one row for each pair of design
+  * Variable and baseline, with the sides shifted where the bounds are
+  * reformulated, and adds them to the static Constraint. Called by
+  * generate_abstract_constraints(): BundleSolver hands these rows to its
+  * master problem when it is attached, and does not follow a change of them
+  * afterwards. */
+
+ void add_variation_constraints( void );
 
 /*--------------------------------------------------------------------------*/
 

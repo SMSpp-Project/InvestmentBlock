@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the limits on the change of an asset from one period to the next: the
+  optional fields `MaxInvestment` and `MaxDisinvestment` of a
+  `Component_<k>`, scalar or one for each asset, each >= 0 and + INF when
+  absent, bound x - b, b being the baseline of the costs
+  (`AssetBaselineVarIndex`, or `InstalledQuantity`), between
+  -`MaxDisinvestment` and `MaxInvestment`, and are read, written and set with
+  `InvestmentFunction::set_variation_limits()`. The InvestmentBlock makes
+  them `FRowConstraint` of its own, one for each pair of design Variable and
+  baseline, which BundleSolver passes to its master problem; two components
+  giving the same pair different limits are refused
+
 - the conversion of an inner Block in design mode when the InvestmentBlock is
   read, in a copy of its netCDF group in memory: each design of an
   `IntermittentUnitBlock`, a `ThermalUnitBlock`, a `NuclearUnitBlock`, a

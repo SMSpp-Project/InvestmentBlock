@@ -1659,6 +1659,28 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
+ /// returns the most the i-th asset may grow over its baseline
+
+ double get_max_investment( Index i ) const
+ {
+  if( i < v_max_investment.size() )
+   return( v_max_investment[ i ] );
+
+  return( Inf< double >() );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the most the i-th asset may shrink below its baseline
+
+ double get_max_disinvestment( Index i ) const
+ {
+  if( i < v_max_disinvestment.size() )
+   return( v_max_disinvestment[ i ] );
+
+  return( Inf< double >() );
+  }
+
+/*--------------------------------------------------------------------------*/
  /// sets the implicit linear constraints on the assets
  /** Sets the linear constraints  lb <= A x <= ub  enforced by the
   * InvestmentFunction via its vertical linearizations (for instance caps or
@@ -1695,6 +1717,37 @@ class InvestmentFunction : public C05Function , public Block {
   v_A = std::move( A );
   v_constraints_lower_bound = std::move( lb );
   v_constraints_upper_bound = std::move( ub );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the limits on the change of each asset over its baseline
+ /** Sets, for each asset, the most it may grow over its baseline \f$ \bar
+  * x_i \f$ and the most it may shrink below it, i.e., \f$ - \p max_dis[ i ]
+  * \le x_i - \bar x_i \le \p max_inv[ i ] \f$, the baseline being the one of
+  * the costs [see set_asset_baseline_variable_indices()]. This
+  * InvestmentFunction does not impose them: the InvestmentBlock holding it
+  * makes them rows of its own [see
+  * InvestmentBlock::generate_abstract_constraints()].
+  *
+  * It is the programmatic counterpart of reading the MaxInvestment and
+  * MaxDisinvestment netCDF fields. Each vector is either empty, meaning +
+  * INF for every asset, or has one entry per asset, each >= 0.
+  *
+  * @param max_inv the most each asset may grow over its baseline.
+  * @param max_dis the most each asset may shrink below its baseline. */
+
+ void set_variation_limits( RealVector max_inv , RealVector max_dis ) {
+  for( const auto * v : { & max_inv , & max_dis } ) {
+   if( ( ! v->empty() ) && ( v->size() != v_asset_indices.size() ) )
+    throw( std::logic_error( "InvestmentFunction::set_variation_limits: one "
+                             "limit per asset is needed" ) );
+   for( auto l : *v )
+    if( ! ( l >= 0 ) )
+     throw( std::invalid_argument( "InvestmentFunction::set_variation_limits:"
+                                   " a limit must be >= 0" ) );
+   }
+  v_max_investment = std::move( max_inv );
+  v_max_disinvestment = std::move( max_dis );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -1874,6 +1927,17 @@ class InvestmentFunction : public C05Function , public Block {
   *   i-th asset and, therefore, with the i-th active ColVariable of this
   *   InvestmentFunction. This variable is optional. If it is not provided
   *   then all disinvestment costs are considered to be zero.
+  *
+  * - The one-dimensional variables "MaxInvestment" and "MaxDisinvestment",
+  *   of type netCDF::NcDouble(), each either a scalar or indexed over
+  *   "NumAssets", containing the most each asset may grow over its baseline
+  *   and the most it may shrink below it, i.e., \f$ -
+  *   \mathrm{MaxDisinvestment}[i] \le x_i - \bar x_i \le
+  *   \mathrm{MaxInvestment}[i] \f$, with the same baseline \f$ \bar x_i \f$
+  *   as the costs; a MaxDisinvestment of 0 forbids disinvesting. Each entry
+  *   is >= 0. They are optional: if one is not provided, its limits are +
+  *   INF. The InvestmentBlock holding this InvestmentFunction makes them
+  *   rows of its own [see set_variation_limits()].
   *
   * - The group "InnerBlock", containing the description of the inner Block.
  */
@@ -2438,6 +2502,12 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< double > v_disinvestment_cost;
  ///< the cost of disinvesting in one unit of each asset
+
+ std::vector< double > v_max_investment;
+ ///< the most each asset may grow over its baseline, + INF if empty
+
+ std::vector< double > v_max_disinvestment;
+ ///< the most each asset may shrink below its baseline, + INF if empty
 
  std::vector< double > v_installed_quantity;
  ///< amount of each asset currently installed in the system

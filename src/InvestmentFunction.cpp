@@ -341,6 +341,21 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                               v_disinvestment_cost ) )
    v_disinvestment_cost.resize( num_assets , 0 );
 
+  // Deserialize the limits on the change over the baseline; absent, + INF
+
+  const auto limit = [ & ]( const std::string & name ) {
+   RealVector v;
+   deserialize_one_each( group , name , num_assets , v );
+   for( auto l : v )
+    if( ! ( l >= 0 ) )
+     throw( std::invalid_argument( "InvestmentFunction::deserialize: the '" +
+                                   name + "' netCDF variable of group '" +
+                                   group.getName() + "' must be >= 0." ) );
+   return( v );
+   };
+  set_variation_limits( limit( "MaxInvestment" ) ,
+                        limit( "MaxDisinvestment" ) );
+
 
   // Deserialize the amount of assets currently installed in the system
 
@@ -1006,6 +1021,8 @@ void InvestmentFunction::remove_actives( const Subset & removed )
   drop( v_asset_feasibility_cut );
   drop( v_cost );
   drop( v_disinvestment_cost );
+  drop( v_max_investment );
+  drop( v_max_disinvestment );
   drop( v_installed_quantity );
   drop( v_asset_var_index );
   drop( v_asset_baseline_var_index );
@@ -1137,6 +1154,14 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ,
 
  ::serialize( group , "DisinvestmentCost" , netCDF::NcDouble() , NumAssets ,
               v_disinvestment_cost );
+
+ if( ! v_max_investment.empty() )
+  ::serialize( group , "MaxInvestment" , netCDF::NcDouble() , NumAssets ,
+               v_max_investment );
+
+ if( ! v_max_disinvestment.empty() )
+  ::serialize( group , "MaxDisinvestment" , netCDF::NcDouble() , NumAssets ,
+               v_max_disinvestment );
 
  if( ! v_installed_quantity.empty() )
   ::serialize( group , "InstalledQuantity" , netCDF::NcDouble() , NumAssets ,

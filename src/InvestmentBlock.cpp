@@ -24,6 +24,10 @@
 
 #include "OneVarConstraint.h"
 
+#include "FRowConstraint.h"
+
+#include "LinearFunction.h"
+
 #include "AbstractBlock.h"
 
 #include "StochasticBlock.h"
@@ -40,6 +44,8 @@
 
 #include <cctype>
 
+#include <map>
+
 #include <memory>
 
 #include <iostream>
@@ -47,6 +53,8 @@
 #include <numeric>
 
 #include <set>
+
+#include <tuple>
 
 /*--------------------------------------------------------------------------*/
 /*------------------------- NAMESPACE AND USING ----------------------------*/
@@ -100,6 +108,66 @@ static std::vector< InvestmentFunction * > component_functions( const Block * IB
   for( Block::Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
    funcs.push_back( component_function( IB , k ) );          // disaggregated: K
  return( funcs );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+// a limit on the change of a design Variable x over its baseline, lo <= x -
+// b - q <= hi, the baseline being either another design Variable b or the
+// InstalledQuantity q [see InvestmentFunction::set_variation_limits()]
+
+struct VariationLimit {
+ ColVariable * x;
+ ColVariable * b;   // nullptr if the baseline is the datum q
+ double q;
+ double lo;
+ double hi;
+ Block::Index k;    // the first component giving it, for the messages
+ Block::Index i;    // and its asset there
+ };
+
+// the limits that the components give, one for each pair of x and baseline,
+// ordered as the design Variable: components sharing the pair, as the
+// scenarios of a period with a common investment do, give it once, and two of
+// them giving it different limits make it throw, the change of one decision
+// having one limit
+
+static std::map< std::tuple< Block::Index , Block::Index , double > ,
+                 VariationLimit > variation_limits( const Block * IB )
+{
+ const auto x0 = static_cast< const InvestmentBlock * >( IB )->
+                                                   get_variables().data();
+ std::map< std::tuple< Block::Index , Block::Index , double > ,
+           VariationLimit > limits;
+ const auto funcs = component_functions( IB );
+ for( Block::Index k = 0 ; k < funcs.size() ; ++k ) {
+  const auto f = funcs[ k ];
+  const auto & avi = f->get_asset_variable_indices();
+  const auto & bvi = f->get_asset_baseline_variable_indices();
+  for( Block::Index i = 0 ; i < f->get_asset_indices().size() ; ++i ) {
+   const double hi = f->get_max_investment( i );
+   const double lo = - f->get_max_disinvestment( i );
+   if( ( hi == Inf< double >() ) && ( lo == - Inf< double >() ) )
+    continue;
+   const auto x = static_cast< ColVariable * >(
+                       f->get_active_var( avi.empty() ? i : avi[ i ] ) );
+   const auto b = bvi.empty() ? nullptr :
+                  static_cast< ColVariable * >( f->get_active_var( bvi[ i ] ) );
+   const double q = b ? 0 : f->get_installed_quantity( i );
+   const auto [ it , added ] = limits.try_emplace(
+                  { Block::Index( x - x0 ) ,
+                    b ? Block::Index( b - x0 ) : Inf< Block::Index >() , q } ,
+                  VariationLimit{ x , b , q , lo , hi , k , i } );
+   if( ( ! added ) && ( ( it->second.lo != lo ) || ( it->second.hi != hi ) ) )
+    throw( std::logic_error( "InvestmentBlock: the components " +
+           std::to_string( it->second.k ) + " (asset " +
+           std::to_string( it->second.i ) + ") and " + std::to_string( k ) +
+           " (asset " + std::to_string( i ) + ") give the change of the same "
+           "design Variable over the same baseline different MaxInvestment "
+           "or MaxDisinvestment" ) );
+   }
+  }
+ return( limits );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -1145,6 +1213,7 @@ InvestmentBlock::~InvestmentBlock()
  v_Block.clear();
 
  Constraint::clear( v_constraints );
+ Constraint::clear( v_variation_constraints );
 
  objective.clear();
  }
@@ -1333,6 +1402,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
                 "scenarios/periods of a weighted expectation, set a per-component"
                 " 'Weight' (probability x discount)." << std::endl;
 
+  variation_limits( this );  // refuses the components that disagree on one
+
   Block::deserialize( group );
   return;
   }
@@ -1463,6 +1534,20 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( constraints_generated() )
   return; // constraints have already been generated
 
+ add_bound_constraints( stcc );  // the bounds of the design Variable
+ add_variation_constraints();    // the limits on their change
+
+ // marked only if there is a row: until then the bounds can still be set and
+ // the components added [see set_variable_bounds() and add_component()]
+ if( ! ( v_lower_bound.empty() && v_upper_bound.empty() &&
+         v_variation_constraints.empty() ) )
+  set_constraints_generated();
+ }
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentBlock::add_bound_constraints( Configuration * stcc )
+{
  if( v_lower_bound.empty() && v_upper_bound.empty() )
   return; // there is no bound constraint
 
@@ -1538,8 +1623,36 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
   }
 
  add_static_constraint( v_constraints , "var_bounds" );
+ }
 
- set_constraints_generated();
+/*--------------------------------------------------------------------------*/
+
+void InvestmentBlock::add_variation_constraints( void )
+{
+ // the shift of a design Variable whose bounds are reformulated, whose value
+ // is then the one of the asset minus its lower bound
+ const auto shift = [ this ]( const ColVariable * x ) {
+  if( ( ! x ) || ( ! f_reformulate_bounds ) || v_lower_bound.empty() )
+   return( 0.0 );
+  const auto lb = v_lower_bound[ x - v_variables.data() ];
+  return( lb > - Inf< double >() ? lb : 0.0 );
+  };
+
+ const auto limits = variation_limits( this );
+ v_variation_constraints.resize( limits.size() );
+ auto row = v_variation_constraints.begin();
+ for( const auto & [ pair , l ] : limits ) {
+  LinearFunction::v_coeff_pair vars = { std::make_pair( l.x , 1.0 ) };
+  if( l.b )
+   vars.push_back( std::make_pair( l.b , -1.0 ) );
+  const double s = l.q - shift( l.x ) + shift( l.b );
+  row->set_lhs( l.lo + s );
+  row->set_rhs( l.hi + s );
+  ( row++ )->set_function( new LinearFunction( std::move( vars ) ) );
+  }
+
+ if( ! v_variation_constraints.empty() )
+  add_static_constraint( v_variation_constraints , "variation_bounds" );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -1717,10 +1830,13 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
  // If a tolerance has not been provided, use the default tolerance.
  const auto tolerance = config ? config->f_value : 1.0e-8;
 
- if( useabstract && ( ! v_constraints.empty() ) ) {
+ if( useabstract && ( ! ( v_constraints.empty() &&
+                             v_variation_constraints.empty() ) ) ) {
   // Use the set of Constraint to decide whether the current solution is
   // feasible.
-  return( RowConstraint::is_feasible( v_constraints , tolerance , false ) );
+  return( RowConstraint::is_feasible( v_constraints , tolerance , false ) &&
+          RowConstraint::is_feasible( v_variation_constraints , tolerance ,
+                                      false ) );
   }
 
  // Check the "physical representation"
@@ -1734,6 +1850,12 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
   if( v_upper_bound[ i ] < Inf< double >() )
    if( v_variables[ i ].get_value() > v_upper_bound[ i ] + tolerance )
     return( false );
+
+ for( const auto & [ pair , l ] : variation_limits( this ) ) {
+  const double d = l.x->get_value() - ( l.b ? l.b->get_value() : 0 ) - l.q;
+  if( ( d < l.lo - tolerance ) || ( d > l.hi + tolerance ) )
+   return( false );
+  }
 
  return( true );
  }
