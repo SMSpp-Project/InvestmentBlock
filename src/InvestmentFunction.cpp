@@ -1333,8 +1333,8 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
 
  // Compute the linearization if required
 
+ reset_linearization();
  if( f_compute_linearization ) {
-  reset_linearization();
   try {
    // the value function is the sum of the contributions of the sub-Blocks
    // that carry the investment, and so is its linearization: they have to be
