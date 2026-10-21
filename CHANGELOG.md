@@ -221,6 +221,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- a `MultiStageStochasticBlock` whose first-stage paths are only in the
+  `TwoStageStochasticBlock` of a lower level, below an inner
+  `MultiStageStochasticBlock`, is kept whole: the deserialize looked for
+  them at the root and its sub-Blocks only, hence it separated the
+  scenarios, dropping the ties among those below, and solved a relaxation
+  with no warning
+
 - the simulation of an `InvestmentFunction` over an `SDDPBlock` runs each
   scenario on a copy of the SDDPBlock, as `sddp_solver` does, so that the
   state a stage passes to the next reaches units whose Variable are not yet

@@ -236,6 +236,27 @@ static std::vector< std::pair< const ColVariable * , Block::Index > >
 // an investment it does not share is free in all its scenarios but the
 // first one
 
+// whether a first-stage AbstractPath of node, or of any
+// TwoStageStochasticBlock below it, ties the scenarios: the inner Block of a
+// MultiStageStochasticBlock may be one in turn, whose paths tie the scenarios
+// below it
+
+static bool has_first_stage_paths( const TwoStageStochasticBlock * node )
+{
+ if( ! node->get_paths_to_static_here_and_now_vars().empty() )
+  return( true );
+
+ for( Block::Index l = 0 ; l < node->get_number_nested_Blocks() ; ++l )
+  if( const auto sub = dynamic_cast< const TwoStageStochasticBlock * >(
+                                            node->get_nested_Block( l ) ) )
+   if( has_first_stage_paths( sub ) )
+    return( true );
+
+ return( false );
+ }
+
+/*--------------------------------------------------------------------------*/
+
 static std::string first_stage_obstacle( const TwoStageStochasticBlock * root ,
                                          const TwoStageStochasticBlock * node ,
                                          const std::string & where )
@@ -1062,16 +1083,11 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
 	 std::to_string( k ) + "." ) );
 
  // the scenarios can be solved one at a time only if they share nothing: a
- // first-stage AbstractPath, of the root or of an inner Block, ties them, and
- // what it reaches says why they stay together; a path to a design is not
- // there any more [see convert_design_mode()]. The paths are counted, not
- // their group, which serialize() always writes
- bool tied = ! tssb->get_paths_to_static_here_and_now_vars().empty();
- if( inner_type == "MultiStageStochasticBlock" )
-  for( auto sub : tssb->get_nested_Blocks() )
-   tied = tied || ( ! static_cast< TwoStageStochasticBlock * >( sub )->
-                    get_paths_to_static_here_and_now_vars().empty() );
- if( tied ) {
+ // first-stage AbstractPath, of the root or of a Block at any depth below
+ // it, ties them, and what it reaches says why they stay together; a path
+ // to a design is not there any more [see convert_design_mode()]. The paths
+ // are counted, not their group, which serialize() always writes
+ if( has_first_stage_paths( tssb ) ) {
   std::string why;
   is_separable( tssb , & why );
   return( whole( why ) );
