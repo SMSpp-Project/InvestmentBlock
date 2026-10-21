@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the marker of the extraction carries the format in its name, so that a
   tree extracted before extracts once more
 
+- the linearization of the scale of a unit takes its terms in the balances
+  of all the carriers of the UCBlock, each with the efficiency of its
+  outputs, from `UCBlock::for_each_balance_term()`, and its pollutant zones
+  from `UCBlock::get_generator_pollutant_zone()`, instead of the node of
+  each generator on the electricity, whose map is gone
+
+- the line of an asset of type 1 may be of any carrier of the UCBlock, the
+  lines of the carriers being numbered one carrier after the other, those
+  of the electricity first (the line l of carrier c is L_0 + ... + L_{c-1} +
+  l), and its investment is the kappa of that line in the NetworkBlock of
+  its carrier, which must be one per time instant
+
 ### Fixed
 
 - the simulation of an `InvestmentFunction` over an `SDDPBlock` runs each
@@ -38,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `InitUpDownTime` of the next, which kept that of the data (and missed,
   e.g., the cost of its minimum up time); the data of the inner Block are
   no longer changed by the simulation
+
+- the linearization of the scale of a unit whose outputs are not the
+  electricity alone, or whose generators have no node on the electricity,
+  which gave the active power the dual of the electric row only, with
+  coefficient 1, and the pollutant zone of the node 0
 
 ## [0.3.0] - 2026-10-09
 

@@ -634,7 +634,10 @@ class InvestmentFunction : public C05Function , public Block {
   *        transmission line. If it is a UnitBlock, then its index is simply
   *        the index that this UnitBlock has within its UCBlock. If it is a
   *        transmission line, then its index is the index that this
-  *        transmission line has within its NetworkBlock. The correspondence
+  *        transmission line has within its NetworkBlock, the lines of the
+  *        carriers of the UCBlock being numbered one carrier after the
+  *        other, those of the carrier 0 first (see
+  *        UCBlock::get_network_blocks( Index )). The correspondence
   *        between \p asset_indices and \p x is positional, i.e., if \p
   *        asset_indices is not empty, \p asset_indices[ i ] is the index of
   *        the asset associated with the i-th active variable of this function
@@ -1552,7 +1555,11 @@ class InvestmentFunction : public C05Function , public Block {
   *   converter of a BatteryUnitBlock, then its index is simply the index
   *   that this UnitBlock has within its UCBlock. If it is a transmission
   *   line, then its index is the index that this transmission line has
-  *   within its NetworkBlock.
+  *   within its NetworkBlock, the lines of the carriers of the UCBlock being
+  *   numbered one carrier after the other, those of the carrier 0 first: the
+  *   line l of carrier c has index L_0 + ... + L_{c-1} + l, L_k being the
+  *   number of lines of carrier k, whose NetworkBlock must then be one per
+  *   time instant (see UCBlock::get_network_blocks( Index )).
   *
   * - The one-dimensional variable "AssetType", of type netCDF::Uint(), which
   *   is either a scalar or indexed over "NumAssets", indicating the type of
@@ -2085,9 +2092,6 @@ class InvestmentFunction : public C05Function , public Block {
  FunctionValue f_value;
  ///< the value of this InvestmentFunction after compute() is called
 
- std::vector< Index > v_block_indices_map;
- ///< map the index of an UnitBlock to the index of the asset under investment
-
  std::vector< Index > v_asset_indices;
  ///< indices of the assets that are subject to investment
 
@@ -2111,15 +2115,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< double > v_installed_quantity;
  ///< amount of each asset currently installed in the system
-
- std::vector< std::vector< std::vector< Index > > > generator_node_map;
- ///< maps the index of a generator to the node it belongs to
- /**< This vector maps a generator to the node it belongs to. The generator is
-  * identified by a triplet (stage, unit_block_index, generator_index), where
-  * stage indicates the stage (between 0 and SDDPBlock::get_time_horizon() -
-  * 1), unit_block_index identifies the UnitBlock to which the generator
-  * belongs (and index between 0 and v_block_indices.size() - 1) and
-  * generator_index is the index of the generator within its UnitBlock. */
 
  std::vector< double > v_lower_bound;
  ///< lower bound on the value of the active variables
@@ -2775,17 +2770,6 @@ class InvestmentFunction : public C05Function , public Block {
  void update_linearization_network_blocks( Index stage ,
 					   Index sub_block_index ,
             const std::vector< std::pair< Index , Index > > & line_indices );
-
-/*--------------------------------------------------------------------------*/
- /// returns the node to which the given generator belongs
-
- Index get_node( Index stage , Index unit_block_index , Index generator )
-  const;
-
-/*--------------------------------------------------------------------------*/
- /// builds the mapping between generator and the node it belongs to
-
- void build_generator_node_map();
 
 /*--------------------------------------------------------------------------*/
  /// returns a pointer to the BendersBFunction associated with the given stage

@@ -901,7 +901,6 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
  v_asset_type.erase( v_asset_type.begin() + i );
 
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
 
  if( ( ! f_Observer ) ||
      ( ! f_Observer->issue_mod( issueMod , Function::eModFVars ) ) )
@@ -926,7 +925,6 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
   return;
 
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
 
  if( ( range.first == 0 ) && ( range.second == Index( v_x.size() ) ) ) {
   // removing *all* Variables
@@ -1051,7 +1049,6 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
   v_disinvestment_cost.clear();
 
   f_blocks_are_updated = false;
-  generator_node_map.clear(); // the generator map must be rebuilt
 
   // Now issue the Modification: note that the subset is empty.
   // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
@@ -1073,7 +1070,6 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
                                 "Variable index in the Subset indices." ) );
 
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
 
  const auto erase = [ this , &indices ]() {
   compact( v_asset_indices , indices );
@@ -1277,9 +1273,6 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  // the Modification of the inner Block are ignored until the linearization
  // is read, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
-
- if( generator_node_map.empty() )
-  build_generator_node_map();
 
  if( changedvars || ( ! f_blocks_are_updated ) ) {
   // Update the Blocks.
@@ -1514,9 +1507,6 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
  // the Modification of the inner Blocks are ignored until the simulation is
  // over, and the flag is put back on every way out, errors included
  FlagGuard ignore_modifications( f_ignore_modifications , true );
-
- if( generator_node_map.empty() )
-  build_generator_node_map();
 
  if( changedvars || ( ! f_blocks_are_updated ) ) {
   // Update the Blocks.
@@ -1814,9 +1804,6 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    solver->set_id( f_id );
    }
   }
-
- if( generator_node_map.empty() )
-  build_generator_node_map();
 
  if( changedvars || ( ! f_blocks_are_updated ) ) {
   // Update the Blocks.
@@ -2762,108 +2749,18 @@ InvestmentFunction::compute_farkas_value( Index stage ,
 
 /*--------------------------------------------------------------------------*/
 
-Index InvestmentFunction::get_node( Index stage , Index block_index ,
-                                    Index generator ) const {
- // i is between 0 and the number of UnitBlock assets - 1.
- const auto i = v_block_indices_map[ block_index ];
- return( generator_node_map[ stage ][ i ][ generator ] );
-}
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::build_generator_node_map() {
-
- // The indices of the UnitBlocks
- std::vector< Index > block_indices;
- block_indices.reserve( v_asset_indices.size() );
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-  if( v_asset_type[ i ] == eUnitBlock )
-   block_indices.push_back( v_asset_indices[ i ] );
- }
-
- if( block_indices.empty() )
-  return;
-
- v_block_indices_map.resize
-  ( 1 + * std::max_element( block_indices.cbegin() , block_indices.cend() ) ,
-    Inf< Index >() );
- for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-  v_block_indices_map[ block_indices[ i ] ] = i;
- }
-
- const auto num_stages = get_number_stages();
-
- generator_node_map.resize( num_stages );
-
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-
-  generator_node_map[ stage ].resize( block_indices.size() );
-
-  const auto ucblock = get_ucblock( stage , 0 );
-  const auto network_data = ucblock->get_NetworkData();
-  const auto number_nodes = network_data ? network_data->get_number_nodes() : 1;
-
-  if( number_nodes <= 1 ) {
-   // Since there is only one node, all generators belong to the same node
-   // (node 0).
-   for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-    const auto unit_block = ucblock->get_unit_block( block_indices[ i ] );
-    const auto num_generators = unit_block->get_number_generators();
-    generator_node_map[ stage ][ i ].resize( num_generators , 0 );
-   }
-   continue;
-  }
-
-  // There are multiple nodes.
-
-  const auto number_units = ucblock->get_number_units();
-  const auto & generator_node = ucblock->get_generator_node();
-
-  for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-
-   Index elc_generator = 0;
-   for( Index unit_id = 0 ; unit_id < number_units ; ++unit_id ) {
-
-    const auto unit_block = ucblock->get_unit_block( unit_id );
-    const auto num_generators = unit_block->get_number_generators();
-
-    auto it = std::find( block_indices.cbegin() ,
-                         block_indices.cend() , unit_id );
-
-    const auto index = std::distance( block_indices.cbegin() , it );
-
-    if( index == block_indices.size() ) {
-     // This UnitBlock is not subject to investment.
-     elc_generator += num_generators;
-     continue;
-    }
-
-    generator_node_map[ stage ][ index ].resize( num_generators );
-
-    for( Index generator = 0 ; generator < num_generators ;
-         ++generator , ++elc_generator ) {
-     generator_node_map[ stage ][ index ][ generator ] =
-      generator_node[ elc_generator ];
-    }
-   } // end( for each UnitBlock )
-  } // end( for each node )
- } // end( for each stage )
-} // end( InvestmentFunction::build_generator_node_map )
-
-/*--------------------------------------------------------------------------*/
-
 void InvestmentFunction::scale_linking_terms
 ( Index block_index , Index stage , Index sub_block_index ,
   const std::function< void( const ColVariable * , double ) > & term ,
   double & constant ) {
 
  /* The scale factor multiplies every term of the UnitBlock in the linking
-  * constraints of the UCBlock (active and reactive node injection, primary
-  * and secondary reserve, inertia and pollutant budget) [see
-  * UnitBlock::scale()]: each term of one copy of the unit is given to term()
-  * as its ColVariable and its coefficient times the dual value of the
-  * constraint, and what does not multiply a ColVariable goes in constant. */
+  * constraints of the UCBlock (the active and reactive balances of the
+  * carriers, primary and secondary reserve, inertia and pollutant budget)
+  * [see UnitBlock::scale()]: each term of one copy of the unit is given to
+  * term() as its ColVariable and its coefficient times the dual value of
+  * the constraint, and what does not multiply a ColVariable goes in
+  * constant. */
 
  const auto ucblock = get_ucblock( stage , sub_block_index );
  const auto network_data = ucblock->get_NetworkData();
@@ -2874,60 +2771,19 @@ void InvestmentFunction::scale_linking_terms
 
  constant = 0;
 
- // Add the contribution associated with the node injection constraints
+ // Add the contribution associated with the balance constraints of all the
+ // carriers, active and reactive [see UCBlock::for_each_balance_term()]:
+ // each term of the unit, divided by its scale, is factor * var - constant
+ // in a row whose dual value is dual
 
- const auto & node_injection_constraints =
-  ucblock->get_node_injection_constraints();
-
- for( Index t = 0 ; t < time_horizon ; ++t ) {
-
-  for( Index g = 0 ; g < block->get_number_generators() ; ++g ) {
-
-   const auto node = get_node( stage , block_index , g );
-
-   const auto & constraint = node_injection_constraints[ t ][ node ];
-   const auto function = constraint.get_function();
-
-   const auto dual = constraint.get_dual();
-   const auto & active_power = block->get_active_power( g )[ t ];
-   term( & active_power , dual );
-
-   assert( active_power.is_active( &constraint ) < Inf< Index >() );
-   assert( function->is_active( &active_power ) < Inf< Index >() );
-
-   if( auto fc = block->get_fixed_consumption( g ) ) {
-    if( auto u = block->get_commitment( g ) ) {
-     const auto fixed_consumption = fc[ t ];
-     // the unit gives the node k * ( p - fc * ( 1 - u ) ): the fixed
-     // consumption of a unit that is off is subtracted
-     constant -= dual * fixed_consumption;
-     term( & u[ t ] , dual * fixed_consumption );
-
-     assert( u[ t ].is_active( &constraint ) );
-     assert( function->is_active( &u[ t ] ) );
-    }
-   }
-
-  } // end( for each generator )
- } // end( for each time instant )
-
- // Add the contribution associated with the reactive node injection
- // constraints, which exist when the network handles the reactive power:
- // they carry the reactive power of each generator of the unit, scaled as
- // the active one is, and nothing else (the fixed consumption of a unit that
- // is off is an active power)
-
- const auto & reactive_injection_constraints =
-  ucblock->get_reactive_node_injection_constraints();
-
- if( ! reactive_injection_constraints.empty() )
-  for( Index t = 0 ; t < time_horizon ; ++t )
-   for( Index g = 0 ; g < block->get_number_generators() ; ++g )
-    if( const auto reactive_power = block->get_reactive_power( g ) ) {
-     const auto node = get_node( stage , block_index , g );
-     term( & reactive_power[ t ] ,
-           reactive_injection_constraints[ t ][ node ].get_dual() );
-     }
+ for( const bool reactive : { false , true } )
+  ucblock->for_each_balance_term( block_index , reactive ,
+   [ & ]( const FRowConstraint & row , const ColVariable * var ,
+          double factor , double cst ) {
+    const auto dual = row.get_dual();
+    term( var , dual * factor );
+    constant -= dual * cst;
+    } );
 
  // Add the contribution associated with the primary demand constraints.
 
@@ -3086,14 +2942,8 @@ void InvestmentFunction::scale_linking_terms
 
  if( ! pollutant_constraints.empty() ) {
 
-  const auto & pollutant_zone = ucblock->get_pollutant_zone();
   const auto & number_pollutant_zones = ucblock->get_number_pollutant_zones();
   const bool has_storage_rho = ! ucblock->get_pollutant_storage_rho().empty();
-
-  // an empty table means one zone per pollutant, with all the nodes in it
-  const auto zone_of_node = [ & ]( Index p , Index node ) -> Index {
-   return( pollutant_zone.empty() ? 0 : pollutant_zone[ p ][ node ] );
-  };
 
   // the generators and the storages of the UCBlock are numbered unit after
   // unit: the index of the first ones of this UnitBlock
@@ -3108,7 +2958,8 @@ void InvestmentFunction::scale_linking_terms
   for( Index p = 0 ; p < pollutant_constraints.size() ; ++p ) {
 
    for( Index g = 0 ; g < block->get_number_generators() ; ++g ) {
-    const auto zone = zone_of_node( p , get_node( stage , block_index , g ) );
+    const auto zone = ucblock->get_generator_pollutant_zone( p ,
+							    first_generator + g );
     if( zone >= number_pollutant_zones[ p ] )
      continue;  // the generator belongs to no zone of pollutant p
     const auto active_power = block->get_active_power( g );
@@ -3123,9 +2974,7 @@ void InvestmentFunction::scale_linking_terms
    if( ! has_storage_rho )
     continue;
 
-   const auto zone = zone_of_node( p , block->get_number_generators() ?
-                                       get_node( stage , block_index , 0 ) :
-                                       0 );
+   const auto zone = ucblock->get_storage_pollutant_zone( p , block_index );
    if( zone >= number_pollutant_zones[ p ] )
     continue;  // the storages belong to no zone of pollutant p
    const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
@@ -3441,6 +3290,57 @@ static void check_no_design_line( const DCNetworkBlock * network ,
  }
 
 /*--------------------------------------------------------------------------*/
+/* The line assets of the UCBlock split by carrier: the lines of the assets
+ * of type eLine are numbered carrier after carrier, those of the carrier 0
+ * first, as the nodes in UCBlock::set_energy_demand(); entry c has the pairs
+ * ( line of the carrier , x ) of the pairs ( line , x ) on carrier c. */
+
+template< class T >
+static std::vector< std::vector< std::pair< Block::Index , T > > >
+lines_by_carrier( const UCBlock * ucblock ,
+		  const std::vector< std::pair< Block::Index , T > > & lines )
+{
+ const auto nc = ucblock->get_number_carriers();
+ std::vector< Block::Index > first( nc + 1 , 0 );
+ for( Block::Index c = 0 ; c < nc ; ++c ) {
+  const auto & nbs = ucblock->get_network_blocks( c );
+  const auto dc = nbs.empty() ? nullptr :
+                  dynamic_cast< const DCNetworkBlock * >( nbs.front() );
+  first[ c + 1 ] = first[ c ] + ( dc ? dc->get_number_lines() : 0 );
+  }
+
+ std::vector< std::vector< std::pair< Block::Index , T > > > split( nc );
+ for( const auto & [ line , x ] : lines ) {
+  const Block::Index c = std::upper_bound( first.begin() , first.end() ,
+					   line ) - first.begin() - 1;
+  if( c >= nc )
+   throw( std::logic_error( "InvestmentFunction: the line " +
+			    std::to_string( line ) + " of an asset is not a "
+			    "line of the UCBlock" ) );
+  split[ c ].push_back( { line - first[ c ] , x } );
+  }
+ return( split );
+ }
+
+/*--------------------------------------------------------------------------*/
+/* The NetworkBlock of carrier c of the UCBlock at time t: that of the
+ * carrier 0 as UCBlock::get_network_block() gives it, and that of a carrier
+ * c > 0 among those of the carrier, which must be one per time instant. */
+
+static NetworkBlock * network_block_at( const UCBlock * ucblock ,
+					Block::Index c , Block::Index t )
+{
+ if( c == 0 )
+  return( ucblock->get_network_block( t ) );
+ const auto & nbs = ucblock->get_network_blocks( c );
+ if( nbs.size() != ucblock->get_time_horizon() )
+  throw( std::logic_error( "InvestmentFunction: a line of Carrier_" +
+			   std::to_string( c ) + " is an asset, while its "
+			   "NetworkBlock are not one per time instant" ) );
+ return( nbs[ t ] );
+ }
+
+/*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::update_linearization_network_blocks
 ( Index stage , Index sub_block_index ,
@@ -3455,9 +3355,12 @@ void InvestmentFunction::update_linearization_network_blocks
  const auto ucblock = get_ucblock( stage , sub_block_index );
  const auto time_horizon = ucblock->get_time_horizon();
 
- for( Index t = 0 ; t < time_horizon ; ++t ) {
+ const auto by_carrier = lines_by_carrier( ucblock , line_indices );
+ for( Index c = 0 ; c < by_carrier.size() ; ++c )
+  for( Index t = 0 ; ( t < time_horizon ) && ( ! by_carrier[ c ].empty() ) ;
+       ++t ) {
 
-  const auto network_block = ucblock->get_network_block( t );
+  const auto network_block = network_block_at( ucblock , c , t );
 
   if( const auto dc_network =
       dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
@@ -3491,7 +3394,7 @@ void InvestmentFunction::update_linearization_network_blocks
     * which is its default but not its only value. */
    const auto scale = dc_network->get_C_v_scal();
 
-   for( const auto & [ line , var_index ] : line_indices ) {
+   for( const auto & [ line , var_index ] : by_carrier[ c ] ) {
 
     check_no_design_line( dc_network , line );
 
@@ -3535,9 +3438,12 @@ void InvestmentFunction::update_linearization_network_blocks
  const auto ucblock = get_ucblock( stage , sub_block_index );
  const auto time_horizon = ucblock->get_time_horizon();
 
- for( Index t = 0 ; t < time_horizon ; ++t ) {
+ const auto by_carrier = lines_by_carrier( ucblock , line_indices );
+ for( Index c = 0 ; c < by_carrier.size() ; ++c )
+  for( Index t = 0 ; ( t < time_horizon ) && ( ! by_carrier[ c ].empty() ) ;
+       ++t ) {
 
-  const auto network_block = ucblock->get_network_block( t );
+  const auto network_block = network_block_at( ucblock , c , t );
 
   if( const auto dc_network =
       dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
@@ -3555,7 +3461,7 @@ void InvestmentFunction::update_linearization_network_blocks
    // [see the other overload]
    const auto scale = dc_network->get_C_v_scal();
 
-   for( const auto & [ line , var_index ] : line_indices ) {
+   for( const auto & [ line , var_index ] : by_carrier[ c ] ) {
 
     check_no_design_line( dc_network , line );
 
@@ -3808,13 +3714,26 @@ void InvestmentFunction::update_network_blocks
   auto ucblock = get_ucblock( stage , sub_block_index );
   const auto time_horizon = ucblock->get_time_horizon();
 
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
+  // the lines and their investment, carrier by carrier
+  std::vector< std::pair< Index , double > > lines( line_indices.size() );
+  for( Index i = 0 ; i < line_indices.size() ; ++i )
+   lines[ i ] = { line_indices[ i ] , investment[ i ] };
+  const auto by_carrier = lines_by_carrier( ucblock , lines );
 
-   auto network_block = ucblock->get_network_block( t );
+  for( Index c = 0 ; c < by_carrier.size() ; ++c )
+   for( Index t = 0 ; ( t < time_horizon ) && ( ! by_carrier[ c ].empty() ) ;
+	++t ) {
+
+   auto network_block = network_block_at( ucblock , c , t );
 
    if( auto dc_network = dynamic_cast< DCNetworkBlock * >( network_block ) ) {
-    auto subset = line_indices;
-    dc_network->set_kappa( investment.cbegin() , std::move( subset ) );
+    Subset subset;
+    std::vector< double > kappa;
+    for( const auto & [ line , x ] : by_carrier[ c ] ) {
+     subset.push_back( line );
+     kappa.push_back( x );
+     }
+    dc_network->set_kappa( kappa.cbegin() , std::move( subset ) );
    }
    else {
     // Unrecognized NetworkBlock
@@ -4004,7 +3923,6 @@ void InvestmentFunction::send_nuclear_modification
  // "nuclear modification" for Function: everything changed
  global_pool.invalidate();
  f_blocks_are_updated = false;
- generator_node_map.clear(); // the generator map must be rebuilt
  if( f_Observer )
   f_Observer->add_Modification
    ( std::make_shared< FunctionMod >( this , FunctionMod::NaNshift ) , chnl );
