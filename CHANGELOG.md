@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   factor, as for a `ThermalUnitBlock`, where the unit was refused as
   unrecognized; the unit test checks its linearization
 
+- the C++20 module `smspp.investmentblock` (`src/InvestmentBlock.cppm`),
+  which exports every name that the headers declare at namespace scope and
+  re-exports `smspp.sddpblock` and `smspp.twostagestochasticblock` and
+  `smspp.ucblock`, so that a source file can write `import
+  smspp.investmentblock;` in place of the `#include` of the headers; it is
+  built with the CMake option `SMSpp_BUILD_MODULE`, as the target
+  `SMS++::InvestmentBlock_module`
+
 ### Changed
 
 - the instances of `data/` are downloaded and extracted by the targets

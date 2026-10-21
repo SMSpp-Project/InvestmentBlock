@@ -159,6 +159,42 @@ target_link_libraries(${modName} PUBLIC
 # the library with this notation.
 add_library(${modNamespace}::${modName} ALIAS ${modName})
 
+# ----- C++20 module -------------------------------------------------------- #
+# The module smspp.investmentblock (src/InvestmentBlock.cppm) exports the names
+# of the headers and re-exports smspp.sddpblock, smspp.twostagestochasticblock,
+# smspp.ucblock; like the module smspp of the core, it is built when
+# SMSpp_BUILD_MODULE is ON, which needs CMake 3.28 or later, the Ninja or
+# Visual Studio generator and a compiler that scans the dependencies of the
+# modules.
+if (SMSpp_BUILD_MODULE)
+    if (CMAKE_VERSION VERSION_LESS 3.28)
+        message(FATAL_ERROR "SMSpp_BUILD_MODULE needs CMake 3.28 or later")
+    endif ()
+    # the scan of the module dependencies, and $<LINK_ONLY> honoured also for
+    # the target itself, which cmake_policy(VERSION 3.15) above leaves off
+    cmake_policy(SET CMP0155 NEW)
+    cmake_policy(SET CMP0131 NEW)
+
+    add_library(${modName}_module)
+    target_sources(${modName}_module PUBLIC
+            FILE_SET CXX_MODULES
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src
+            FILES src/${modName}.cppm)
+    target_compile_features(${modName}_module PUBLIC cxx_std_20)
+    # the interface takes the include paths and the definitions of the
+    # library, but not its compile options (e.g., the -fopenmp of a source,
+    # which no header needs), so that it agrees with the module it imports
+    target_include_directories(${modName}_module PRIVATE
+            $<TARGET_PROPERTY:${modName},INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(${modName}_module PRIVATE
+            $<TARGET_PROPERTY:${modName},INTERFACE_COMPILE_DEFINITIONS>)
+    target_link_libraries(${modName}_module PUBLIC $<LINK_ONLY:${modName}>
+            ${modNamespace}::SDDPBlock_module
+            ${modNamespace}::TwoStageStochasticBlock_module
+            ${modNamespace}::UCBlock_module)
+    add_library(${modNamespace}::${modName}_module ALIAS ${modName}_module)
+endif ()
+
 # ----- Subdirectories ------------------------------------------------------ #
 if (BUILD_TESTING)
     add_subdirectory(test)
@@ -250,6 +286,17 @@ install(TARGETS ${modName}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} # .dll
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} # .so .dylib
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}) # .lib
+
+# Install the module, whose interface is compiled again by each importer
+if (SMSpp_BUILD_MODULE)
+    install(TARGETS ${modName}_module
+            EXPORT ${modName}Targets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            FILE_SET CXX_MODULES
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${modNamespace}/modules)
+endif ()
 
 # Install the headers
 install(DIRECTORY include/
