@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- the simulation of an `InvestmentFunction` over an `SDDPBlock` runs each
+  scenario on a copy of the SDDPBlock, as `sddp_solver` does, so that the
+  state a stage passes to the next reaches units whose Variable are not yet
+  generated: a `ThermalUnitBlock` that switched in a stage refused the
+  `InitUpDownTime` of the next, which kept that of the data (and missed,
+  e.g., the cost of its minimum up time); the data of the inner Block are
+  no longer changed by the simulation
+
 ### Added
 
 - an investment in a `ConversionUnitBlock` is represented by its scale
