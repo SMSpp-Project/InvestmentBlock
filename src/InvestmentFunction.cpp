@@ -87,6 +87,66 @@ class FlagGuard {
  const bool f_saved;
 };
 
+/* The copies of an SDDPBlock on which the scenarios are simulated [see
+ * InvestmentFunction::compute_SDDPBlock()]: the image of the SDDPBlock and
+ * the BlockConfig of the Block of each of its stages, as the training leaves
+ * them. A copy has that BlockConfig and a single Solver, an SDDPGreedySolver
+ * with the ComputeConfig and the functions of the given one, which
+ * configures the Block of each stage when it gets there and takes its
+ * Solver away when it leaves the copy. */
+
+Block * stage_block( SDDPBlock * sddp_block , Block::Index t ,
+                     Block::Index i ) {
+ auto benders_block = sddp_block->get_sub_Block( t , i )->get_inner_block();
+ return( static_cast< BendersBFunction * >( static_cast< FRealObjective * >(
+          benders_block->get_objective() )->get_function() )->
+         get_inner_block() );
+ }
+
+struct SimulationImage {
+ std::vector< unsigned char > image;
+ std::vector< CRBlockConfig > stage_bc;
+ Block::Index num_stages = 0;
+ Block::Index num_sub_blocks = 0;
+
+ explicit SimulationImage( SDDPBlock * sddp_block ) :
+  num_stages( sddp_block->get_time_horizon() ) ,
+  num_sub_blocks( sddp_block->get_num_sub_blocks_per_stage() ) {
+  sddp_block->Block::serialize( image );
+  stage_bc.reserve( num_stages * num_sub_blocks );
+  for( Block::Index t = 0 ; t < num_stages ; ++t )
+   for( Block::Index i = 0 ; i < num_sub_blocks ; ++i )
+    stage_bc.emplace_back( stage_block( sddp_block , t , i ) );
+  }
+
+ // a new copy, with the SDDPGreedySolver that simulates it in solver
+ SDDPBlock * copy( const SDDPGreedySolver * original ,
+                   SDDPGreedySolver * & solver ) const {
+  auto c = static_cast< SDDPBlock * >( Block::deserialize( image ) );
+  Block::Index k = 0;
+  for( Block::Index t = 0 ; t < num_stages ; ++t )
+   for( Block::Index i = 0 ; i < num_sub_blocks ; ++i ) {
+    // apply() takes the content of what it applies, hence a clone
+    auto bc = stage_bc[ k++ ].clone();
+    bc->apply( stage_block( c , t , i ) );
+    delete bc;
+    }
+  solver = static_cast< SDDPGreedySolver * >(
+                              Solver::new_Solver( original->classname() ) );
+  c->register_Solver( solver );
+  auto cc = original->get_ComputeConfig();
+  solver->set_ComputeConfig( cc );
+  delete cc;
+  solver->set_callback( original->get_callback() );
+  return( c );
+  }
+
+ static void release( SDDPBlock * c , SDDPGreedySolver * solver ) {
+  c->unregister_Solver( solver , true );
+  delete c;
+  }
+ };
+
 }  // namespace
 
 /*--------------------------------------------------------------------------*/
@@ -1618,6 +1678,18 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
 
  auto simulation_value = decltype( f_value )( 0 );
 
+ // each scenario is simulated on a copy of the SDDPBlock, as sddp_solver
+ // does: the SDDPGreedySolver passes to each stage the final state of the
+ // previous one [see SDDPGreedySolver::set_callback()], which a unit whose
+ // Variable are generated cannot always take (a ThermalUnitBlock refuses an
+ // InitUpDownTime that changes them), while the units of a copy are
+ // generated only when its SDDPGreedySolver gets to their stage. The copy
+ // has the data of the inner Block as the training leaves them, cuts and
+ // investment included [see SimulationImage], and the SDDPGreedySolver the
+ // functions of the one of the inner Block whose sub-Block index it has,
+ // which is locked meanwhile
+ const SimulationImage simulation_image( get_sddp_block() );
+
  #pragma omp parallel for reduction( + : simulation_value )
  for( int scenario = 0 ; scenario < num_scenarios ; ++scenario ) {
 
@@ -1625,16 +1697,25 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    continue;
 
   const auto sub_block_index = lock_sub_block();
-  auto solver = get_solver< SDDPGreedySolver >
+  auto original = get_solver< SDDPGreedySolver >
    ( v_greedy_solvers[ sub_block_index ] );
-  assert( solver );
+  assert( original );
+
+  SDDPBlock * copy = nullptr;
+  SDDPGreedySolver * solver = nullptr;
+  #pragma omp critical( InvestmentFunction_copy )
+  copy = simulation_image.copy( original , solver );
+
+  const auto release_copy = [ & ]() {
+   #pragma omp critical( InvestmentFunction_copy )
+   SimulationImage::release( copy , solver );
+   };
+
   solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
-  // TODO
-  //solver->set_par
-  //( SDDPGreedySolver::intSubBlockIndex , int( sub_block_index ) );
   const auto status = solver->compute( true );
 
   if( ! solver->has_var_solution() ) {
+   release_copy();
    unlock_sub_block( sub_block_index );
    #pragma omp critical( InvestmentFunction )
    {
@@ -1648,14 +1729,27 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    #pragma omp critical( InvestmentFunction )
    {
     f_solver_status = status;
-    if( f_compute_linearization )
-     update_linearization( sub_block_index );
+    if( f_compute_linearization ) {
+     f_simulated_sddp_block = copy;
+     f_simulated_solver = solver;
+     try {
+      update_linearization( sub_block_index );
+      }
+     catch( ... ) {
+      f_simulated_sddp_block = nullptr;
+      f_simulated_solver = nullptr;
+      throw;
+      }
+     f_simulated_sddp_block = nullptr;
+     f_simulated_solver = nullptr;
+     }
    }
   }
   catch( const std::exception & e ) {
    // An error occurred while updating the linearization.
    std::cout << "InvestmentFunction::compute(): an error occurred while "
     "updating the linearization: '" << e.what() << "'" << std::endl;
+   release_copy();
    unlock_sub_block( sub_block_index );
    #pragma omp critical( InvestmentFunction )
    {
@@ -1668,6 +1762,8 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   // Update the function value
 
   simulation_value += solver->get_var_value();
+
+  release_copy();
 
   // TODO
   // Possibly output the solution
@@ -1862,6 +1958,13 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  const auto scenario_end = num_scenarios;
 #endif
 
+ // each scenario is simulated on a copy of the replica it is given, as in
+ // compute_SDDPBlock() [see SimulationImage]
+ std::vector< SimulationImage > simulation_images;
+ simulation_images.reserve( v_Block.size() );
+ for( Index i = 0 ; i < v_Block.size() ; ++i )
+  simulation_images.emplace_back( get_sddp_block( i ) );
+
  #pragma omp parallel for reduction( + : simulation_value )
  for( int scenario = scenario_start ; scenario < int( scenario_end ) ;
       ++scenario ) {
@@ -1870,8 +1973,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    continue;
 
   const auto sub_block_index = lock_sub_block();
-  auto solver = get_solver< SDDPGreedySolver >( sub_block_index );
-  if( ! solver ) {
+  auto original = get_solver< SDDPGreedySolver >( sub_block_index );
+  if( ! original ) {
    #pragma omp critical( InvestmentFunction )
    {
     interrupt_loop = true;
@@ -1880,10 +1983,22 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    unlock_sub_block( sub_block_index );
    continue;
    }
+
+  SDDPBlock * copy = nullptr;
+  SDDPGreedySolver * solver = nullptr;
+  #pragma omp critical( InvestmentFunction_copy )
+  copy = simulation_images[ sub_block_index ].copy( original , solver );
+
+  const auto release_copy = [ & ]() {
+   #pragma omp critical( InvestmentFunction_copy )
+   SimulationImage::release( copy , solver );
+   };
+
   solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
   const auto status = solver->compute( true );
 
   if( ! solver->has_var_solution() ) {
+   release_copy();
    #pragma omp critical( InvestmentFunction )
    {
     interrupt_loop = true;
@@ -1901,14 +2016,27 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    #pragma omp critical( InvestmentFunction )
    {
     f_solver_status = status;
-    if( f_compute_linearization )
-     update_linearization( sub_block_index , local_linearization );
+    if( f_compute_linearization ) {
+     f_simulated_sddp_block = copy;
+     f_simulated_solver = solver;
+     try {
+      update_linearization( sub_block_index , local_linearization );
+      }
+     catch( ... ) {
+      f_simulated_sddp_block = nullptr;
+      f_simulated_solver = nullptr;
+      throw;
+      }
+     f_simulated_sddp_block = nullptr;
+     f_simulated_solver = nullptr;
+     }
     }
    }
   catch( const std::exception & e ) {
    std::cerr << "InvestmentFunction::compute_SDDPBlock_replicas: an error "
                 "occurred while updating the linearization: '"
              << e.what() << "'" << std::endl;
+   release_copy();
    unlock_sub_block( sub_block_index );
    #pragma omp critical( InvestmentFunction )
    {
@@ -1925,9 +2053,11 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
   if( f_output_solution ) {
 #ifdef InvF_HAVE_SDDP_SOLUTION_OUTPUT
    SDDPBlockSolutionOutput( f_output_solution_directory ).
-    print( get_sddp_block( sub_block_index ) , scenario , true );
+    print( copy , scenario , true );
 #endif
    }
+
+  release_copy();
 
   // Unlock the sub-Block
   unlock_sub_block( sub_block_index );
@@ -2653,7 +2783,10 @@ InvestmentFunction::get_benders_function( Index stage ,
  BendersBlock * benders_block = nullptr;
 
  if( v_Block.size() > 1 ) {
-  sddp_block = get_sddp_block( sub_block_index );
+  // the copy of the replica just simulated, if any [see
+  // f_simulated_sddp_block]
+  sddp_block = f_simulated_sddp_block ? f_simulated_sddp_block
+                                      : get_sddp_block( sub_block_index );
   assert( sddp_block );
   if( stage >= sddp_block->get_time_horizon() )
    throw( std::invalid_argument( "InvestmentFunction::get_benders_function: "
@@ -2663,7 +2796,9 @@ InvestmentFunction::get_benders_function( Index stage ,
    ( sddp_block->get_sub_Block( stage )->get_inner_block() );
   }
  else {
-  sddp_block = get_sddp_block();
+  // the copy just simulated, if any [see f_simulated_sddp_block]
+  sddp_block = f_simulated_sddp_block ? f_simulated_sddp_block
+                                      : get_sddp_block();
   assert( sddp_block );
   if( stage >= sddp_block->get_time_horizon() )
    throw( std::invalid_argument( "InvestmentFunction::get_benders_function: "
@@ -2825,7 +2960,8 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
  // has dispatched upstream, so an empty v_greedy_solvers *is* the answer.
  // Asking the type again would leave out any other inner Block, a
  // TwoStageStochasticBlock in particular, for which both casts are null
- auto * solver = v_greedy_solvers.empty()
+ auto * solver = f_simulated_solver ? f_simulated_solver
+                 : v_greedy_solvers.empty()
                  ? get_inner_solver()
                  : get_solver< CDASolver >( v_greedy_solvers[
 						      sub_block_index ] );
@@ -2871,11 +3007,13 @@ void InvestmentFunction::update_linearization
  // solution, and accumulates the per-stage contributions into the
  // caller-supplied `linearization` vector.
 
- SDDPBlock * sddp_block = nullptr;
- if( v_Block.size() > 1 )
-  sddp_block = get_sddp_block( sub_block_index );
- else
-  sddp_block = get_sddp_block();
+ SDDPBlock * sddp_block = f_simulated_sddp_block;
+ if( ! sddp_block ) {
+  if( v_Block.size() > 1 )
+   sddp_block = get_sddp_block( sub_block_index );
+  else
+   sddp_block = get_sddp_block();
+  }
 
  if( ! sddp_block )
   throw( std::logic_error( "InvestmentFunction::update_linearization: the "
@@ -2884,7 +3022,8 @@ void InvestmentFunction::update_linearization
 
  const auto num_stages = sddp_block->get_time_horizon();
 
- auto solver = get_solver< CDASolver >( sub_block_index );
+ auto solver = f_simulated_solver ? f_simulated_solver
+                                   : get_solver< CDASolver >( sub_block_index );
 
  if( solver && solver->has_dual_solution() )
   solver->get_dual_solution();

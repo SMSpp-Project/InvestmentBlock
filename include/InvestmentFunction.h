@@ -2310,6 +2310,17 @@ class InvestmentFunction : public C05Function , public Block {
  ///< true if a "UnitBlockSolverConfig" was given to the UCBlock
 
  bool f_blocks_are_updated = false;
+
+ SDDPBlock * f_simulated_sddp_block = nullptr;
+ ///< the copy of the SDDPBlock a scenario has just been simulated on
+ /**< Set by compute_SDDPBlock(), while the linearization is read out of the
+  * copy of the SDDPBlock on which a scenario has been simulated, and
+  * nullptr otherwise: get_benders_function() then reads the stages of the
+  * copy in place of those of the inner Block, and update_linearization()
+  * the solution of f_simulated_solver. */
+
+ CDASolver * f_simulated_solver = nullptr;
+ ///< the Solver that has simulated f_simulated_sddp_block
  ///< indicates whether the sub-Blocks are updated
 
  int f_solver_status = 0;

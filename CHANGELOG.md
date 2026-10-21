@@ -191,6 +191,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `set_variable_bounds()` on InvestmentBlock, plus accessors for the
   programmatic construction path
 
+- the C++20 module `smspp.investmentblock` (`src/InvestmentBlock.cppm`),
+  which exports every name that the headers declare at namespace scope and
+  re-exports `smspp.sddpblock` and `smspp.twostagestochasticblock` and
+  `smspp.ucblock`, so that a source file can write `import
+  smspp.investmentblock;` in place of the `#include` of the headers; it is
+  built with the CMake option `SMSpp_BUILD_MODULE`, as the target
+  `SMS++::InvestmentBlock_module`
+
 ### Changed
 
 - `InvestmentFunction` no longer looks at the class of its inner Block while
@@ -210,6 +218,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in every module that keeps its instances in the Package Registry, and
   the marker of the extraction carries the format in its name, so that a
   tree extracted before extracts once more
+
+### Fixed
+
+- the simulation of an `InvestmentFunction` over an `SDDPBlock` runs each
+  scenario on a copy of the SDDPBlock, as `sddp_solver` does, so that the
+  state a stage passes to the next reaches units whose Variable are not yet
+  generated: a `ThermalUnitBlock` that switched in a stage refused the
+  `InitUpDownTime` of the next, which kept that of the data (and missed,
+  e.g., the cost of its minimum up time); the data of the inner Block are
+  no longer changed by the simulation
 
 ## [0.3.0] - 2026-10-09
 
