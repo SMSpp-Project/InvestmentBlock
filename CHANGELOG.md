@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- an exception in the simulation of a scenario of an `InvestmentFunction`
+  over an `SDDPBlock` (the copy of the SDDPBlock that cannot be built, or a
+  `compute()` that throws) is an error of the scenario, as a `compute()`
+  that finds nothing, rather than an exception leaving the parallel loop,
+  which ended the program
 - the simulation of an `InvestmentFunction` over an `SDDPBlock` runs each
   scenario on a copy of the SDDPBlock, as `sddp_solver` does, so that the
   state a stage passes to the next reaches units whose Variable are not yet
