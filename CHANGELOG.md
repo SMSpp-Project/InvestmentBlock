@@ -219,6 +219,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the marker of the extraction carries the format in its name, so that a
   tree extracted before extracts once more
 
+- the linearization of the scale of a unit takes its terms in the balances
+  of all the carriers of the UCBlock, each with the efficiency of its
+  outputs, from `UCBlock::for_each_balance_term()`, and its pollutant zones
+  from `UCBlock::get_generator_pollutant_zone()`, instead of the node of
+  each generator on the electricity, whose map is gone
+
+- the line of an asset of type 1 may be of any carrier of the UCBlock, the
+  lines of the carriers being numbered one carrier after the other, those
+  of the electricity first (the line l of carrier c is L_0 + ... + L_{c-1} +
+  l), and its investment is the kappa of that line in the NetworkBlock of
+  its carrier, which must be one per time instant
+
 ### Fixed
 
 - a `MultiStageStochasticBlock` whose first-stage paths are only in the
@@ -227,7 +239,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them at the root and its sub-Blocks only, hence it separated the
   scenarios, dropping the ties among those below, and solved a relaxation
   with no warning
-
+- an exception in the simulation of a scenario of an `InvestmentFunction`
+  over an `SDDPBlock` (the copy of the SDDPBlock that cannot be built, or a
+  `compute()` that throws) is an error of the scenario, as a `compute()`
+  that finds nothing, rather than an exception leaving the parallel loop,
+  which ended the program
 - the simulation of an `InvestmentFunction` over an `SDDPBlock` runs each
   scenario on a copy of the SDDPBlock, as `sddp_solver` does, so that the
   state a stage passes to the next reaches units whose Variable are not yet
@@ -235,6 +251,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `InitUpDownTime` of the next, which kept that of the data (and missed,
   e.g., the cost of its minimum up time); the data of the inner Block are
   no longer changed by the simulation
+
+- the linearization of the scale of a unit whose outputs are not the
+  electricity alone, or whose generators have no node on the electricity,
+  which gave the active power the dual of the electric row only, with
+  coefficient 1, and the pollutant zone of the node 0
 
 ## [0.3.0] - 2026-10-09
 

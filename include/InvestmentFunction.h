@@ -587,7 +587,10 @@ class InvestmentFunction : public C05Function , public Block {
   *        transmission line. If it is a UnitBlock, then its index is simply
   *        the index that this UnitBlock has within its UCBlock. If it is a
   *        transmission line, then its index is the index that this
-  *        transmission line has within its NetworkBlock. The correspondence
+  *        transmission line has within its NetworkBlock, the lines of the
+  *        carriers of the UCBlock being numbered one carrier after the
+  *        other, those of the carrier 0 first (see
+  *        UCBlock::get_network_blocks( Index )). The correspondence
   *        between \p asset_indices and \p x is positional, i.e., if \p
   *        asset_indices is not empty, \p asset_indices[ i ] is the index of
   *        the asset associated with the i-th active variable of this function
@@ -1808,11 +1811,15 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * - The one-dimensional variable "Assets", of type netCDF::Uint() and
   *   indexed over "NumAssets", containing the indices of the assets that are
-  *   subject to investment. An asset can be either a UnitBlock or a
-  *   transmission line. If it is a UnitBlock, then its index is simply the
-  *   index that this UnitBlock has within its UCBlock. If it is a
-  *   transmission line, then its index is the index that this transmission
-  *   line has within its NetworkBlock.
+  *   subject to investment. An asset can be a UnitBlock, the converter of a
+  *   BatteryUnitBlock or a transmission line. If it is a UnitBlock or the
+  *   converter of a BatteryUnitBlock, then its index is simply the index
+  *   that this UnitBlock has within its UCBlock. If it is a transmission
+  *   line, then its index is the index that this transmission line has
+  *   within its NetworkBlock, the lines of the carriers of the UCBlock being
+  *   numbered one carrier after the other, those of the carrier 0 first: the
+  *   line l of carrier c has index L_0 + ... + L_{c-1} + l, L_k being the
+  *   number of lines of carrier k.
   *
   * - The one-dimensional variable "AssetType", of type netCDF::Uint(), which
   *   is either a scalar or indexed over "NumAssets", indicating the type of

@@ -123,21 +123,35 @@ struct SimulationImage {
  SDDPBlock * copy( const SDDPGreedySolver * original ,
                    SDDPGreedySolver * & solver ) const {
   auto c = static_cast< SDDPBlock * >( Block::deserialize( image ) );
-  Block::Index k = 0;
-  for( Block::Index t = 0 ; t < num_stages ; ++t )
-   for( Block::Index i = 0 ; i < num_sub_blocks ; ++i ) {
-    // apply() takes the content of what it applies, hence a clone
-    auto bc = stage_bc[ k++ ].clone();
-    bc->apply( stage_block( c , t , i ) );
-    delete bc;
-    }
-  solver = static_cast< SDDPGreedySolver * >(
+  if( ! c )
+   throw( std::logic_error( "InvestmentFunction::compute: the image of the "
+                            "SDDPBlock cannot be read back" ) );
+  solver = nullptr;
+  try {
+   Block::Index k = 0;
+   for( Block::Index t = 0 ; t < num_stages ; ++t )
+    for( Block::Index i = 0 ; i < num_sub_blocks ; ++i ) {
+     // apply() takes the content of what it applies, hence a clone
+     auto bc = stage_bc[ k++ ].clone();
+     bc->apply( stage_block( c , t , i ) );
+     delete bc;
+     }
+   solver = static_cast< SDDPGreedySolver * >(
                               Solver::new_Solver( original->classname() ) );
-  c->register_Solver( solver );
-  auto cc = original->get_ComputeConfig();
-  solver->set_ComputeConfig( cc );
-  delete cc;
-  solver->set_callback( original->get_callback() );
+   c->register_Solver( solver );
+   auto cc = original->get_ComputeConfig();
+   solver->set_ComputeConfig( cc );
+   delete cc;
+   solver->set_callback( original->get_callback() );
+   }
+  catch( ... ) {
+   if( solver )
+    release( c , solver );
+   else
+    delete c;
+   solver = nullptr;
+   throw;
+   }
   return( c );
   }
 
@@ -1701,20 +1715,43 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
    ( v_greedy_solvers[ sub_block_index ] );
   assert( original );
 
+  // an exception cannot leave the parallel loop, nor a critical section:
+  // it is a failure of the scenario, as a compute() that finds nothing
   SDDPBlock * copy = nullptr;
   SDDPGreedySolver * solver = nullptr;
+  std::string failure;
   #pragma omp critical( InvestmentFunction_copy )
-  copy = simulation_image.copy( original , solver );
+  try {
+   copy = simulation_image.copy( original , solver );
+   }
+  catch( const std::exception & e ) {
+   failure = e.what();
+   }
 
   const auto release_copy = [ & ]() {
+   if( ! copy )
+    return;
    #pragma omp critical( InvestmentFunction_copy )
    SimulationImage::release( copy , solver );
    };
 
-  solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
-  const auto status = solver->compute( true );
+  int status = kError;
+  if( failure.empty() )
+   try {
+    solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
+    status = solver->compute( true );
+    }
+   catch( const std::exception & e ) {
+    failure = e.what();
+    status = kError;
+    }
 
-  if( ! solver->has_var_solution() ) {
+  if( ! failure.empty() )
+   std::cerr << "InvestmentFunction::compute(): an error occurred while "
+             << "simulating scenario " << scenario << ": '" << failure << "'"
+             << std::endl;
+
+  if( ( ! failure.empty() ) || ( ! solver->has_var_solution() ) ) {
    release_copy();
    unlock_sub_block( sub_block_index );
    #pragma omp critical( InvestmentFunction )
@@ -1984,20 +2021,43 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
    continue;
    }
 
+  // an exception cannot leave the parallel loop, nor a critical section:
+  // it is a failure of the scenario [see compute_SDDPBlock()]
   SDDPBlock * copy = nullptr;
   SDDPGreedySolver * solver = nullptr;
+  std::string failure;
   #pragma omp critical( InvestmentFunction_copy )
-  copy = simulation_images[ sub_block_index ].copy( original , solver );
+  try {
+   copy = simulation_images[ sub_block_index ].copy( original , solver );
+   }
+  catch( const std::exception & e ) {
+   failure = e.what();
+   }
 
   const auto release_copy = [ & ]() {
+   if( ! copy )
+    return;
    #pragma omp critical( InvestmentFunction_copy )
    SimulationImage::release( copy , solver );
    };
 
-  solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
-  const auto status = solver->compute( true );
+  int status = kError;
+  if( failure.empty() )
+   try {
+    solver->set_par( SDDPGreedySolver::intScenarioId , scenario );
+    status = solver->compute( true );
+    }
+   catch( const std::exception & e ) {
+    failure = e.what();
+    status = kError;
+    }
 
-  if( ! solver->has_var_solution() ) {
+  if( ! failure.empty() )
+   std::cerr << "InvestmentFunction::compute_SDDPBlock_replicas: an error "
+                "occurred while simulating scenario " << scenario << ": '"
+             << failure << "'" << std::endl;
+
+  if( ( ! failure.empty() ) || ( ! solver->has_var_solution() ) ) {
    release_copy();
    #pragma omp critical( InvestmentFunction )
    {
