@@ -2813,8 +2813,7 @@ void InvestmentFunction::set_asset_names( void ) {
   const auto & cls =
    piece->get_nested_Block( v_asset_indices[ i ] )->classname();
 
-  if( Block::get_method_fs< Block::MF_dbl_it , Block::Range >
-       ( cls + "::resize" ) ) {
+  if( Block::get_method_fs< double >( cls + "::resize" ) ) {
    v_asset_setter_name[ i ] = "UCBlock::resize_unit";
    v_asset_linearization_name[ i ] = "UCBlock::get_resize_unit_linearization";
    }
