@@ -3237,14 +3237,14 @@ void InvestmentFunction::resolve_asset_methods( void ) {
                               "spans and a Subset." ) );
     }
    else {
-    g.setter = Block::get_method_fs< Block::MF_dbl_it , Block::Subset && ,
+    g.setter = Block::get_method_fs< Block::MF_dbl_sp , Block::Subset && ,
                                      bool >( g.setter_name );
     if( ! g.setter )
      throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
                               "asset " + std::to_string( i ) + " is written "
                               "by '" + g.setter_name + "', which the methods "
                               "factory does not have as a setter taking a "
-                              "Subset." ) );
+                              "span and a Subset." ) );
 
     g.linearization = Block::get_query_fs< Block::MF_dbl_msp ,
                                            Block::c_Subset & , bool >
@@ -3348,7 +3348,8 @@ void InvestmentFunction::update_blocks() {
                    Subset( group.indices ) , group.ordered , eNoBlck ,
                    eNoBlck );
      else
-      std::invoke( *group.setter , ucblock , investment[ g ].cbegin() ,
+      std::invoke( *group.setter , ucblock ,
+                   Block::MF_dbl_sp( investment[ g ] ) ,
                    Subset( group.indices ) , group.ordered , eNoBlck ,
                    eNoBlck );
      }

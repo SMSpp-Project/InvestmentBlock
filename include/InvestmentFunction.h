@@ -1859,7 +1859,7 @@ class InvestmentFunction : public C05Function , public Block {
   * - The variable "AssetSignature", of type netCDF::NcUint, which is either
   *   a scalar or indexed over "NumAssets", saying with which parameters the
   *   two methods of the i-th asset are registered. With 0 the setter takes
-  *   ( MF_dbl_it , Subset && , bool ) and the getter ( MF_dbl_msp ,
+  *   ( MF_dbl_sp , Subset && , bool ) and the getter ( MF_dbl_msp ,
   *   c_Subset & , bool ); with 1, the value of the two assets of a pair
   *   (types 0 and 2 on the same unit), the setter takes ( MF_dbl_sp ,
   *   MF_dbl_sp , Subset && , bool ) and the getter ( MF_dbl_msp , MF_dbl_msp ,
@@ -2470,7 +2470,7 @@ class InvestmentFunction : public C05Function , public Block {
   std::string setter_name;         ///< the name of the setter
   std::string linearization_name;  ///< the name of the getter
 
-  Block::FunctionType< Block::MF_dbl_it , Block::Subset && , bool > * setter =
+  Block::FunctionType< Block::MF_dbl_sp , Block::Subset && , bool > * setter =
    nullptr;
   ///< writes the investment
 
