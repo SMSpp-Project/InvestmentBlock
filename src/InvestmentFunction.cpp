@@ -3024,9 +3024,16 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
 
  // Retrieve the dual solution. A dual direction is written where the dual
  // solution goes and is already in place, the caller having asked for it;
- // there is no primal solution to go with it.
+ // there is no primal solution to go with it. With no greedy or simulated
+ // Solver the Solver is the same for every sub-Block, that of the inner
+ // Block (of the whole tree, for a TwoStageStochasticBlock), and it writes
+ // the solution of all of them at once: it is asked for it with the first
+ // sub-Block, and the others only read it [see compute_UCBlock()]
 
- if( ! direction ) {
+ const bool ask = f_simulated_solver || ( ! v_greedy_solvers.empty() ) ||
+                  ( sub_block_index == 0 );
+
+ if( ( ! direction ) && ask ) {
   if( solver && solver->has_dual_solution() )
    solver->get_dual_solution(); // TODO pass Configuration
   else
