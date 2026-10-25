@@ -40,9 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same unit form a pair, written and read back together through the
   forms with two spans of their names, with `AssetSignature` 1, the first
   value for the asset of type 0. A type 2 with no type 0 on its unit is
-  refused at load; a pair whose two assets name different methods, an
-  `AssetSignature` that does not match the pairs, and a pair on a unit
-  whose class has no form with two spans make the first `compute()` fail
+  refused at load; a pair whose two assets name different methods and an
+  `AssetSignature` that does not match the pairs are refused at load too
+  (over an `SDDPBlock`, at the first `compute()`), and a pair on a unit
+  whose class has no form with two spans makes the first `compute()` fail
 
 - the key "UnitBlockSolverConfig" of `InvestmentFunction::set_ComputeConfig()`,
   the `BlockSolverConfig` of the copy of a unit with no copies, which the
@@ -181,8 +182,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a feasibility cut out of an unbounded dual direction, 1 by default.
   A file without the names has them worked out from `AssetType` and from
   whether the class of each unit registers `<class>::resize`; half of the
-  pair of names, or an unknown signature, are refused at deserialize, and a name the methods factory does not have makes the first
-  `compute()` fail before the solve
+  pair of names, or an unknown signature, are refused at deserialize, and a name the methods factory does not have too (over an `SDDPBlock`,
+  at the first `compute()`, before the solve)
 
 - `set_implicit_constraints()` on InvestmentFunction, to set the implicit
   linear constraints (caps or budgets over the assets of the component)
@@ -210,8 +211,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not give are worked out of the classes of the units then, not at the
   first `compute()`, and are not written by `serialize()`. A name
   "<class>::<method>" is called only on a Block of that class, and otherwise
-  the first `compute()` fails, where a Block of another class was cast to
-  `UCBlock` and refused
+  deserialize fails (the first `compute()`, after a new inner Block), where
+  a Block of another class was cast to `UCBlock` and refused
+
+- `InvestmentFunction::deserialize` no longer refuses an inner Block by its
+  class (an `SDDPBlock`, a `TwoStageStochasticBlock` or a `UCBlock`, and
+  only the first or the last when given from outside): once the inner Block
+  is set, it resolves the methods of the assets, and refuses an inner Block
+  they cannot be called on, deleting it, or handing it back when given from
+  outside; over an `SDDPBlock` this still waits for the first `compute()`
 
 - the instances of `data/` are downloaded and extracted by the targets
   `download_investment_<fmt>` and `extract_investment_<fmt>`, written as

@@ -686,9 +686,10 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
  /// de-serialize taking the inner Block from outside
  /** As deserialize( group , issueMod ), except that the inner Block is NOT
-  * created out of the 'Block' sub-group: the given \p inner is used instead
-  * (and must be a UCBlock or an SDDPBlock, as usual). Ownership of \p inner
-  * is taken, exactly as for an inner Block read from the file.
+  * created out of the 'Block' sub-group: the given \p inner is used instead.
+  * Ownership of \p inner is taken, exactly as for an inner Block read from
+  * the file, unless this throws: \p inner is then handed back, still owned
+  * by the caller.
   *
   * This is what the StochasticBlock expansion of InvestmentBlock uses: the
   * 'Block' sub-group there describes a StochasticBlock *template*, which the
@@ -2899,9 +2900,10 @@ class InvestmentFunction : public C05Function , public Block {
   * them worked out here, out of "AssetType" and out of the names that the
   * class of each unit registers.
   *
-  * Called once, the first time the Blocks are updated, before the first
-  * solve: a name that the methods factory does not have makes it throw,
-  * naming the asset. The assets of type 0 and 2 on the same unit form a pair
+  * Called at the end of deserialize(), when the inner Block has pieces, and
+  * else, or after a new inner Block, the first time the Blocks are updated,
+  * before the first solve: a name that the methods factory does not have
+  * makes it throw, naming the asset. The assets of type 0 and 2 on the same unit form a pair
   * and go in a group of their own, written and read back with the two-span
   * forms of their methods [see "AssetSignature" in serialize()]. */
 

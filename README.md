@@ -104,7 +104,7 @@ the following:
   the variables of the `InvestmentFunction`).
 
 - The `InvestmentFunction` has an inner `Block` which contains the assets to
-  invest in. This inner `Block` can be either a `UCBlock` or an `SDDPBlock`.
+  invest in. This inner `Block` is, for instance, a `UCBlock` or an `SDDPBlock`.
   In the former case the OPEX is deterministic. In the latter case it is the
   expected cost of the sub-`Block` of the `SDDPBlock`, some of which (the ones
   where the investments take place) must themselves be `UCBlock`. Note that the

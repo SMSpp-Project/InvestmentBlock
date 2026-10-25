@@ -37,7 +37,6 @@
 #include "SDDPGreedySolver.h"
 #include "SDDPSolver.h"
 #include "SMSTypedefs.h"
-#include "UCBlock.h"
 
 #include <algorithm>
 #include <cmath>
@@ -503,18 +502,11 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
   // deserialize( group , inner , issueMod )): the 'Block' sub-group, which
   // there describes the scenario template, is NOT read.
 
-  if( ! ( dynamic_cast< SDDPBlock * >( f_external_inner_block ) ||
-          dynamic_cast< UCBlock * >( f_external_inner_block ) ) )
-   throw( std::invalid_argument( "InvestmentFunction::deserialize: the given "
-                                 "inner Block is neither an SDDPBlock nor a "
-                                 "UCBlock." ) );
-
   set_inner_block( f_external_inner_block );
   }
  else if( f_num_sub_blocks <= 1 ) {
 
-  // Single-Block path: create one inner Block, which may be either an
-  // SDDPBlock or a UCBlock.
+  // Single-Block path: create one inner Block.
 
   auto inner_block = Block::new_Block( inner_block_group , this );
 
@@ -522,15 +514,6 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
                             "possible to create the inner Block from group '" +
                             BLOCK_NAME + "'." ) );
-
-  if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
-          dynamic_cast< TwoStageStochasticBlock * >( inner_block ) ||
-          dynamic_cast< UCBlock * >( inner_block ) ) ) {
-   delete inner_block;
-   throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
-                            "Block is neither an SDDPBlock, nor a "
-                            "TwoStageStochasticBlock, nor a UCBlock." ) );
-   }
 
   set_inner_block( inner_block );
   }
@@ -559,6 +542,20 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    }
   set_inner_blocks( blocks );
   }
+
+ // the methods of the assets are resolved now that the pieces of the inner
+ // Block are known [see set_pieces()], so that an inner Block they cannot be
+ // called on is refused here and not at the first compute(): the one read
+ // here is then deleted, and the one given from outside handed back to its
+ // owner. An SDDPBlock has no pieces, and waits for compute()
+ if( ! v_pieces.empty() )
+  try {
+   resolve_asset_methods();
+   }
+  catch( ... ) {
+   set_inner_block( nullptr , ! f_external_inner_block );
+   throw;
+   }
 
  Block::deserialize( group );
 
@@ -2789,8 +2786,8 @@ void InvestmentFunction::set_asset_names( void ) {
   * their type: a unit is then resized if its class offers it, and
   * replicated otherwise, which is what such an instance has always meant.
   * The units of a UCBlock are its first sub-Blocks. A name left empty, that
-  * of a unit the piece has not, makes the first compute() fail [see
-  * resolve_asset_methods()]. */
+  * of a unit the piece has not, makes deserialize() fail, or the first
+  * compute() after a new inner Block [see resolve_asset_methods()]. */
 
  v_asset_setter_name.resize( num_assets );
  v_asset_linearization_name.resize( num_assets );
