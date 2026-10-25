@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- an `InvestmentFunction` over a `TwoStageStochasticBlock` or a
+  `MultiStageStochasticBlock` asks the Solver for the solution once per
+  evaluation, and no longer once per scenario: every request wrote the
+  solution of the whole inner Block again, so that an evaluation cost the
+  square of the number of scenarios; the values and the linearizations do
+  not change
+
 - an exception in the simulation of a scenario of an `InvestmentFunction`
   over an `SDDPBlock` (the copy of the SDDPBlock that cannot be built, or a
   `compute()` that throws) is an error of the scenario, as a `compute()`
