@@ -43,6 +43,12 @@ InvsBkINC = -I$(InvsBkSDR)/include
 InvsBkH   = $(InvsBkSDR)/include/InvestmentBlock.h \
 	$(InvsBkSDR)/include/InvestmentFunction.h
 
+# the C++20 module smspp.investmentblock - - - - - - - - - - - - - - - - - -
+# [see makefile-mod of SMS++]
+
+$(eval $(call SMSppMODrule,InvsBk,$(InvsBkSDR),InvestmentBlock,\
+	smspp.investmentblock,$(SDDPBkMOD) $(TSSBkMOD) $(UCBckMOD)))
+
 # clean - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 clean::
