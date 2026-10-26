@@ -47,7 +47,7 @@ InvsBkH   = $(InvsBkSDR)/include/InvestmentBlock.h \
 # [see makefile-mod of SMS++]
 
 $(eval $(call SMSppMODrule,InvsBk,$(InvsBkSDR),InvestmentBlock,\
-	smspp.investmentblock,$(SDDPBkMOD) $(TSSBkMOD) $(UCBckMOD)))
+	smspp.investmentblock,SDDPBk TSSBk UCBck))
 
 # clean - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -57,12 +57,13 @@ clean::
 # dependencies: every .o from its .cpp + every recursively included .h- - - -
 
 $(InvsBkSDR)/obj/InvestmentBlock.o: $(InvsBkSDR)/src/InvestmentBlock.cpp \
-	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(TSSBkH) $(UCBckH) \
-	$(SMS++OBJ)
+	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(TSSBkH) \
+	$(UCBckH) $(SMS++OBJ)
 	$(CC) -c $(InvsBkSDR)/src/InvestmentBlock.cpp -o $@ $(InvsBkINC) \
 	$(SDDPBkINC) $(TSSBkINC) $(UCBckINC) $(SMS++INC) $(SW)
 
-$(InvsBkSDR)/obj/InvestmentFunction.o: $(InvsBkSDR)/src/InvestmentFunction.cpp \
+$(InvsBkSDR)/obj/InvestmentFunction.o: \
+	$(InvsBkSDR)/src/InvestmentFunction.cpp \
 	$(InvsBkSDR)/include/InvestmentFunction.h \
 	$(InvsBkSDR)/include/InvestmentBlock.h $(SDDPBkH) $(TSSBkH) \
 	$(UCBckH) $(SMS++OBJ)
