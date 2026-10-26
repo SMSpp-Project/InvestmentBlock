@@ -2998,15 +2998,15 @@ class InvestmentFunction : public C05Function , public Block {
  /// output the values of the active Variable of this InvestmentFunction
  /** This function appends the current values of the active Variable of this
   * InvestmentFunction into the file whose name is given by the parameter
-  * #strOutputFile (if this name is not empty). */
+  * #strOutputFilename (if this name is not empty). */
 
  void output_variable_values( void ) const;
 
 /*--------------------------------------------------------------------------*/
  /// output the current value of this InvestmentFunction
  /** This function appends the value of this InvestmentFunction into the file
-  * whose name is given by the parameter #strOutputFile (if this name is not
-  * empty). */
+  * whose name is given by the parameter #strOutputFilename (if this name is
+  * not empty). */
 
  void output_function_value( void ) const;
 
