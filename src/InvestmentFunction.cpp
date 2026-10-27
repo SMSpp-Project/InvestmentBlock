@@ -3606,8 +3606,10 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
                   ( sub_block_index == 0 );
 
  if( ( ! direction ) && ask ) {
+  // the whole solution: a Configuration naming the needed parts has a format
+  // that depends on the :Solver of the inner Block, which is not known here
   if( solver && solver->has_dual_solution() )
-   solver->get_dual_solution(); // TODO pass Configuration
+   solver->get_dual_solution( nullptr );
   else
    throw( std::logic_error( "InvestmentFunction::update_linearization: "
                             "dual solution not available." ) );
@@ -3618,7 +3620,7 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
    // The primal solution may only be necessary if there are UnitBlocks
    // subject to investment.
    if( solver && solver->has_var_solution() )
-    solver->get_var_solution(); // TODO pass Configuration
+    solver->get_var_solution( nullptr );  // the whole of it, as above
    else
     throw( std::logic_error( "InvestmentFunction::update_linearization: "
                              "primal solution not available." ) );
