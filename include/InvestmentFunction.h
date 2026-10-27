@@ -788,17 +788,19 @@ class InvestmentFunction : public C05Function , public Block {
   * - "UnitBlockSolverConfig": a pointer to the BlockSolverConfig of the
   *    copy of a unit with no copies, which the derivative with respect to the
   *    number of copies solves alone [see
-  *    UCBlock::get_replicate_linearization()]. This InvestmentFunction does not use it: it gives a clone of it to
-  *    every UCBlock of the inner Block, as the extra Configuration of its
-  *    BlockConfig, where the UCBlock reads it. The Solver is applied to an
-  *    AbstractBlock that holds the copy as its sub-Block, hence it has to
-  *    handle a Block with sub-Block (e.g., a :MILPSolver), and it has to
-  *    solve the copy as the unit is solved in the inner Block (e.g., its
-  *    continuous relaxation, if that is what the inner Block is solved for).
-  *    If it is not given, the UCBlock uses a clone of the Solver registered
-  *    with it, i.e., the unit is solved by the same Solver, with the same
-  *    parameters, that solves it in the inner Block; with any other inner
-  *    Block it has to be given, if a scaled UnitBlock can have no copies.
+  *    UCBlock::get_replicate_linearization()]. This InvestmentFunction does
+  *    not use it: it gives a clone of it to every UCBlock of the inner
+  *    Block, as the extra Configuration of its BlockConfig, where the
+  *    UCBlock reads it. The Solver is applied to an AbstractBlock that holds
+  *    the copy as its sub-Block, hence it has to handle a Block with
+  *    sub-Block (e.g., a :MILPSolver), and it has to solve the copy as the
+  *    unit is solved in the inner Block (e.g., its continuous relaxation, if
+  *    that is what the inner Block is solved for). If it is not given, the
+  *    "BlockSolverConfig" given with it, if any, is given in its place, i.e.,
+  *    the unit is solved by the same Solver, with the same parameters, that
+  *    solves the inner Block; this needs the pieces of the inner Block [see
+  *    set_pieces()], so with an SDDPBlock it has to be given, if a scaled
+  *    UnitBlock can have no copies.
   *
   * If a key that is not any of the above is provided, an exception is
   * thrown. No pointer is kept by the InvestmentFunction, which keeps a clone

@@ -709,6 +709,13 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
        cBSC->clear();
        v_BSC.push_back( cBSC );
        }
+      // given with no "UnitBlockSolverConfig", it is also that of the copy of
+      // a unit with no copies, which is solved as the inner Block is [see
+      // set_unit_BlockSolverConfig()]
+      if( ( ! v_pieces.empty() ) &&
+          ( config_map->f_value.find( "UnitBlockSolverConfig" ) ==
+            config_map->f_value.end() ) )
+       set_unit_BlockSolverConfig( bsc );
       }
      else
       // An invalid Configuration has been provided.
