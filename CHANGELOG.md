@@ -206,6 +206,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- the pipeline builds the module also with its makefiles, after CMake, and
+  runs on a change of the makefiles too [see `ci/makefile` of the umbrella]
+
 - `SMSpp_BUILD_MODULE` no longer stops the configuration when the C++20
   module cannot be built, i.e., with a CMake older than 3.28, a generator
   other than Ninja or Visual Studio, a compiler other than Clang 16 (with
@@ -251,6 +254,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its carrier, which must be one per time instant
 
 ### Fixed
+
+- `makefile-c` and `makefile-s` include the basic makefile of
+  TwoStageStochasticBlock, whose StochasticBlock comes with SDDPBlock
+  already: with both makefile-s it was compiled twice, from two paths, and
+  whatever linked InvestmentBlock failed on its multiple definitions
 
 - an `InvestmentFunction` over a `TwoStageStochasticBlock` or a
   `MultiStageStochasticBlock` asks the Solver for the solution once per
