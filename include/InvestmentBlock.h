@@ -366,19 +366,9 @@ public:
   * "ObjectiveSense" of size 0 is refused as well.
   *
   * An inner Block in design mode, i.e., whose units and lines carry the
-  * design Variable of their investment, is converted before it is built, in
-  * a copy of \p group in memory, which is then read in its place: each design
-  * becomes an asset, with "Cost", "LowerBound", "UpperBound" and "Integer"
-  * those of the design, a battery a pair of assets (or one, when its
-  * converter follows the storage design) with its "ConverterKappa", the
-  * units lose their investment cost, a DesignNetworkBlock gives way to the
-  * NetworkBlock of its time instants, and the first-stage AbstractPath of a
-  * TwoStageStochasticBlock or MultiStageStochasticBlock to the designs are
-  * dropped. Only the inner Block at the root of a group that declares no
-  * asset is converted; refused are a design in a "Component_<k>" or beside
-  * declared assets, a design that is not first-stage, a ConversionUnitBlock
-  * in design mode, and a design on a unit whose "Scale", "Kappa" or
-  * "ConverterKappa" is not 1.
+  * design Variable of their investment, is refused: design_converter [see
+  * tools/design_converter.cpp] converts such a file into one of
+  * InvestmentBlock, each design an asset.
   *
   * @param group A netCDF::NcGroup holding the required data. */
 

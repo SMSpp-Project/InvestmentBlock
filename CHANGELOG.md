@@ -24,20 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline, which BundleSolver passes to its master problem; two components
   giving the same pair different limits are refused
 
-- the conversion of an inner Block in design mode when the InvestmentBlock is
-  read, in a copy of its netCDF group in memory: each design of an
-  `IntermittentUnitBlock`, a `ThermalUnitBlock`, a `NuclearUnitBlock`, a
-  `BatteryUnitBlock` or a `DesignNetworkBlock` becomes an asset with its
-  investment cost, its bounds and its integrality, the battery a pair of
-  assets with its `ConverterKappa` (or one asset, when its converter follows
-  the storage design), the units lose their investment cost, the
-  `DesignNetworkBlock` gives way to the `NetworkBlock` of its time instants,
-  and the first-stage paths of a `TwoStageStochasticBlock` or
-  `MultiStageStochasticBlock` to the designs are dropped. It applies to the
-  inner Block at the root of a file that declares no asset; refused at load
-  are a design in a `Component_<k>` or beside declared assets, a design that
-  is not first-stage, a `ConversionUnitBlock` in design mode, and a design on
-  a unit whose `Scale`, `Kappa` or `ConverterKappa` is not 1
+- `InvestmentBlock::deserialize()` refuses an inner Block in design mode,
+  i.e., one whose units and lines carry the design Variable of their
+  investment (an `IntermittentUnitBlock`, a `ThermalUnitBlock`, a
+  `NuclearUnitBlock` or a `ConversionUnitBlock` with an investment cost, a
+  `BatteryUnitBlock` with a battery or converter investment cost, a
+  `DesignNetworkBlock`); the error names `design_converter`, the converter of
+  such files
 
 - the type of asset 2, the second size of a unit that has two, for a
   `BatteryUnitBlock` its converter: an asset of type 0 and one of type 2 on
