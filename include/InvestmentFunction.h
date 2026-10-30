@@ -1857,20 +1857,14 @@ class InvestmentFunction : public C05Function , public Block {
   *   from "AssetType": a line is "UCBlock::resize_line", and a unit
   *   is "UCBlock::resize_unit" if its class registers "<classname>::resize",
   *   and "UCBlock::replicate" otherwise; the second size of a unit takes the
-  *   names of its first.
-  *
-  * - The variable "AssetSignature", of type netCDF::NcUint, which is either
-  *   a scalar or indexed over "NumAssets", saying with which parameters the
-  *   two methods of the i-th asset are registered. With 0 the setter takes
-  *   ( MF_dbl_sp , Subset && , bool ) and the getter ( MF_dbl_msp ,
-  *   c_Subset & , bool ); with 1, the value of the two assets of a pair
-  *   (types 0 and 2 on the same unit), the setter takes ( MF_dbl_sp ,
-  *   MF_dbl_sp , Subset && , bool ) and the getter ( MF_dbl_msp , MF_dbl_msp ,
-  *   c_Subset & , bool ), the first value of each pair for the asset of type
-  *   0 and the second for that of type 2. The two assets of a pair have the
-  *   same setter, getter and AssetFeasibilityCut. Any other value, or one
-  *   that does not match the pairs, is refused. This variable is optional.
-  *   If it is not provided, then it is 1 for the pairs and 0 elsewhere.
+  *   names of its first. The setter of an asset takes ( MF_dbl_sp ,
+  *   Subset && , bool ) and the getter ( MF_dbl_msp , c_Subset & , bool ),
+  *   save for the two assets of a pair (types 0 and 2 on the same unit), for
+  *   which the setter takes ( MF_dbl_sp , MF_dbl_sp , Subset && , bool ) and
+  *   the getter ( MF_dbl_msp , MF_dbl_msp , c_Subset & , bool ), the first
+  *   value of each pair for the asset of type 0 and the second for that of
+  *   type 2. The two assets of a pair have the same setter, getter and
+  *   AssetFeasibilityCut.
   *
   * - The variable "AssetFeasibilityCut", of type netCDF::NcUint, which is
   *   either a scalar or indexed over "NumAssets": 1 if the getter of the
@@ -2455,9 +2449,6 @@ class InvestmentFunction : public C05Function , public Block {
  std::vector< std::string > v_asset_linearization_name;
  ///< the name of the getter of each asset, empty if the instance has none
 
- std::vector< int > v_asset_signature;
- ///< the parameters of the two methods of each asset, empty if all are 0
-
  std::vector< int > v_asset_feasibility_cut;
  ///< whether the getter of each asset gives a feasibility cut, empty if
  ///< the instance does not say
@@ -2907,7 +2898,7 @@ class InvestmentFunction : public C05Function , public Block {
   * before the first solve: a name that the methods factory does not have
   * makes it throw, naming the asset. The assets of type 0 and 2 on the same unit form a pair
   * and go in a group of their own, written and read back with the two-span
-  * forms of their methods [see "AssetSignature" in serialize()]. */
+  * forms of their methods [see "AssetSetter" in serialize()]. */
 
  void resolve_asset_methods( void );
 

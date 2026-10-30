@@ -35,10 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the type of asset 2, the second size of a unit that has two, for a
   `BatteryUnitBlock` its converter: an asset of type 0 and one of type 2 on
   the same unit form a pair, written and read back together through the
-  forms with two spans of their names, with `AssetSignature` 1, the first
-  value for the asset of type 0. A type 2 with no type 0 on its unit is
-  refused at load; a pair whose two assets name different methods and an
-  `AssetSignature` that does not match the pairs are refused at load too
+  forms with two spans of their names, the first value for the asset of
+  type 0. A type 2 with no type 0 on its unit is refused at load; a pair
+  whose two assets name different methods is refused at load too
   (over an `SDDPBlock`, at the first `compute()`), and a pair on a unit
   whose class has no form with two spans makes the first `compute()` fail
 
@@ -175,13 +174,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UCBlock::resize_unit`, `UCBlock::replicate` and `UCBlock::resize_line`
   with their getters. InvestmentFunction does not know what they do: the
   assets naming the same methods are written with one call, and read back
-  with one call. `AssetSignature` says with which parameters the two methods
-  are registered, 0 (the subset form) being the only value and the default;
-  `AssetFeasibilityCut` says whether the getter also gives the coefficient
-  of a feasibility cut out of an unbounded dual direction, 1 by default.
+  with one call. `AssetFeasibilityCut` says whether the getter also gives
+  the coefficient of a feasibility cut out of an unbounded dual direction, 1
+  by default.
   A file without the names has them worked out from `AssetType` and from
   whether the class of each unit registers `<class>::resize`; half of the
-  pair of names, or an unknown signature, are refused at deserialize, and a name the methods factory does not have too (over an `SDDPBlock`,
+  pair of names is refused at deserialize, and a name the methods factory does not have too (over an `SDDPBlock`,
   at the first `compute()`, before the solve)
 
 - `set_implicit_constraints()` on InvestmentFunction, to set the implicit

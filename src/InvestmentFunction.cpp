@@ -365,14 +365,6 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                             "and 'AssetLinearization' go together, and only "
                             "one of them is there." ) );
 
-  deserialize_one_each( group , "AssetSignature" , num_assets ,
-                        v_asset_signature );
-  for( const auto signature : v_asset_signature )
-   if( ( signature != 0 ) && ( signature != 1 ) )
-    throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
-                             "AssetSignature: " + std::to_string( signature )
-                             + "; it is 0 or 1." ) );
-
   deserialize_one_each( group , "AssetFeasibilityCut" , num_assets ,
                         v_asset_feasibility_cut );
   for( const auto cut : v_asset_feasibility_cut )
@@ -1095,7 +1087,6 @@ void InvestmentFunction::remove_actives( const Subset & removed )
   drop( v_asset_type );
   drop( v_asset_setter_name );
   drop( v_asset_linearization_name );
-  drop( v_asset_signature );
   drop( v_asset_feasibility_cut );
   drop( v_cost );
   drop( v_disinvestment_cost );
@@ -1205,10 +1196,6 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ,
   ::serialize( group , "AssetLinearization" , NumAssets ,
                v_asset_linearization_name );
   }
-
- if( ! v_asset_signature.empty() )
-  ::serialize( group , "AssetSignature" , netCDF::NcUint() , NumAssets ,
-               v_asset_signature );
 
  if( ( ! v_asset_feasibility_cut.empty() ) && ( ! f_derived_cuts ) )
   ::serialize( group , "AssetFeasibilityCut" , netCDF::NcUint() , NumAssets ,
@@ -3147,20 +3134,6 @@ void InvestmentFunction::resolve_asset_methods( void ) {
                              "which has no asset of type 0" ) );
    second[ i ] = j;
    }
-
- // the signature of each asset is that of the pairs
- for( Index i = 0 ; i < num_assets ; ++i ) {
-  const int expected = ( ( second[ i ] != Inf< Index >() ) ||
-                         ( v_asset_type[ i ] == eSecondSize ) ) ? 1 : 0;
-  if( ( ! v_asset_signature.empty() ) &&
-      ( v_asset_signature[ i ] != expected ) )
-   throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
-                            "asset " + std::to_string( i ) + " has "
-                            "AssetSignature " +
-                            std::to_string( v_asset_signature[ i ] ) + ", "
-                            "while it is " + std::to_string( expected ) +
-                            ( expected ? " in a pair" : " alone" ) ) );
-  }
 
  // the names of the two methods of each asset, and whether its getter gives
  // a feasibility cut: those of the instance, or worked out of the classes of
