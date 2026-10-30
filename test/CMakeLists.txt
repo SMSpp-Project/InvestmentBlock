@@ -57,6 +57,13 @@ add_test(NAME ${modName}_unit_test
          COMMAND ${modName}_unit_test
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+# ----- the local suite ----------------------------------------------------- #
+# The suite that the developers keep outside the repository [see README.md],
+# where it is present.
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/local.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/local.cmake)
+endif ()
+
 # ----- the label of this module's tests ------------------------------------ #
 
 # The label lets the module CI select exactly the tests exercising this module

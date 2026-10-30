@@ -25,6 +25,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built with the CMake option `SMSpp_BUILD_MODULE`, as the target
   `SMS++::InvestmentBlock_module`
 
+- components: an InvestmentBlock can be the sum of several
+  InvestmentFunction, each in a sub-Block and seen by BundleSolver as a
+  component of its own, added with `add_component()` on all the design
+  Variable or on a subset of them and returned by
+  `get_investment_functions()`; each is weighted by the weight of the
+  Objective of its inner Block [see `Block::get_objective_weight()`], with
+  a warning when they are all 1. With components the InvestmentBlock is a
+  minimization, and a maximization asked at its root is refused; the
+  `f_reformulate_bounds` option requires that each component have the lower
+  bounds of the design Variable it is active in, and
+  `set_number_sub_blocks()` and `set_num_sub_blocks_per_stage()` hold only
+  without components
+
+- `AssetVarIndex` and `AssetBaselineVarIndex` (netCDF), with
+  `set_asset_variable_indices()` and
+  `set_asset_baseline_variable_indices()`: for each asset, the design
+  Variable it invests in, so that components can share the design Variable
+  or each have its own, and the one its cost is charged against in place
+  of `InstalledQuantity`, e.g., the same asset in the previous period
+
+- the netCDF format with components: one `Component_<k>` group for each,
+  numbered from 0 with no gaps, holding an InvestmentFunction with its
+  `InnerBlock`, whose `ObjectiveWeight` is the weight of the component; the
+  indices of design Variable in the file are those of the root, which holds
+  no `NumConstraints` or `Constraints_*`, each component having its own
+  [see the comment of `InvestmentBlock::deserialize()`]
+
+- `MaxInvestment` and `MaxDisinvestment` (netCDF), with
+  `InvestmentFunction::set_variation_limits()`: how much an asset may grow
+  over its baseline (`AssetBaselineVarIndex`, or `InstalledQuantity`) and
+  how much it may shrink, scalar or one for each asset, >= 0 and + INF when
+  absent, which the InvestmentBlock makes linear constraints of its own;
+  two components giving the same asset and baseline different limits are
+  refused
+
+- an inner Block made of Blocks of the class of the methods of its assets,
+  such as a `TwoStageStochasticBlock` or a `MultiStageStochasticBlock` of
+  `UCBlock`, is split at load into one component for each such Block [see
+  `InvestmentFunction::find_pieces()`], weighted by the weights of the
+  Objective from it up to the InvestmentBlock, i.e., the probability of its
+  scenario, and `serialize()` writes it back whole; an inner Block, or a
+  Block between it and the pieces, with Variable or Constraint of its own
+  that tie the pieces is refused when the Constraint are generated, and
+  `ScenarioDecomposition` (netCDF) 0 keeps it whole
+
+- `AssetSetter`, `AssetLinearization` and `AssetFeasibilityCut` (netCDF):
+  for each asset, the names in the methods factory of the method that
+  writes its investment into the inner Block and of the one that reads back
+  the derivative of its value, e.g., `UCBlock::resize_unit` and
+  `UCBlock::get_resize_unit_linearization`, and whether the latter also
+  gives the coefficient of a feasibility cut, 1 by default; the assets
+  naming the same methods are written and read with one call each, a file
+  without the names has them worked out from `AssetType`, and half a pair
+  of names, or a name the methods factory does not have, is refused at
+  load (over an `SDDPBlock`, at the first `compute()`)
+
+- `InvestmentFunction::deserialize( group , inner )` and
+  `InvestmentFunction::serialize( group , inner )`, which take the inner
+  Block from the caller instead of the `InnerBlock` group
+
+- `InvestmentBlock::set_variable_bounds()`,
+  `InvestmentBlock::fix_design_variable()` and
+  `InvestmentFunction::set_implicit_constraints()`, to build and change an
+  InvestmentBlock without a file
+
+- `InvestmentBlockSolution` holds one Solution of the inner Block for each
+  component, written as `InnerSolution_<k>` groups with their number in
+  `NumInnerSolutions`, or as `InnerSolution` with a single component
+
+- `InvestmentBlock::deserialize()` refuses an inner Block in design mode,
+  i.e., one whose units and lines carry the design Variable of their own
+  investment: a unit with an investment cost, a `BatteryUnitBlock` with
+  that of its battery or of its converter, a `DesignNetworkBlock`
+
+- `test/BSPar_osimp.txt`, the parameters of BundleSolver that a suite kept
+  outside the repository reads, `test/README.md`, which describes the
+  folder, and `test/.gitignore`; `test/CMakeLists.txt` includes
+  `test/local.cmake` where present
+
 ### Changed
 
 - the pipeline builds the module also with its makefiles, after CMake, and
@@ -54,6 +133,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the electricity first (the line l of carrier c is L_0 + ... + L_{c-1} +
   l), and its investment is the kappa of that line in the NetworkBlock of
   its carrier, which must be one per time instant
+
+- an asset of type 2 is the second size of any unit that has two, not only
+  the converter of a `BatteryUnitBlock`: it pairs with the asset of type 0
+  on the same unit, which must be there and name the same methods, or the
+  load is refused (over an `SDDPBlock`, at the first `compute()`); a unit
+  whose class has no method taking both sizes makes the first `compute()`
+  fail
+
+- the key `UnitBlockSolverConfig` of `InvestmentFunction::set_ComputeConfig()`
+  is given to every `UCBlock` of the inner Block, as the extra
+  Configuration of its `BlockConfig`, since the `UCBlock` computes the
+  derivative by copies [see `UCBlock::get_replicate_linearization()`];
+  without it the "BlockSolverConfig" of the inner Block takes its place,
+  and over an `SDDPBlock` it is needed when an asset can have no copies
+
+- `InvestmentFunction` no longer looks at the class of its inner Block, an
+  `SDDPBlock` apart: it takes any inner Block the methods of its assets can
+  be called on, such as a `MultiStageStochasticBlock`, and refuses the
+  others at load, where it refused all but an `SDDPBlock`, a
+  `TwoStageStochasticBlock` and a `UCBlock`; a name "<class>::<method>" is
+  called only on a Block of that class
+
+- a netCDF variable with one value for each asset, or for each linear
+  constraint, of InvestmentBlock and InvestmentFunction is refused at load
+  when its size is neither 1 nor that of `NumAssets` (`NumConstraints`)
+
+- `InvestmentFunction::compute()` returns `kUnbounded` when the Solver of
+  the inner Block proves it unbounded, at the opposite of the worst value
+  and with no linearization, as `LagBFunction` and `BendersBFunction` do:
+  it returned `kError`, or -Inf with a linearization read from whatever
+  duals the Solver had
+
+- `InvestmentFunction::get_var_lower_bound()` is public
+
+### Removed
+
+- the attributes `ReplicateBatteryUnits` and `ReplicateIntermittentUnits`
+  of InvestmentFunction, which `AssetSetter` replaces: a group carrying
+  either is refused at load
+
+- the casts of InvestmentFunction to `ThermalUnitBlock`,
+  `BatteryUnitBlock`, `IntermittentUnitBlock` and `DCNetworkBlock`, and the
+  derivative by copies of a unit that it computed out of the rows of the
+  UCBlock: the methods each asset names do both [see `AssetSetter`]
+
+- `InvestmentBlock::get_integer()`, and the overloads of
+  `InvestmentBlock::set_variable_values()` taking an `Eigen::ArrayXd` or an
+  iterator, which nothing called: `set_variable_values()` takes a
+  `std::vector`
 
 ### Fixed
 
@@ -86,6 +214,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   electricity alone, or whose generators have no node on the electricity,
   which gave the active power the dual of the electric row only, with
   coefficient 1, and the pollutant zone of the node 0
+
+- `InvestmentFunction::compute()` returns `kError` when the inner Block is
+  solved but its linearization cannot be read, e.g., because its Solver
+  gives no dual solution: it returned the status of the solve, with no
+  value and no linearization, and a bundle above it could declare an
+  optimum of 0
+
+- a throw in `InvestmentFunction::compute()`, its own or of the Solver of
+  the inner Block, leaves the inner Block unlocked and gives the Solver its
+  identity back
+
+- `remove_variable()` and `remove_variables()` of InvestmentFunction remove
+  all the data of the assets sized by the removed Variable: the costs, the
+  installed quantity and the columns of the linear constraints stayed at
+  their position
+
+- the dimension `ObjectiveSense` of InvestmentBlock is read as documented,
+  and as BendersBlock reads it: size 0 is a maximization, any other size a
+  minimization; its size was taken as the sense itself, so that size 1 was
+  a maximization
+
+- a deserialize that is refused frees what it had built: the
+  InvestmentFunction of the single-component format, and an inner Block
+  that InvestmentFunction refuses, were leaked
+
+- `InvestmentBlock::serialize()` with a single component no longer fails:
+  InvestmentFunction wrote `NumAssets` and `LowerBound` again in the group
+  of the InvestmentBlock, which already holds them, and left the group
+  with its own type
+
+- `InvestmentFunction::get_dflt_str_par()` has a default for each of its
+  two string parameters: the default of `strOutputSolutionDirectory` was
+  read past the end of a vector, which made every reset to the defaults
+  crash, as `investmentblock_solver` does after solving
+
+- over several replicas of an `SDDPBlock`, `InvestmentFunction` sums the
+  linearization into a vector as long as the active Variable: it was as
+  long as the last one computed, empty before the first, and the first
+  coefficient was written out of it
 
 ## [0.3.0] - 2026-10-09
 

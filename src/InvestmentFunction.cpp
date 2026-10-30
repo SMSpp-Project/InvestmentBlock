@@ -16,22 +16,15 @@
 /*------------------------------ INCLUDES ----------------------------------*/
 /*--------------------------------------------------------------------------*/
 
-#include "AbstractBlock.h"
-#include "BatteryUnitBlock.h"
 #include "BendersBFunction.h"
 #include "BendersBlock.h"
 #include "BlockSolverConfig.h"
-#include "DCNetworkBlock.h"
 #include "FRealObjective.h"
 #include "Observer.h"
 #include "OneVarConstraint.h"
 #include "RBlockConfig.h"
-#include "ConversionUnitBlock.h"
-#include "IntermittentUnitBlock.h"
-#include "LinearFunction.h"
 #include "InvestmentFunction.h"
 #include "SDDPBlock.h"
-#include "TwoStageStochasticBlock.h"
 // Solution-output utility lives under tools/sddp_solver/. It is purely
 // optional: when its header is on the include path (e.g. when the tool
 // makefile passes -I.../tools/sddp_solver) the f_output_solution path
@@ -43,9 +36,6 @@
 #include "SDDPGreedySolver.h"
 #include "SDDPSolver.h"
 #include "SMSTypedefs.h"
-#include "StochasticBlock.h"
-#include "ThermalUnitBlock.h"
-#include "UCBlock.h"
 
 #include <algorithm>
 #include <cmath>
@@ -208,6 +198,7 @@ InvestmentFunction::InvestmentFunction
  v_asset_type = std::move( asset_type );
  v_cost = std::move( cost );
  v_disinvestment_cost = std::move( disinvestment_cost );
+ set_pieces();   // the inner Block came before the assets
 
  f_violated_constraint = { Inf< Index >() , eLHS };
 
@@ -218,8 +209,6 @@ InvestmentFunction::InvestmentFunction
  f_compute_linearization = get_dflt_int_par( intComputeLinearization );
  AAccMlt = get_dflt_dbl_par( dblAAccMlt );
  set_par( intGPMaxSz , C05Function::get_dflt_int_par( intGPMaxSz ) );
-
- prepare_converter_assets();
 }
 
 /*--------------------------------------------------------------------------*/
@@ -228,9 +217,6 @@ InvestmentFunction::~InvestmentFunction() {
  // remove the Solver that this InvestmentFunction registered in the inner
  // Blocks, then delete them
  unconfigure_inner_Block_Solver();
-
- delete f_unit_BSC;
- delete f_inner_BSC;
 
  for( auto block : v_Block )
   delete block;
@@ -241,21 +227,27 @@ InvestmentFunction::~InvestmentFunction() {
 void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                                       ModParam issueMod ) {
 
- // Deserialize the attributes
+ // ReplicateBatteryUnits, ReplicateIntermittentUnits and AssetMethod are
+ // refused, rather than read as a different model: each asset names the
+ // methods that size it in "AssetSetter"
 
- auto replicate_battery = group.getAtt( "ReplicateBatteryUnits" );
- if( ( ! replicate_battery.isNull() ) ) {
-  int replicate;
-  replicate_battery.getValues( & replicate );
-  f_replicate_battery = replicate;
- }
+ for( const char * name : { "ReplicateBatteryUnits" ,
+                            "ReplicateIntermittentUnits" } )
+  if( ! group.getAtt( name ).isNull() )
+   throw( std::logic_error( std::string( "InvestmentFunction::deserialize: "
+                            "the attribute '" ) + name + "' is no longer "
+                            "supported: say how each asset is sized with "
+                            "'AssetSetter' and 'AssetLinearization'." ) );
 
- auto replicate_intermittent = group.getAtt( "ReplicateIntermittentUnits" );
- if( ! replicate_intermittent.isNull() ) {
-  int replicate;
-  replicate_intermittent.getValues( & replicate );
-  f_replicate_intermittent = replicate;
- }
+ if( ! group.getVar( "AssetMethod" ).isNull() )
+  throw( std::logic_error( "InvestmentFunction::deserialize: the variable "
+                           "'AssetMethod' is no longer supported: say how "
+                           "each asset is sized with 'AssetSetter' and "
+                           "'AssetLinearization', as \"UCBlock::resize_unit\" "
+                           "and \"UCBlock::get_resize_unit_linearization\" "
+                           "for 1, \"UCBlock::replicate\" and "
+                           "\"UCBlock::get_replicate_linearization\" for 0, "
+                           "with 'AssetFeasibilityCut' 0." ) );
 
  // Deserialize the dimensions
 
@@ -266,13 +258,39 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
 
+ // Deserialize the asset -> active-variable mapping (optional; default
+ // identity, i.e. asset i uses the i-th active variable). When set, asset i
+ // uses active variable v_asset_var_index[ i ]; this lets several
+ // InvestmentFunction share the same active variables while each invests only
+ // in some of them (the multi-period case). Absent, it is the identity.
+ deserialize_one_each( group , "AssetVarIndex" , num_assets ,
+                       v_asset_var_index );
+
  if( ! v_x.empty() ) {
-  if( num_assets != v_x.size() )
+  if( ! v_asset_var_index.empty() )
+   // mapping mode: one entry per asset, each pointing to an active variable
+   check_indices( v_asset_var_index , v_x.size() , "InvestmentFunction::"
+                  "deserialize: the 'AssetVarIndex' entry" );
+  else if( num_assets != v_x.size() )
+   // identity mode: one asset per active variable, same order
    throw( std::logic_error( "InvestmentFunction::deserialize: the number of "
                             "assets to invest (" + std::to_string( num_assets ) +
                             ") is different from the number of active variables "
                             "(" + std::to_string( v_x.size() ) + ")." ) );
  }
+
+ // Deserialize the per-asset variable baseline (optional; absent => the
+ // baseline is the InstalledQuantity datum, as in the single-period case).
+ // When present, entry i is the index of the active variable whose value is
+ // asset i's baseline -- the multi-period transition: the component of period
+ // t reads the design variable of period t-1 (see add_linear_term()).
+ deserialize_one_each( group , "AssetBaselineVarIndex" , num_assets ,
+                       v_asset_baseline_var_index );
+
+ if( ! v_x.empty() )
+  check_indices( v_asset_baseline_var_index , v_x.size() ,
+                 "InvestmentFunction::deserialize: the "
+                 "'AssetBaselineVarIndex' entry" );
 
  // Number of linear constraints
 
@@ -281,96 +299,115 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  if( ! deserialize_dim( group , "NumConstraints" , num_constraints ) )
   num_constraints = 0;
 
- // Deserialize the assets
+ // Deserialize the assets; names worked out for an inner Block read before
+ // are not those of the instance [see set_asset_names()]
+
+ if( f_derived_names ) {
+  v_asset_setter_name.clear();
+  v_asset_linearization_name.clear();
+  }
+ if( f_derived_cuts )
+  v_asset_feasibility_cut.clear();
+ f_derived_names = f_derived_cuts = false;
 
  if( num_assets ) {
 
   // Deserialize the asset indices.
 
-  ::deserialize( group , "Assets" , num_assets , v_asset_indices , false );
+  if( ! deserialize_one_each( group , "Assets" , num_assets ,
+                              v_asset_indices ) )
+   throw( std::logic_error( "InvestmentFunction::deserialize: the 'Assets' "
+                            "netCDF variable must be provided." ) );
 
   // Deserialize the types of assets.
 
-  if( ! ::deserialize( group , "AssetType" , num_assets , v_asset_type ,
-                       true , true ) )
+  if( ! deserialize_one_each( group , "AssetType" , num_assets ,
+                              v_asset_type ) )
    v_asset_type.resize( num_assets , eUnitBlock );
 
-  if( ! v_asset_type.empty() ) {
-   if( v_asset_type.size() == 1 )
-    v_asset_type.resize( num_assets , v_asset_type.front() );
-   else if( v_asset_type.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the 'AssetType'"
-                             " netCDF variable, if provided, must have size 0,"
-                             " 1, or 'NumAssets'." ) );
+  // The names of the methods that write each asset and read it back. They
+  // go together; without them they are worked out of the class of each unit
+  // [see resolve_asset_methods()].
 
-   assert( v_asset_indices.size() == v_asset_type.size() );
-   for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
-    for( Index j = i + 1 ; j < v_asset_indices.size() ; ++j )
-     if( ( v_asset_indices[ i ] == v_asset_indices[ j ] ) &&
-         ( v_asset_type[ i ] == v_asset_type[ j ] ) )
-      throw( std::logic_error
-             ( "InvestmentFunction::deserialize: asset with index " +
-               std::to_string( v_asset_indices[ i ] ) + " and type " +
-               std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
-  }
+  ::deserialize( group , "AssetSetter" , num_assets , v_asset_setter_name ,
+                 true );
+  ::deserialize( group , "AssetLinearization" , num_assets ,
+                 v_asset_linearization_name , true );
+
+  if( v_asset_setter_name.empty() != v_asset_linearization_name.empty() )
+   throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetSetter' "
+                            "and 'AssetLinearization' go together, and only "
+                            "one of them is there." ) );
+
+  deserialize_one_each( group , "AssetFeasibilityCut" , num_assets ,
+                        v_asset_feasibility_cut );
+  for( const auto cut : v_asset_feasibility_cut )
+   if( ( cut != 0 ) && ( cut != 1 ) )
+    throw( std::logic_error( "InvestmentFunction::deserialize: invalid "
+                             "AssetFeasibilityCut: " + std::to_string( cut ) +
+                             "." ) );
+
+  for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+   for( Index j = i + 1 ; j < v_asset_indices.size() ; ++j )
+    if( ( v_asset_indices[ i ] == v_asset_indices[ j ] ) &&
+        ( v_asset_type[ i ] == v_asset_type[ j ] ) )
+     throw( std::logic_error
+            ( "InvestmentFunction::deserialize: asset with index " +
+              std::to_string( v_asset_indices[ i ] ) + " and type " +
+              std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
+
+  // the second size of a unit goes with its first [see AssetType]
+  for( Index j = 0 ; j < v_asset_indices.size() ; ++j )
+   if( ( v_asset_type[ j ] == eSecondSize ) &&
+       ( first_size_of( j ) == Inf< Index >() ) )
+    throw( std::logic_error( "InvestmentFunction::deserialize: asset " +
+                             std::to_string( j ) + " is the second size of "
+                             "unit " + std::to_string( v_asset_indices[ j ] ) +
+                             ", which has no asset of type 0." ) );
 
   // Deserialize the lower bound on the active variables
 
-  ::deserialize( group , "LowerBound" , num_assets , v_lower_bound ,
-                 true , true );
+  deserialize_one_each( group , "LowerBound" , num_assets , v_lower_bound );
 
-  if( ! v_lower_bound.empty() ) {
-   if( v_lower_bound.size() == 1 )
-    v_lower_bound.resize( num_assets , v_lower_bound.front() );
-   else if( v_lower_bound.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the 'LowerBound'"
-                             " netCDF variable, if provided, must have size 0,"
-                             " 1, or 'NumAssets'." ) );
-  }
+  // Deserialize the costs of investments; absent, all coefficients are zero
 
-  // Deserialize the costs of investments
-
-  if( ::deserialize( group , "Cost" , num_assets ,
-                     v_cost , true , true ) ) {
-   if( v_cost.size() == 1 )
-    v_cost.resize( num_assets , v_cost.front() );
-   else if( v_cost.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the 'Cost'"
-                             " netCDF variable, if provided, must have size "
-                             "0, 1, or 'NumAssets'." ) );
-  }
-  else {
-   // All coefficients are zero.
+  if( ! deserialize_one_each( group , "Cost" , num_assets , v_cost ) )
    v_cost.resize( num_assets , 0 );
-  }
 
-  // Deserialize the costs of disinvestments
+  // Deserialize the costs of disinvestments; absent, all of them are zero
 
-  if( ::deserialize( group , "DisinvestmentCost" , num_assets ,
-                     v_disinvestment_cost , true , true ) ) {
-   if( v_disinvestment_cost.size() == 1 )
-    v_disinvestment_cost.resize( num_assets , v_disinvestment_cost.front() );
-   else if( v_disinvestment_cost.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the "
-                             "'DisinvestmentCost' netCDF variable, if provided,"
-                             " must have size 0, 1, or 'NumAssets'." ) );
-  }
-  else {
-   // All coefficients are zero.
+  if( ! deserialize_one_each( group , "DisinvestmentCost" , num_assets ,
+                              v_disinvestment_cost ) )
    v_disinvestment_cost.resize( num_assets , 0 );
-  }
+
+  // Deserialize the limits on the change over the baseline; absent, + INF
+
+  const auto limit = [ & ]( const std::string & name ) {
+   RealVector v;
+   deserialize_one_each( group , name , num_assets , v );
+   for( auto l : v )
+    if( ! ( l >= 0 ) )
+     throw( std::invalid_argument( "InvestmentFunction::deserialize: the '" +
+                                   name + "' netCDF variable of group '" +
+                                   group.getName() + "' must be >= 0." ) );
+   return( v );
+   };
+  set_variation_limits( limit( "MaxInvestment" ) ,
+                        limit( "MaxDisinvestment" ) );
+
 
   // Deserialize the amount of assets currently installed in the system
 
-  if( ::deserialize( group , "InstalledQuantity" , num_assets ,
-                     v_installed_quantity , true , true ) ) {
-   if( v_installed_quantity.size() == 1 )
-    v_installed_quantity.resize( num_assets , v_installed_quantity.front() );
-   else if( v_installed_quantity.size() != num_assets )
-    throw( std::logic_error( "InvestmentFunction::deserialize: the "
-                             "'InstalledCapacity' netCDF variable, if provided,"
-                             " must have size 0, 1, or 'NumAssets'." ) );
-  }
+  deserialize_one_each( group , "InstalledQuantity" , num_assets ,
+                        v_installed_quantity );
+
+  // A variable baseline excludes the InstalledQuantity datum: both answer
+  // "how much was there before", having the two together is ambiguous.
+  if( ( ! v_asset_baseline_var_index.empty() ) &&
+      ( ! v_installed_quantity.empty() ) )
+   throw( std::logic_error( "InvestmentFunction::deserialize: "
+                            "'AssetBaselineVarIndex' cannot be combined with "
+                            "'InstalledQuantity'." ) );
 
  } // end( if( num_assets ) )
 
@@ -378,37 +415,15 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  if( num_constraints ) {
 
-  if( ::deserialize( group , "Constraints_LowerBound" , num_constraints ,
-                     v_constraints_lower_bound , true , true ) ) {
-   if( v_constraints_lower_bound.size() == 1 )
-    v_constraints_lower_bound.resize( num_constraints ,
-                                      v_constraints_lower_bound.front() );
-   else if( v_constraints_lower_bound.size() != num_constraints )
-    throw( std::logic_error
-           ( "InvestmentFunction::deserialize: the 'Constraints_LowerBound'"
-             " netCDF variable, if provided, must have size "
-             "0, 1, or 'NumConstraints'." ) );
-  }
-  else {
-   // The lower bound is - infinity
-   v_constraints_lower_bound.resize( num_constraints , -Inf< double >() );
-  }
+  // absent, the lower bounds are - infinity and the upper ones infinity
 
-  if( ::deserialize( group , "Constraints_UpperBound" , num_constraints ,
-                     v_constraints_upper_bound , true , true ) ) {
-   if( v_constraints_upper_bound.size() == 1 )
-    v_constraints_upper_bound.resize( num_constraints ,
-                                      v_constraints_upper_bound.front() );
-   else if( v_constraints_upper_bound.size() != num_constraints )
-    throw( std::logic_error
-           ( "InvestmentFunction::deserialize: the 'Constraints_UpperBound'"
-             " netCDF variable, if provided, must have size "
-             "0, 1, or 'NumConstraints'." ) );
-  }
-  else {
-   // The upper bound is infinity
+  if( ! deserialize_one_each( group , "Constraints_LowerBound" ,
+                              num_constraints , v_constraints_lower_bound ) )
+   v_constraints_lower_bound.resize( num_constraints , -Inf< double >() );
+
+  if( ! deserialize_one_each( group , "Constraints_UpperBound" ,
+                              num_constraints , v_constraints_upper_bound ) )
    v_constraints_upper_bound.resize( num_constraints , Inf< double >() );
-  }
 
   for( Index i = 0 ; i < num_constraints ; ++i )
    if( v_constraints_lower_bound[ i ] > v_constraints_upper_bound[ i ] )
@@ -447,10 +462,17 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
   throw( std::logic_error( "InvestmentFunction::deserialize: the '" +
                            BLOCK_NAME + "' group must be present." ) );
 
- if( f_num_sub_blocks <= 1 ) {
+ if( f_external_inner_block ) {
 
-  // Single-Block path: create one inner Block, which may be either an
-  // SDDPBlock or a UCBlock.
+  // The inner Block is provided from outside (a piece of a split inner
+  // Block, see deserialize( group , inner , issueMod )): the "InnerBlock"
+  // sub-group, which describes the whole inner Block, is NOT read.
+
+  set_inner_block( f_external_inner_block );
+  }
+ else if( f_num_sub_blocks <= 1 ) {
+
+  // Single-Block path: create one inner Block.
 
   auto inner_block = Block::new_Block( inner_block_group , this );
 
@@ -458,13 +480,6 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
                             "possible to create the inner Block from group '" +
                             BLOCK_NAME + "'." ) );
-
-  if( ! ( dynamic_cast< SDDPBlock * >( inner_block ) ||
-          dynamic_cast< TwoStageStochasticBlock * >( inner_block ) ||
-          dynamic_cast< UCBlock * >( inner_block ) ) )
-   throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
-                            "Block is neither an SDDPBlock, nor a "
-                            "TwoStageStochasticBlock, nor a UCBlock." ) );
 
   set_inner_block( inner_block );
   }
@@ -481,19 +496,34 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
     throw( std::logic_error( "InvestmentFunction::deserialize: it was not "
                              "possible to create the inner Block from group '"
                              + BLOCK_NAME + "'." ) );
-   if( ! dynamic_cast< SDDPBlock * >( inner_block ) )
+   if( ! dynamic_cast< SDDPBlock * >( inner_block ) ) {
+    // the replicas are read out of the same group: either the first one is
+    // rejected, and none was made before it, or none is
+    delete inner_block;
     throw( std::logic_error( "InvestmentFunction::deserialize: the inner "
                              "Block is not an SDDPBlock (only SDDPBlock is "
                              "supported in the multi-replica path)." ) );
+    }
    blocks.push_back( inner_block );
    }
   set_inner_blocks( blocks );
   }
 
- // before the Constraints of the UCBlock are generated
- prepare_converter_assets();
-
- Block::deserialize( group );
+ // the methods of the assets are resolved now that the pieces of the inner
+ // Block are known [see set_pieces()], so that an inner Block they cannot be
+ // called on is refused here and not at the first compute(): the one read
+ // here is then deleted, and the one given from outside handed back to its
+ // owner, as when Block::deserialize() refuses the group (a weight that is
+ // not positive). An SDDPBlock has no pieces, and waits for compute()
+ try {
+  if( ! v_pieces.empty() )
+   resolve_asset_methods();
+  Block::deserialize( group );
+  }
+ catch( ... ) {
+  set_inner_block( nullptr , ! f_external_inner_block );
+  throw;
+  }
 
 }  // end( InvestmentFunction::deserialize )
 
@@ -516,26 +546,40 @@ void InvestmentFunction::set_default_inner_Block_BlockConfig() {
 
 void InvestmentFunction::set_default_inner_Block_BlockSolverConfig() {
  unconfigure_inner_Block_Solver();
- delete f_inner_BSC;
- f_inner_BSC = nullptr;
- delete f_unit_BSC;
- f_unit_BSC = nullptr;
+ set_unit_BlockSolverConfig( nullptr );
 }
 
 /*--------------------------------------------------------------------------*/
 
-const BlockSolverConfig *
-InvestmentFunction::get_unit_BlockSolverConfig( void ) const {
- if( f_unit_BSC )
-  return( f_unit_BSC );
- if( f_inner_BSC && get_ucblock() )
-  return( f_inner_BSC );
- throw( std::logic_error( "InvestmentFunction::get_unit_BlockSolverConfig: "
-                          "a scaled UnitBlock with no copies needs the "
-                          "\"UnitBlockSolverConfig\" of its copy, which "
-                          "has not been given, and the inner Block is not "
-                          "a UCBlock whose BlockSolverConfig could be used "
-                          "in its place" ) );
+void InvestmentFunction::set_unit_BlockSolverConfig
+( const BlockSolverConfig * bsc ) {
+ if( ( ! bsc ) && ( ! f_unit_BSC_given ) )
+  return;
+
+ const auto num_stages = get_number_stages();
+
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+  for( Index stage = 0 ; stage < num_stages ; ++stage ) {
+   const auto piece = get_piece( stage , i );
+   if( ! piece ) {
+    if( ! bsc )
+     continue;
+    throw( std::logic_error( "InvestmentFunction::set_unit_BlockSolverConfig: "
+                             "the inner Block has no Block in stage " +
+                             std::to_string( stage ) + " of sub-Block " +
+                             std::to_string( i ) ) );
+    }
+
+   // a differential BlockConfig with only the extra part: the other
+   // Configuration of the Block are left as they are
+   auto config = new BlockConfig( true );
+   config->f_extra_Configuration = bsc ? bsc->clone()
+                                       : new BlockSolverConfig();
+   config->apply( piece );
+   delete config;
+   }
+
+ f_unit_BSC_given = bsc != nullptr;
 }
 
 /*--------------------------------------------------------------------------*/
@@ -624,7 +668,6 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
       // there and its cleared apply() removes exactly them [see
       // BlockSolverConfig::apply()]
       unconfigure_inner_Block_Solver();   // clean up for the new arrival
-      prepare_converter_assets();  // before the Solver generate the rows
       v_BSC.reserve( v_Block.size() );
       for( auto inner_block : v_Block ) {
        auto cBSC = bsc->clone();
@@ -632,10 +675,13 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
        cBSC->clear();
        v_BSC.push_back( cBSC );
        }
-      // kept whole, for the copies of the units [see
-      // get_unit_BlockSolverConfig()]
-      delete f_inner_BSC;
-      f_inner_BSC = bsc->clone();
+      // given with no "UnitBlockSolverConfig", it is also that of the copy of
+      // a unit with no copies, which is solved as the inner Block is [see
+      // set_unit_BlockSolverConfig()]
+      if( ( ! v_pieces.empty() ) &&
+          ( config_map->f_value.find( "UnitBlockSolverConfig" ) ==
+            config_map->f_value.end() ) )
+       set_unit_BlockSolverConfig( bsc );
       }
      else
       // An invalid Configuration has been provided.
@@ -647,16 +693,12 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
    else
     if( key == "UnitBlockSolverConfig" ) {
      if( ! config ) {
-      if( ! scfg->diff() ) {
-       delete f_unit_BSC;
-       f_unit_BSC = nullptr;
-       }
+      if( ! scfg->diff() )
+       set_unit_BlockSolverConfig( nullptr );
       }
      else
-      if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) ) {
-       delete f_unit_BSC;
-       f_unit_BSC = bsc->clone();
-       }
+      if( auto bsc = dynamic_cast< BlockSolverConfig * >( config ) )
+       set_unit_BlockSolverConfig( bsc );
       else
        throw( std::invalid_argument(
 	      "InvestmentFunction::set_ComputeConfig: the Configuration "
@@ -674,19 +716,27 @@ void InvestmentFunction::set_ComputeConfig( const ComputeConfig * scfg )
 
 void InvestmentFunction::set_variables( VarVector && x )
 {
+ // The cost vectors are indexed by asset, so their size is the number of
+ // assets, which need not equal the number of active variables (the latter is
+ // larger when several components share the same variables; see
+ // set_asset_variable_indices()).
  if( ! v_cost.empty() )
-  if( v_cost.size() != x.size() )
-   throw( std::logic_error("InvestmentFunction::set_variables: given x has "
-                           "size " + std::to_string( x.size() ) + ", but the "
-                           "number of linear coefficients is " +
-                           std::to_string( v_cost.size() ) ) );
+  if( v_cost.size() != v_asset_indices.size() )
+   throw( std::logic_error("InvestmentFunction::set_variables: the number of "
+                           "linear coefficients is " +
+                           std::to_string( v_cost.size() ) +
+                           ", but there are " +
+                           std::to_string( v_asset_indices.size() ) +
+                           " assets" ) );
 
  if( ! v_disinvestment_cost.empty() )
-  if( v_disinvestment_cost.size() != x.size() )
-   throw( std::logic_error("InvestmentFunction::set_variables: given x has "
-                           "size " + std::to_string( x.size() ) + ", but the "
-                           "number of linear coefficients is " +
-                           std::to_string( v_disinvestment_cost.size() ) ) );
+  if( v_disinvestment_cost.size() != v_asset_indices.size() )
+   throw( std::logic_error("InvestmentFunction::set_variables: the number of "
+                           "disinvestment coefficients is " +
+                           std::to_string( v_disinvestment_cost.size() ) +
+                           ", but there are " +
+                           std::to_string( v_asset_indices.size() ) +
+                           " assets" ) );
 
  v_x = std::move( x );
  f_blocks_are_updated = false;
@@ -781,30 +831,7 @@ void InvestmentFunction::put_State( const State & state ) {
 
  global_pool.clone( s.global_pool );
 
- if( ! f_Observer )
-  return;
-
- // If the global pool was not initially empty, issue a Modification telling
- // that all previous linearizations have been removed.
-
- if( ! global_pool_was_empty )
-  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
-                                ( this , C05FunctionMod::GlobalPoolRemoved ,
-                                  Subset() , 0 , 0 ) );
-
- // Collect the indices of all linearizations that were added and issue the
- // Modification.
-
- Subset added;
- added.reserve( global_pool.size() );
- for( Index i = 0 ; i < global_pool.size() ; ++i )
-  if( global_pool.is_linearization_there( i ) )
-   added.push_back( i );
-
- if( ! added.empty() )
-  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
-                                ( this , C05FunctionMod::GlobalPoolAdded ,
-                                  std::move( added ) , 0 , 0 ) );
+ issue_State_mods( global_pool_was_empty );
 
 }  // end( InvestmentFunction::put_State )
 
@@ -818,13 +845,20 @@ void InvestmentFunction::put_State( State && state ) {
 
  global_pool.clone( std::move( s.global_pool ) );
 
+ issue_State_mods( global_pool_was_empty );
+}  // end( InvestmentFunction::put_State )
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::issue_State_mods( bool was_empty ) {
+
  if( ! f_Observer )
   return;
 
  // If the global pool was not initially empty, issue a Modification telling
  // that all previous linearizations have been removed.
 
- if( ! global_pool_was_empty )
+ if( ! was_empty )
   f_Observer->add_Modification( std::make_shared< C05FunctionMod >
                                 ( this , C05FunctionMod::GlobalPoolRemoved ,
                                   Subset() , 0 , 0 ) );
@@ -842,7 +876,7 @@ void InvestmentFunction::put_State( State && state ) {
   f_Observer->add_Modification( std::make_shared< C05FunctionMod >
                                 ( this , C05FunctionMod::GlobalPoolAdded ,
                                   std::move( added ) , 0 , 0 ) );
-}  // end( InvestmentFunction::put_State )
+}  // end( InvestmentFunction::issue_State_mods )
 
 /*--------------------------------------------------------------------------*/
 
@@ -907,14 +941,7 @@ void InvestmentFunction::remove_variable( Index i , ModParam issueMod ) {
                            "Variable index " + std::to_string( i ) + "." ) );
 
  auto var = v_x[ i ];
- v_x.erase( v_x.begin() + i ); // erase it in v_x
-
- // Erase the asset index, asset type, and the linear coefficient associated
- // with the Variable being removed
- v_asset_indices.erase( v_asset_indices.begin() + i );
- v_asset_type.erase( v_asset_type.begin() + i );
-
- f_blocks_are_updated = false;
+ remove_actives( { i } );
 
  if( ( ! f_Observer ) ||
      ( ! f_Observer->issue_mod( issueMod , Function::eModFVars ) ) )
@@ -938,85 +965,21 @@ void InvestmentFunction::remove_variables( Range range , ModParam issueMod ) {
  if( range.second <= range.first )
   return;
 
- f_blocks_are_updated = false;
+ Vec_p_Var vars( v_x.begin() + range.first , v_x.begin() + range.second );
+ Subset removed;
+ removed.reserve( range.second - range.first );
+ for( Index i = range.first ; i < range.second ; ++i )
+  removed.push_back( i );
 
- if( ( range.first == 0 ) && ( range.second == Index( v_x.size() ) ) ) {
-  // removing *all* Variables
-  Vec_p_Var vars( v_x.size() );
+ remove_actives( removed );
 
-  for( decltype( v_x )::size_type i = 0 ; i < v_x.size() ; ++i )
-   vars[ i ] = v_x[ i ];
-
-  v_x.clear();
-  v_asset_indices.clear();
-  v_asset_type.clear();
-  v_cost.clear();
-  v_disinvestment_cost.clear();
-
-  // Now issue the Modification.
-  // An InvestmentFunction is strongly quasi-additive.
-  if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) )
-   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsRngd >
-                                 ( this , std::move( vars ) , range , 0 ,
-                                   Observer::par2concern( issueMod ) ) ,
-                                 Observer::par2chnl( issueMod ) );
-  return;
- }
-
- // Removing *some* Variables.
-
- // Iterators to the Variables to be removed.
-
- const auto v_x_it = std::make_pair( v_x.begin() + range.first ,
-                                     v_x.begin() + range.second );
-
- const auto erase = [ this , &v_x_it , range ]() {
-
-  // Iterators to the elements to be removed
-
-  const auto v_asset_indices_it =
-   std::make_pair( v_asset_indices.begin() + range.first ,
-                   v_asset_indices.begin() + range.second );
-
-  const auto v_asset_type_it =
-   std::make_pair( v_asset_type.begin() + range.first ,
-                   v_asset_type.begin() + range.second );
-
-  const auto v_cost_it =
-   std::make_pair( v_cost.begin() + range.first ,
-                   v_cost.begin() + range.second );
-
-  const auto v_disinvestment_cost_it =
-   std::make_pair( v_disinvestment_cost.begin() + range.first ,
-                   v_disinvestment_cost.begin() + range.second );
-
-  v_x.erase( v_x_it.first , v_x_it.second );
-  v_asset_indices.erase( v_asset_indices_it.first , v_asset_indices_it.second );
-  v_asset_type.erase( v_asset_type_it.first , v_asset_type_it.second );
-  v_cost.erase( v_cost_it.first , v_cost_it.second );
-  v_disinvestment_cost.erase( v_disinvestment_cost_it.first ,
-                              v_disinvestment_cost_it.second );
- };
-
- if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) ) {
-  // Somebody is there: meanwhile, prepare data for the Modification
-
-  Vec_p_Var vars( range.second - range.first );
-  std::copy( v_x_it.first , v_x_it.second , vars.begin() );
-
-  // Erase the elements associated with the Variables being removed
-  erase();
-
-  // Now issue the Modification.
-  // An InvestmentFunction is strongly quasi-additive
+ // Now issue the Modification.
+ // An InvestmentFunction is strongly quasi-additive.
+ if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) )
   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsRngd >
                                 ( this , std::move( vars ) , range , 0 ,
                                   Observer::par2concern( issueMod ) ) ,
                                 Observer::par2chnl( issueMod ) );
- }
- else  // no one is there: just do it
-  // Erase the elements associated with the Variables being removed
-  erase();
 
 }  // end( InvestmentFunction::remove_variables( range ) )
 
@@ -1042,77 +1005,118 @@ static void compact( std::vector< T > & x ,
 
 /*--------------------------------------------------------------------------*/
 
+void InvestmentFunction::remove_actives( const Subset & removed )
+{
+ const auto is_removed = [ & removed ]( Index i ) {
+  return( std::binary_search( removed.begin() , removed.end() , i ) );
+  };
+
+ // the assets that go, those sized by a removed Variable: with the identity
+ // mapping asset i is sized by the i-th active Variable
+ const Index num_assets = v_asset_indices.size();
+ Subset assets;
+ for( Index j = 0 ; j < num_assets ; ++j )
+  if( is_removed( v_asset_var_index.empty() ? j : v_asset_var_index[ j ] ) )
+   assets.push_back( j );
+
+ // an asset that stays cannot lose its baseline: refused before anything
+ // is changed
+ for( Index j = 0 ; j < v_asset_baseline_var_index.size() ; ++j )
+  if( is_removed( v_asset_baseline_var_index[ j ] ) &&
+      ( ! std::binary_search( assets.begin() , assets.end() , j ) ) )
+   throw( std::logic_error( "InvestmentFunction::remove_variables: the active "
+                            "Variable " +
+                            std::to_string( v_asset_baseline_var_index[ j ] ) +
+                            " is the baseline of the asset " +
+                            std::to_string( j ) + ", which stays." ) );
+
+ // the data of the assets that go, in every vector indexed by asset; one
+ // shorter than the assets holds the default for those past its end
+ const auto drop = [ & assets ]( auto & v ) {
+  Subset in;
+  for( auto j : assets )
+   if( j < v.size() )
+    in.push_back( j );
+  if( ! in.empty() )
+   compact( v , in );
+  };
+
+ if( ! assets.empty() ) {
+  drop( v_asset_indices );
+  drop( v_asset_type );
+  drop( v_asset_setter_name );
+  drop( v_asset_linearization_name );
+  drop( v_asset_feasibility_cut );
+  drop( v_cost );
+  drop( v_disinvestment_cost );
+  drop( v_max_investment );
+  drop( v_max_disinvestment );
+  drop( v_installed_quantity );
+  drop( v_asset_var_index );
+  drop( v_asset_baseline_var_index );
+  for( auto & row : v_A )  // a column for each asset
+   drop( row );
+  }
+
+ // the Variable of the assets that stay, and their baselines, move to the
+ // positions they have once the removed ones are gone
+ for( auto v : { & v_asset_var_index , & v_asset_baseline_var_index } )
+  for( auto & k : *v )
+   k -= std::lower_bound( removed.begin() , removed.end() , k ) -
+        removed.begin();
+
+ // the data indexed by active Variable
+ const auto num_active = v_x.size();
+ compact( v_x , removed );
+ for( auto v : { & v_lower_bound , & v_linearization } )
+  if( v->size() == num_active )
+   compact( *v , removed );
+
+ // the groups of assets are indexed by asset, so they no longer are: drop
+ // them and let them be resolved again the next time the Blocks are updated
+ v_asset_groups.clear();
+ f_methods_resolved = false;
+ f_blocks_are_updated = false;
+
+}  // end( InvestmentFunction::remove_actives )
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
                                            ModParam issueMod ) {
 
- if( indices.empty() ) {      // removing *all* Variables
-
+ const bool all = indices.empty();
+ if( all ) {      // removing *all* Variables
   if( v_x.empty() )       // there is no Variable to be removed
    return;                // cowardly (and silently) return
-
-  Vec_p_Var vars( v_x.size() );
-
   for( Index i = 0 ; i < v_x.size() ; ++i )
-   vars[ i ] = v_x[ i ];
+   indices.push_back( i );
+  }
+ else {           // removing *some* Variables
+  if( ! ordered )
+   std::sort( indices.begin() , indices.end() );
 
-  // Clear all elements
-  v_x.clear();
-  v_asset_indices.clear();
-  v_asset_type.clear();
-  v_cost.clear();
-  v_disinvestment_cost.clear();
+  if( indices.back() >= v_x.size() )  // the last name is wrong
+   throw( std::invalid_argument( "InvestmentFunction::remove_variables: wrong "
+                                 "Variable index in the Subset indices." ) );
+  }
 
-  f_blocks_are_updated = false;
+ Vec_p_Var vars;
+ vars.reserve( indices.size() );
+ for( auto nm : indices )
+  vars.push_back( v_x[ nm ] );
 
-  // Now issue the Modification: note that the subset is empty.
-  // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
-  if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) )
-   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsSbst >
-                                 ( this , std::move( vars ) , Subset() , true ,
-                                   0 , Observer::par2concern( issueMod ) ) ,
-                                 Observer::par2chnl( issueMod ) );
-  return;
- }
+ remove_actives( indices );
 
- // removing *some* Variables
-
- if( ! ordered )
-  std::sort( indices.begin() , indices.end() );
-
- if( indices.back() >= v_x.size() )  // the last name is wrong
-  throw( std::invalid_argument( "InvestmentFunction::remove_variables: wrong "
-                                "Variable index in the Subset indices." ) );
-
- f_blocks_are_updated = false;
-
- const auto erase = [ this , &indices ]() {
-  compact( v_asset_indices , indices );
-  compact( v_asset_type , indices );
-  compact( v_cost , indices );
-  compact( v_disinvestment_cost , indices );
-  compact( v_x , indices );
- };
-
- if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) ) {
-  Vec_p_Var vars( indices.size() );
-  auto its = vars.begin();
-  for( auto nm : indices )
-   *(its++) = v_x[ nm ];
-
-  erase();
-
-  // Remove
-
-  // Now issue the Modification.
-  // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
+ // Now issue the Modification: an empty subset if all were removed.
+ // An InvestmentFunction is strongly quasi-additive, and indices is ordered.
+ if( f_Observer && f_Observer->issue_mod( issueMod , Function::eModFVars ) )
   f_Observer->add_Modification( std::make_shared< C05FunctionModVarsSbst >
                                 ( this , std::move( vars ) ,
-                                  std::move( indices ) , true , 0 ,
+                                  all ? Subset() : std::move( indices ) ,
+                                  true , 0 ,
                                   Observer::par2concern( issueMod ) ) ,
                                 Observer::par2chnl( issueMod ) );
- }
- else  // no one is there: just do it
-  erase();
 
 }  // end( InvestmentFunction::remove_variables( subset ) )
 
@@ -1120,20 +1124,17 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
 /*------------ METHODS FOR Saving THE DATA OF THE InvestmentFunction -------*/
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
+void InvestmentFunction::serialize( netCDF::NcGroup & group ,
+                                    const Block * inner ) const {
 
  Block::serialize( group );
 
- if( f_replicate_battery )
-  group.putAtt( "ReplicateBatteryUnits" , netCDF::NcInt() ,
-                int( f_replicate_battery ) );
-
- if( f_replicate_intermittent )
-  group.putAtt( "ReplicateIntermittentUnits" , netCDF::NcInt() ,
-                int( f_replicate_intermittent ) );
-
+ // in the single-component format the group is that of the InvestmentBlock,
+ // which has already written the number of assets and their lower bounds
  const auto num_assets = v_asset_indices.size();
- auto NumAssets = group.addDim( "NumAssets" , num_assets );
+ auto NumAssets = group.getDim( "NumAssets" );
+ if( NumAssets.isNull() )
+  NumAssets = group.addDim( "NumAssets" , num_assets );
 
  ::serialize( group , "Assets" , netCDF::NcUint() , NumAssets ,
               v_asset_indices );
@@ -1141,20 +1142,50 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
  ::serialize( group , "AssetType" , netCDF::NcUint() , NumAssets ,
               v_asset_type );
 
- ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
-              v_lower_bound );
+ // the names worked out of the classes are not written [see
+ // set_asset_names()], so that the instance is written as it was read
+ if( ! f_derived_names ) {
+  ::serialize( group , "AssetSetter" , NumAssets , v_asset_setter_name );
+  ::serialize( group , "AssetLinearization" , NumAssets ,
+               v_asset_linearization_name );
+  }
+
+ if( ( ! v_asset_feasibility_cut.empty() ) && ( ! f_derived_cuts ) )
+  ::serialize( group , "AssetFeasibilityCut" , netCDF::NcUint() , NumAssets ,
+               v_asset_feasibility_cut );
+
+ // asset -> active-variable mapping: written only if non-identity (non-empty)
+ if( ! v_asset_var_index.empty() )
+  ::serialize( group , "AssetVarIndex" , netCDF::NcUint() , NumAssets ,
+               v_asset_var_index );
+
+ if( ! v_asset_baseline_var_index.empty() )
+  ::serialize( group , "AssetBaselineVarIndex" , netCDF::NcUint() , NumAssets ,
+               v_asset_baseline_var_index );
+
+ if( group.getVar( "LowerBound" ).isNull() )
+  ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
+               v_lower_bound );
 
  ::serialize( group , "Cost" , netCDF::NcDouble() , NumAssets , v_cost );
 
  ::serialize( group , "DisinvestmentCost" , netCDF::NcDouble() , NumAssets ,
               v_disinvestment_cost );
 
+ if( ! v_max_investment.empty() )
+  ::serialize( group , "MaxInvestment" , netCDF::NcDouble() , NumAssets ,
+               v_max_investment );
+
+ if( ! v_max_disinvestment.empty() )
+  ::serialize( group , "MaxDisinvestment" , netCDF::NcDouble() , NumAssets ,
+               v_max_disinvestment );
+
  if( ! v_installed_quantity.empty() )
   ::serialize( group , "InstalledQuantity" , netCDF::NcDouble() , NumAssets ,
                v_installed_quantity );
 
  if( ! v_A.empty() ) {
- // Deserialize the linear constraints
+  // Serialize the linear constraints
 
   const auto num_constraints = v_A.size();
   auto NumConstraints = group.addDim( "NumConstraints" , num_constraints );
@@ -1172,9 +1203,9 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ) const {
    Constraints_A.putVar( { i , 0 } , { 1 , num_assets } , v_A[ i ].data() );
  }
 
- if( auto inner_block = get_nested_Block( 0 ) ) {
+ if( inner ) {
   auto inner_block_group = group.addGroup( BLOCK_NAME );
-  inner_block->serialize( inner_block_group );
+  inner->serialize( inner_block_group );
  }
 }
 
@@ -1234,9 +1265,25 @@ int InvestmentFunction::compute( bool changedvars ) {
  if( ( ! owned ) && ( ! v_Block.front()->lock( f_id ) ) )
   return( kError ); // If this does not work, this is clearly an error.
 
+ // the inner Block is unlocked on every way out of here, a throw of this
+ // function or of the Solver it calls included
+ struct Unlock {
+  Block * block;
+  const void * id;
+  ~Unlock() { if( block ) block->unlock( id ); }
+  } unlock{ owned ? nullptr : v_Block.front() , f_id };
+
+ // the pieces of the inner Block, set with it [see set_pieces()], say that
+ // the same computation serves all but an SDDPBlock: fix the investment in
+ // each piece, solve the inner Block and read value and linearization off
+ // its Solver. What a TwoStageStochasticBlock adds is only that its pieces
+ // are its leaves, and that the value it returns is already the expected one
+ // over the scenarios
  int status;
- if( get_sddp_block() ) {
-  status = compute_SDDPBlock( changedvars , owned );
+ if( ! v_pieces.empty() )
+  status = compute_pieces( changedvars );
+ else if( get_sddp_block() ) {
+  status = compute_SDDPBlock( changedvars );
 #ifdef USE_MPI
   // only rank 0 simulates [see compute_SDDPBlock()], and every other rank
   // takes what it found: the Solver of this Function runs on every rank, and
@@ -1251,38 +1298,33 @@ int InvestmentFunction::compute( bool changedvars ) {
   boost::mpi::broadcast( world , v_linearization , 0 );
 #endif
   }
- else if( get_ucblock() || get_tssb_block() )
-  // the same computation serves both: fix the investment in the inner
-  // Block, solve it and read value and linearization off its Solver. What a
-  // TwoStageStochasticBlock adds is only that the investment is written into
-  // each scenario, which update_blocks() takes care of, and that the value
-  // it returns is already the expected one over the scenarios
-  status = compute_UCBlock( changedvars , owned );
- else {
-  if( ! owned )
-   v_Block.front()->unlock( f_id );  // unlock the inner Block
+ else
   throw( std::invalid_argument( "InvestmentFunction::compute: "
                                 "invalid inner Block." ) );
- }
-
- if( ! owned )
-  v_Block.front()->unlock( f_id );  // unlock the inner Block
 
  return( status );
 }
 
 /*--------------------------------------------------------------------------*/
 
-int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
+int InvestmentFunction::compute_pieces( bool changedvars ) {
 
  // Since the inner Solver may need to lock the inner Block, the
  // InvestmentFunction lends its identity to the inner Solver.
 
- auto solver = get_ucblock_solver( 0 , 0 );
+ auto solver = get_inner_solver();
  assert( solver );
 
  void * solver_id = solver->id();
  solver->set_id( f_id );
+
+ // the Solver gets its identity back on every way out of here, a throw
+ // included; the set_id() below gives it back before the events at the end
+ struct GiveBack {
+  Solver * solver;
+  void * id;
+  ~GiveBack() { solver->set_id( id ); }
+  } give_back{ solver , solver_id };
 
  // the Modification of the inner Block are ignored until the linearization
  // is read, and the flag is put back on every way out, errors included
@@ -1296,11 +1338,10 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
   }
   catch( const std::exception & e ) {
    // An error occurred while updating the Blocks.
-   std::cout << "InvestmentFunction::compute_UCBlock(): an error occurred "
+   std::cout << "InvestmentFunction::compute_pieces(): an error occurred "
              << "while updating the Blocks: '" << e.what() << "'" << std::endl;
    f_value = worst_value();
    output_function_value();
-   solver->set_id( solver_id );
    return( kError );
   }
  }
@@ -1308,6 +1349,17 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  // Optimization phase
 
  f_solver_status = solver->compute();
+
+ // a provably unbounded inner Block is an answer, not an error, as for
+ // LagBFunction and BendersBFunction [see Solver::kUnbounded]: the value is
+ // the opposite of the worst one, whether or not the Solver also has a
+ // solution, and there is no linearization of an unbounded value to read
+ if( f_solver_status == Solver::kUnbounded ) {
+  f_value = - worst_value();
+  f_has_value = true;
+  output_function_value();
+  return( f_solver_status );
+  }
 
  if( ! solver->has_var_solution() ) {
   f_value = worst_value();
@@ -1319,69 +1371,7 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
   // and proceeds, exactly as done above for violated linear constraints. Only
   // a genuine failure with no proof of infeasibility is a kError.
   if( f_solver_status == Solver::kInfeasible ) {
-   // the point is outside the domain, and saying only that leaves whoever
-   // asked with nothing to cut it away with: the master would propose the
-   // same direction again. The infeasibility certificate is the vertical
-   // linearization, and it is read exactly as the diagonal one is, the
-   // Solver writing the dual ray where the optimal duals go
-   if( f_compute_linearization )
-    if( auto cda = dynamic_cast< CDASolver * >( solver ) )
-     if( cda->has_dual_direction() ) {
-
-      /* The multipliers are of use only if they are homogeneous, - A'y and
-       * not c - A'y: with the Objective in them the coefficients of the
-       * vertical linearization all come out zero, the master is handed the
-       * empty row 0 <= - alpha and a problem that has an optimum is reported
-       * infeasible. The constant comes out right either way, which is what
-       * makes the mistake silent and this check worth its three lines. */
-
-      if( const auto hd = cda->int_par_str2idx( "intHomogeneousDirection" ) ;
-          ( hd < Inf< Solver::idx_type >() ) && ( ! cda->get_int_par( hd ) ) )
-       throw( std::logic_error(
-        "InvestmentFunction::compute: the Solver of the inner Block returns "
-        "the multipliers of an unbounded dual direction with the Objective "
-        "in them, and no certificate of infeasibility can be read out of "
-        "those: set intHomogeneousDirection to 1 in its configuration" ) );
-
-      cda->get_dual_direction();
-
-      /* The value of the certificate is one number over the whole inner
-       * Block, and it is summed out of the Block itself. The Solver has a
-       * number of its own [CDASolver::get_dual_direction_value()] and it is
-       * NOT this one: what a :MILPSolver hands over there is the violation
-       * of the aggregated constraint at the point its algorithm stopped at,
-       * while what the cut needs is the value of the certificate, each bound
-       * taken on the side its multiplier points at. On these instances the
-       * two differ, 6000 against 106000, and the difference is nine of the
-       * twelve columns of the certificate taken on the opposite side. */
-
-      reset_linearization();
-      try {
-       FunctionValue farkas = 0;
-       for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
-        update_linearization( i , true );
-        farkas += compute_farkas_value( 0 , i );
-        }
-
-       /* A certificate is a certificate only if it is positive here: the
-        * inner Block is proved infeasible at this point by F( x ) > 0, and
-        * F( x ) <= 0 is what cuts the point away. A non-positive value is no
-        * usable proof, the degenerate ray of an empty variable domain in
-        * particular, whose multipliers are all zero; claiming a cut out of it
-        * would hand the master the empty statement 0 <= 0. */
-       if( farkas > 0 ) {
-        f_farkas_value = farkas;
-        f_has_farkas_linearization = true;
-        }
-       }
-      catch( const std::exception & e ) {
-       std::cout << "InvestmentFunction::compute(): an error occurred while "
-                 << "updating the certificate: '" << e.what() << "'"
-                 << std::endl;
-       }
-      }
-
-   solver->set_id( solver_id );
+   read_farkas_linearization( solver );
    return( Solver::kInfeasible );
    }
 
@@ -1392,7 +1382,6 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
             << " on the inner Block returned status " << f_solver_status
             << " with no solution and no proof of infeasibility" << std::endl;
 
-  solver->set_id( solver_id );
   return( kError );
  }
 
@@ -1406,11 +1395,11 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
    // the value function is the sum of the contributions of the sub-Blocks
    // that carry the investment, and so is its linearization: they have to be
    // read one by one, exactly as update_blocks() writes the investment into
-   // each of them. With a single UCBlock inside there is one of them and the
-   // loop is the previous single call; with a TwoStageStochasticBlock there
-   // is one per scenario, all solved at once by the same Solver but each
-   // holding its own duals, and reading only the first one would return the
-   // investment cost alone wherever the other scenarios are the binding ones
+   // each of them. With a single UCBlock inside there is one of them; with a
+   // TwoStageStochasticBlock there is one per scenario, all solved at once by
+   // the same Solver but each holding its own duals, and reading only the
+   // first one would return the investment cost alone wherever the other
+   // scenarios are the binding ones
    for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
     update_linearization( i );
   }
@@ -1419,44 +1408,26 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
    std::cout << "InvestmentFunction::compute(): an error occurred while "
              << "updating the linearization: '"
              << e.what() << "'" << std::endl;
-   solver->set_id( solver_id );
    output_function_value();
+   // without a linearization the caller can do nothing with this point, and
+   // the status of the solve would tell it all went well; it is also what a
+   // call with nothing changed returns, so it is the status that is set
+   f_solver_status = kError;
    return( f_solver_status );
   }
  }
 
- // Possibly output the solution
-
- if( f_output_solution ) {
-  // TODO
- }
-
  ignore_modifications.restore();
 
- // Consider the linear term of the objective
+ // Consider the linear term of the objective (investment/transition cost;
+ // baseline-aware, see add_linear_term())
 
- for( Index i = 0 ; i < v_x.size() ; ++i ) {
-
-  const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( i , false );
-
-  // Update the objective value and the linearization
-
-  if( x > installed_quantity ) {
-   // An investment is being made in asset i
-   const auto cost = get_cost( i );
-   f_value += cost * ( x - installed_quantity );
-   v_linearization[ i ] += cost;
-  }
-  else {
-   // A disinvestment is being made in asset i
-   const auto disinvestment_cost = get_disinvestment_cost( i );
-   f_value += disinvestment_cost * ( installed_quantity - x );
-   v_linearization[ i ] -= disinvestment_cost;
-  }
- }
+ add_linear_term( f_value , v_linearization );
 
  solver->set_id( solver_id );
+
+ // w * F: scale the diagonal value and linearization by the component weight
+ scale_diagonal_by_weight();
 
  // At this point, if a linearization has been computed, then a diagonal
  // linearization is available.
@@ -1479,11 +1450,73 @@ int InvestmentFunction::compute_UCBlock( bool changedvars , bool owned ) {
  output_function_value();
 
  return( f_solver_status );
-}  // end( InvestmentFunction::compute_UCBlock )
+}  // end( InvestmentFunction::compute_pieces )
 
 /*--------------------------------------------------------------------------*/
 
-int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
+void InvestmentFunction::read_farkas_linearization( CDASolver * solver ) {
+
+ // the point is outside the domain, and saying only that leaves whoever
+ // asked with nothing to cut it away with: the master would propose the
+ // same direction again. The infeasibility certificate is the vertical
+ // linearization, and it is read exactly as the diagonal one is, the Solver
+ // writing the dual ray where the optimal duals go
+ if( ( ! f_compute_linearization ) || ( ! solver->has_dual_direction() ) )
+  return;
+
+ /* The multipliers are of use only if they are homogeneous, - A'y and not
+  * c - A'y: with the Objective in them the coefficients of the vertical
+  * linearization all come out zero, the master is handed the empty row
+  * 0 <= - alpha and a problem that has an optimum is reported infeasible.
+  * The constant comes out right either way, which is what makes the mistake
+  * silent. */
+
+ if( const auto hd = solver->int_par_str2idx( "intHomogeneousDirection" ) ;
+     ( hd < Inf< Solver::idx_type >() ) && ( ! solver->get_int_par( hd ) ) )
+  throw( std::logic_error(
+   "InvestmentFunction::compute: the Solver of the inner Block returns "
+   "the multipliers of an unbounded dual direction with the Objective "
+   "in them, and no certificate of infeasibility can be read out of "
+   "those: set intHomogeneousDirection to 1 in its configuration" ) );
+
+ solver->get_dual_direction();
+
+ /* The value of the certificate is one number over the whole inner Block,
+  * and it is summed out of the Block itself. The Solver has a number of its
+  * own [CDASolver::get_dual_direction_value()] and it is NOT this one: what
+  * a :MILPSolver hands over there is the violation of the aggregated
+  * constraint at the point its algorithm stopped at, while what the cut
+  * needs is the value of the certificate, each bound taken on the side its
+  * multiplier points at. */
+
+ reset_linearization();
+ try {
+  FunctionValue farkas = 0;
+  for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
+   update_linearization( i , true );
+   farkas += compute_farkas_value( 0 , i );
+   }
+
+  /* A certificate is a certificate only if it is positive here: the inner
+   * Block is proved infeasible at this point by F( x ) > 0, and F( x ) <= 0
+   * is what cuts the point away. A non-positive value is no usable proof,
+   * the degenerate ray of an empty variable domain in particular, whose
+   * multipliers are all zero; claiming a cut out of it would hand the
+   * master the empty statement 0 <= 0. */
+  if( farkas > 0 ) {
+   f_farkas_value = farkas;
+   f_has_farkas_linearization = true;
+   }
+  }
+ catch( const std::exception & e ) {
+  std::cout << "InvestmentFunction::compute(): an error occurred while "
+            << "updating the certificate: '" << e.what() << "'" << std::endl;
+  }
+}  // end( InvestmentFunction::read_farkas_linearization )
+
+/*--------------------------------------------------------------------------*/
+
+int InvestmentFunction::compute_SDDPBlock( bool changedvars ) {
 
  // Identify all relevant Solver of the inner Block
  build_solver_map();
@@ -1746,31 +1779,16 @@ int InvestmentFunction::compute_SDDPBlock( bool changedvars , bool owned ) {
   v_linearization[ i ] /= num_scenarios;
  }
 
- // Consider the linear term of the objective
+ // Consider the linear term of the objective (investment/transition cost;
+ // baseline-aware, see add_linear_term())
 
- for( Index i = 0 ; i < v_x.size() ; ++i ) {
-
-  const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( i , false );
-
-  // Update the objective value and the linearization
-
-  if( x > installed_quantity ) {
-   // An investment is being made in asset i
-   const auto cost = get_cost( i );
-   f_value += cost * ( x - installed_quantity );
-   v_linearization[ i ] += cost;
-  }
-  else {
-   // A disinvestment is being made in asset i
-   const auto disinvestment_cost = get_disinvestment_cost( i );
-   f_value += disinvestment_cost * ( installed_quantity - x );
-   v_linearization[ i ] -= disinvestment_cost;
-  }
- }
+ add_linear_term( f_value , v_linearization );
 
  // Unlock the inner Block if it is necessary
  unlend_identity();
+
+ // w * F: scale the diagonal value and linearization by the component weight
+ scale_diagonal_by_weight();
 
  // At this point, if a linearization has been computed, then a diagonal
  // linearization is available.
@@ -1887,7 +1905,10 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
 
  auto simulation_value = decltype( f_value )( 0 );
 
- std::vector< double > local_linearization( v_linearization.size() , 0 );
+ // one coefficient per active Variable, as reset_linearization() sizes it:
+ // v_linearization is empty until a linearization has been computed, and
+ // sizing on it wrote the first coefficient out of an empty vector
+ std::vector< double > local_linearization( v_x.size() , 0 );
 
 #ifdef USE_MPI
  boost::mpi::communicator world;
@@ -2098,21 +2119,8 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
  if( ! world.rank() ) {
 #endif
 
- for( Index i = 0 ; i < v_x.size() ; ++i ) {
-  const auto installed_quantity = get_installed_quantity( i );
-  const auto x = get_var_value( i , false );
-
-  if( x > installed_quantity ) {
-   const auto cost = get_cost( i );
-   local_value += cost * ( x - installed_quantity );
-   local_linearization[ i ] += cost;
-   }
-  else {
-   const auto disinvestment_cost = get_disinvestment_cost( i );
-   local_value += disinvestment_cost * ( installed_quantity - x );
-   local_linearization[ i ] -= disinvestment_cost;
-   }
-  }
+ // investment/transition cost; baseline-aware, see add_linear_term()
+ add_linear_term( local_value , local_linearization );
 
 #ifdef USE_MPI
  }
@@ -2140,6 +2148,10 @@ int InvestmentFunction::compute_SDDPBlock_replicas( bool changedvars ) {
   if( ! owned[ i ] )
    v_Block[ i ]->unlock( f_id );
   }
+
+ // w * F: scale the diagonal value and linearization by the component weight
+ // (after the MPI reduce/broadcast, so every rank scales identical values)
+ scale_diagonal_by_weight();
 
  // At this point, if a linearization has been computed, then a diagonal
  // linearization is available.
@@ -2178,8 +2190,11 @@ static RealObjective::OFValue get_recours_obj( const Block * blck ) {
 
 Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 {
+ // w * F: the recourse-objective constant is part of the value and scales by
+ // the component weight, that of the Objective of the inner Block (it does
+ // not flow through f_value)
  if( auto bk = get_nested_Block( 0 ) )
-  return( get_recours_obj( bk ) );
+  return( bk->get_objective_weight() * get_recours_obj( bk ) );
  return( 0 );
 }
 
@@ -2188,15 +2203,14 @@ Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 bool InvestmentFunction::is_convex( void )
 {
  // the operational cost is a convex function of the investment if it is a
- // minimum, and if the inner problem is convex, which cannot be checked
- // here; an inner Block whose Objective is not there yet is taken as a
- // minimization, as all those an InvestmentFunction supports are
- const auto inner = v_Block.empty() ? nullptr : v_Block.front();
- if( ( ! inner ) || ( inner->get_objective_sense() == Objective::eMax ) )
+ // minimum, and if the inner problem is convex, which cannot be checked here
+ if( v_Block.empty() || ( ! v_Block.front() ) ||
+     ( get_inner_block_objective_sense() == Objective::eMax ) )
   return( false );
 
  // c ( x - x_bar )^+ + d ( x_bar - x )^+ is convex if and only if c + d >= 0
- for( Index i = 0 ; i < v_x.size() ; ++i )
+ // for every asset, the costs being per asset and not per Variable
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
   if( get_cost( i ) + get_disinvestment_cost( i ) < 0 )
    return( false );
 
@@ -2210,11 +2224,11 @@ bool InvestmentFunction::is_concave( void )
  // symmetric to is_convex(): the operational cost has to be a maximum, and
  // c ( x - x_bar )^+ + d ( x_bar - x )^+ is concave if and only if
  // c + d <= 0
- const auto inner = v_Block.empty() ? nullptr : v_Block.front();
- if( ( ! inner ) || ( inner->get_objective_sense() != Objective::eMax ) )
+ if( v_Block.empty() || ( ! v_Block.front() ) ||
+     ( get_inner_block_objective_sense() != Objective::eMax ) )
   return( false );
 
- for( Index i = 0 ; i < v_x.size() ; ++i )
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
   if( get_cost( i ) + get_disinvestment_cost( i ) > 0 )
    return( false );
 
@@ -2237,15 +2251,10 @@ bool InvestmentFunction::has_linearization( bool diagonal )
   return( true );
 
  if( f_violated_constraint.first < Inf< Index >() ) {
-  // A constraint has been violated. Compute the vertical linearization
-  // (gradient of the violated constraint, with sign according to which
-  // side -- LHS or RHS -- was violated).
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
-  v_linearization.resize( v_x.size() );
-  for( Index j = 0 ; j < Index( v_x.size() ) ; ++j )
-   v_linearization[ j ] = sign * v_A[ i ][ j ];
+  // A constraint has been violated: materialize the vertical linearization
+  // (gradient of the violated constraint, per-asset columns landing on each
+  // asset's variable -- see vertical_linearization()).
+  vertical_linearization( v_linearization );
   return( true );
   }
 
@@ -2276,15 +2285,8 @@ void InvestmentFunction::store_linearization( Index name , ModParam issueMod )
  global_pool.store( get_linearization_constant() , v_linearization , name ,
                     f_diagonal_linearization_required );
 
- if( ( ! f_Observer ) ||
-     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
-  return;
-
- f_Observer->add_Modification( std::make_shared< C05FunctionMod >
-                               ( this , C05FunctionMod::GlobalPoolAdded ,
-                                 Subset( { name } ) , 0 ,
-                                 Observer::par2concern( issueMod ) ) ,
-                               Observer::par2chnl( issueMod ) );
+ issue_pool_mod( C05FunctionMod::GlobalPoolAdded , Subset( { name } ) ,
+                 issueMod );
 
  } // end InvestmentFunction::store_linearization( Index )
 
@@ -2296,15 +2298,8 @@ void InvestmentFunction::store_combination_of_linearizations
  global_pool.store_combination_of_linearizations( coefficients , name ,
                                                   AAccMlt );
 
- if( ( ! f_Observer ) ||
-     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
-  return;
-
- f_Observer->add_Modification( std::make_shared< C05FunctionMod >
-                               ( this , C05FunctionMod::GlobalPoolAdded ,
-                                 Subset( { name } ) , 0 ,
-                                 Observer::par2concern( issueMod ) ) ,
-                               Observer::par2chnl( issueMod ) );
+ issue_pool_mod( C05FunctionMod::GlobalPoolAdded , Subset( { name } ) ,
+                 issueMod );
 
 }  // end( InvestmentFunction::store_combination_of_linearizations )
 
@@ -2314,15 +2309,8 @@ void InvestmentFunction::delete_linearization( const Index name ,
                                                ModParam issueMod ) {
  global_pool.delete_linearization( name );
 
- if( ( ! f_Observer ) ||
-     ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
-  return;
-
- f_Observer->add_Modification( std::make_shared< C05FunctionMod >
-                               ( this , C05FunctionMod::GlobalPoolRemoved ,
-                                 Subset( { name } ) , 0 ,
-                                 Observer::par2concern( issueMod ) ) ,
-                               Observer::par2chnl( issueMod ) );
+ issue_pool_mod( C05FunctionMod::GlobalPoolRemoved , Subset( { name } ) ,
+                 issueMod );
 }  // end( InvestmentFunction::delete_linearization )
 
 /*--------------------------------------------------------------------------*/
@@ -2331,16 +2319,23 @@ void InvestmentFunction::delete_linearizations( Subset && which , bool ordered ,
                                                 ModParam issueMod ) {
  global_pool.delete_linearizations( which , ordered );
 
+ issue_pool_mod( C05FunctionMod::GlobalPoolRemoved , std::move( which ) ,
+                 issueMod );
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::issue_pool_mod( int type , Subset && which ,
+                                         ModParam issueMod ) {
  if( ( ! f_Observer ) ||
      ( ! f_Observer->issue_mod( issueMod , Function::eModFValues ) ) )
   return;
 
  f_Observer->add_Modification( std::make_shared< C05FunctionMod >
-                               ( this , C05FunctionMod::GlobalPoolRemoved ,
-                                 std::move( which ) , 0 ,
+                               ( this , type , std::move( which ) , 0 ,
                                  Observer::par2concern( issueMod ) ) ,
                                Observer::par2chnl( issueMod ) );
-}
+}  // end( InvestmentFunction::issue_pool_mod )
 
 /*--------------------------------------------------------------------------*/
 
@@ -2357,24 +2352,10 @@ void InvestmentFunction::get_linearization_coefficients
   return;
  }
 
- if( f_diagonal_linearization_required ) {
-  // Diagonal linearization
-  for( Index i = range.first ; i < range.second ; ++i )
-   g[ i - range.first ] = v_linearization[ i ];
- }
- else if( f_has_farkas_linearization ) {
-  // Vertical linearization out of the infeasibility certificate
-  for( Index j = range.first ; j < range.second ; ++j )
-   g[ j - range.first ] = v_linearization[ j ];
- }
- else {
-  // Vertical linearization out of a violated implicit constraint
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
-  for( Index j = range.first ; j < range.second ; ++j )
-   g[ j - range.first ] = sign * v_A[ i ][ j ];
- }
+ std::vector< double > scratch;
+ const auto & linearization = current_linearization( scratch );
+ for( Index i = range.first ; i < range.second ; ++i )
+  g[ i - range.first ] = linearization[ i ];
 }  // end( InvestmentFunction::get_linearization_coefficients( * , range ) )
 
 /*--------------------------------------------------------------------------*/
@@ -2392,24 +2373,10 @@ void InvestmentFunction::get_linearization_coefficients
   return;
  }
 
- if( f_diagonal_linearization_required ) {
-  // Diagonal linearization
-  for( Index i = range.first ; i < range.second ; ++i )
-   g.coeffRef( i ) = v_linearization[ i ];
- }
- else if( f_has_farkas_linearization ) {
-  // Vertical linearization out of the infeasibility certificate
-  for( Index j = range.first ; j < range.second ; ++j )
-   g.coeffRef( j ) = v_linearization[ j ];
- }
- else {
-  // Vertical linearization out of a violated implicit constraint
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
-  for( Index j = range.first ; j < range.second ; ++j )
-   g.coeffRef( j ) = sign * v_A[ i ][ j ];
- }
+ std::vector< double > scratch;
+ const auto & linearization = current_linearization( scratch );
+ for( Index i = range.first ; i < range.second ; ++i )
+  g.coeffRef( i ) = linearization[ i ];
 }  // end( InvestmentFunction::get_linearization_coefficients( sv , range ) )
 
 /*--------------------------------------------------------------------------*/
@@ -2423,27 +2390,11 @@ void InvestmentFunction::get_linearization_coefficients
   return;
  }
 
- if( f_diagonal_linearization_required ) {
-  // Diagonal linearization
-  Index k = 0;
-  for( auto i : subset )
-   g[ k++ ] = v_linearization[ i ];
- }
- else if( f_has_farkas_linearization ) {
-  // Vertical linearization out of the infeasibility certificate
-  Index k = 0;
-  for( auto j : subset )
-   g[ k++ ] = v_linearization[ j ];
- }
- else {
-  // Vertical linearization out of a violated implicit constraint
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
-  Index k = 0;
-  for( auto j : subset )
-   g[ k++ ] = sign * v_A[ i ][ j ];
- }
+ std::vector< double > scratch;
+ const auto & linearization = current_linearization( scratch );
+ Index k = 0;
+ for( auto i : subset )
+  g[ k++ ] = linearization[ i ];
 }  // end( InvestmentFunction::get_linearization_coefficients( * , subset ) )
 
 /*--------------------------------------------------------------------------*/
@@ -2457,24 +2408,10 @@ void InvestmentFunction::get_linearization_coefficients
   return;
  }
 
- if( f_diagonal_linearization_required ) {
-  // Diagonal linearization
-  for( auto i : subset )
-   g.coeffRef( i ) = v_linearization[ i ];
- }
- else if( f_has_farkas_linearization ) {
-  // Vertical linearization out of the infeasibility certificate
-  for( auto j : subset )
-   g.coeffRef( j ) = v_linearization[ j ];
- }
- else {
-  // Vertical linearization out of a violated implicit constraint
-  assert( f_violated_constraint.first < v_A.size() );
-  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
-  const auto i = f_violated_constraint.first;
-  for( auto j : subset )
-   g.coeffRef( j ) = sign * v_A[ i ][ j ];
- }
+ std::vector< double > scratch;
+ const auto & linearization = current_linearization( scratch );
+ for( auto i : subset )
+  g.coeffRef( i ) = linearization[ i ];
 }  // end( InvestmentFunction::get_linearization_coefficients( sv, subset ) )
 
 /*--------------------------------------------------------------------------*/
@@ -2482,56 +2419,43 @@ void InvestmentFunction::get_linearization_coefficients
 Function::FunctionValue
 InvestmentFunction::get_linearization_constant( Index name ) {
 
- if( name == Inf<Index>() ) {
-  // Linearization just computed and not in the global pool yet.
-
-  if( f_diagonal_linearization_required ) {
-   // Diagonal linearization
-   auto alpha = f_value;
-   for( Index i = 0 ; i < v_linearization.size() ; ++i ) {
-    alpha -= v_linearization[ i ] * get_var_value( i );
-   }
-
-   return( alpha );
-  }
-  else if( f_has_farkas_linearization ) {
-   // Vertical linearization out of the infeasibility certificate. F is
-   // affine in the design and the cut is F <= 0, so the constant follows
-   // from its value exactly as the diagonal one follows from that of the
-   // Function; the values read here are the ones the coefficients are
-   // relative to, so a reformulated bound needs no undoing
-   auto alpha = f_farkas_value;
-   for( Index i = 0 ; i < v_linearization.size() ; ++i )
-    alpha -= v_linearization[ i ] * get_var_value( i );
-
-   return( alpha );
-  }
-  else {
-   // Vertical linearization out of a violated implicit constraint
-   assert( f_violated_constraint.first < v_A.size() );
-   const auto i = f_violated_constraint.first;
-   double alpha = 0;
-   if( f_reformulated_bounds ) {
-    for( Index j = 0 ; j < v_A[ i ].size() ; ++j )
-     if( ( j < v_lower_bound.size() )
-         && ( v_lower_bound[ j ] > -Inf< double >() ) )
-      alpha += v_A[ i ][ j ] * v_lower_bound[ j ];
-   }
-
-   if( f_violated_constraint.second == eLHS )
-    alpha = v_constraints_lower_bound[ i ] - alpha;
-   else
-    alpha = alpha - v_constraints_upper_bound[ i ];
-
-   return( alpha );
-  }
- }
- else {
+ if( name != Inf< Index >() )
   // Linearization from the global pool
   return( global_pool.get_linearization_constant( name ) );
- }
 
- return( 0 );
+ // Linearization just computed and not in the global pool yet.
+
+ if( f_diagonal_linearization_required || f_has_farkas_linearization ) {
+  // Diagonal linearization, or vertical one out of the infeasibility
+  // certificate. F is affine in the design and the cut is F <= 0, so the
+  // constant of the latter follows from the value of F exactly as that of
+  // the former follows from the value of the Function; the values read here
+  // are the ones the coefficients are relative to, so a reformulated bound
+  // needs no undoing
+  auto alpha = f_diagonal_linearization_required ? f_value : f_farkas_value;
+  for( Index i = 0 ; i < v_linearization.size() ; ++i )
+   alpha -= v_linearization[ i ] * get_var_value( i );
+
+  return( alpha );
+  }
+
+ // Vertical linearization out of a violated implicit constraint
+ assert( f_violated_constraint.first < v_A.size() );
+ const auto i = f_violated_constraint.first;
+ double alpha = 0;
+ if( f_reformulated_bounds ) {
+  for( Index j = 0 ; j < v_A[ i ].size() ; ++j )
+   if( ( j < v_lower_bound.size() )
+       && ( v_lower_bound[ j ] > -Inf< double >() ) )
+    alpha += v_A[ i ][ j ] * v_lower_bound[ j ];
+  }
+
+ if( f_violated_constraint.second == eLHS )
+  alpha = v_constraints_lower_bound[ i ] - alpha;
+ else
+  alpha = alpha - v_constraints_upper_bound[ i ];
+
+ return( alpha );
 }  // end( InvestmentFunction::get_linearization_constant )
 
 /*--------------------------------------------------------------------------*/
@@ -2548,9 +2472,10 @@ Function::FunctionValue InvestmentFunction::get_value( void )
 /*--------------------------------------------------------------------------*/
 
 double InvestmentFunction::compute_linear_constraint_value( Index i ) const {
+ // per-asset semantics: column j multiplies the variable of ASSET j
  double value = 0;
  for( Index j = 0 ; j < v_A[ i ].size() ; ++j )
-  value += v_A[ i ][ j ] * get_var_value( j , false );
+  value += v_A[ i ][ j ] * get_var_value( asset_var( j ) , false );
  return( value );
 }
 
@@ -2558,44 +2483,34 @@ double InvestmentFunction::compute_linear_constraint_value( Index i ) const {
 
 bool InvestmentFunction::constraints_are_satisfied( void ) {
 
+ // a side is violated only if the relative violation exceeds
+ // f_constraints_tolerance (with the standard "max(1, |rhs|)" denominator
+ // to handle zero/tiny bounds)
+ const auto violated = [ this ]( double violation , double bound ) {
+  return( ( violation > 0 ) &&
+          ( violation / std::max( 1.0 , std::abs( bound ) ) >
+            f_constraints_tolerance ) );
+  };
+
  Index start = 0;
  if( f_violated_constraint.first < Inf< Index >() )
   start = f_violated_constraint.first + 1;
 
  for( Index i = start ; i < v_A.size() ; ++i ) {
-  auto constraint_value = compute_linear_constraint_value( i );
+  const auto value = compute_linear_constraint_value( i );
+  const auto lower = v_constraints_lower_bound[ i ];
+  const auto upper = v_constraints_upper_bound[ i ];
 
-  // Lower bound: declare infeasible only if the relative violation exceeds
-  // f_constraints_tolerance (with the standard "max(1, |rhs|)" denominator
-  // to handle zero/tiny bounds).
-  {
-   auto lower_violation = v_constraints_lower_bound[ i ] - constraint_value;
-   if( lower_violation > 0 ) {
-    lower_violation /=
-     std::max( decltype( v_constraints_lower_bound )::value_type( 1 ) ,
-               std::abs( v_constraints_lower_bound[ i ] ) );
-    if( lower_violation > f_constraints_tolerance ) {
-     f_violated_constraint = { i , eLHS };
-     return( false );
-     }
-    }
+  if( violated( lower - value , lower ) ) {
+   f_violated_constraint = { i , eLHS };
+   return( false );
    }
 
-  // Upper bound: symmetric check.
-  {
-   auto upper_violation = constraint_value - v_constraints_upper_bound[ i ];
-   if( upper_violation > 0 ) {
-    upper_violation /=
-     std::max( decltype( v_constraints_upper_bound )::value_type( 1 ) ,
-               std::abs( v_constraints_upper_bound[ i ] ) );
-    if( upper_violation > f_constraints_tolerance ) {
-     f_violated_constraint = { i , eRHS };
-     return( false );
-     }
-    }
+  if( violated( value - upper , upper ) ) {
+   f_violated_constraint = { i , eRHS };
+   return( false );
    }
-
- }
+  }
 
  return( true );
 } // end ( InvestmentFunction::constraints_are_satisfied )
@@ -2617,38 +2532,31 @@ void InvestmentFunction::add_Modification( sp_Mod mod ,
 /*--------------------------------------------------------------------------*/
 
 int InvestmentFunction::get_inner_block_objective_sense() const {
- auto inner_block = get_ucblock( 0 , 0 );
- assert( inner_block );
- return( inner_block->get_objective_sense() );
+ if( v_Block.empty() || ( ! v_Block.front() ) )
+  return( Objective::eUndef );
+ if( const auto piece = get_piece( 0 , 0 ) )
+  return( piece->get_objective_sense() );
+ // an inner Block with no piece is an error that compute() reports at the
+ // worst value, whose sign is asked here: the inner Block answers for its
+ // sub-Blocks, so that the report does not fail in turn
+ return( v_Block.front()->get_objective_sense() );
 }
 
 /*--------------------------------------------------------------------------*/
 
-UCBlock * InvestmentFunction::get_ucblock( Index stage , Index i ) const {
- if( auto ucblock = get_ucblock() )
-  return( ucblock );
- // in a TwoStageStochasticBlock the here-and-now Variable live in the Block
- // the first-stage AbstractPath are resolved against, which for a plain one
- // is the scenario sub-Block itself and for a nested one is the sub-Block
- // the nesting descends to
- if( const auto tssb = get_tssb_block() )
-  // every leaf of the scenario structure carries its own copy of the units
-  // the investment scales, and a nested one has more leaves than scenarios
-  return( dynamic_cast< UCBlock * >( tssb->get_leaf_block( i ) ) );
+Block * InvestmentFunction::get_piece( Index stage , Index i ) const {
+ if( ! v_pieces.empty() )
+  return( i < v_pieces.size() ?
+          v_pieces[ i ].get_element< Block >( v_Block.front() ) : nullptr );
+ if( ! get_sddp_block() )
+  return( nullptr );
  if( v_Block.size() > 1 )
   assert( i < v_Block.size() );
  else
   assert( i < f_num_sub_blocks_per_stage );
  auto benders_function = get_benders_function( stage , i );
  assert( benders_function );
- return( dynamic_cast< UCBlock * >( benders_function->get_inner_block() ) );
-}
-
-/*--------------------------------------------------------------------------*/
-
-UCBlock * InvestmentFunction::get_ucblock() const {
- assert( ! v_Block.empty() );
- return( dynamic_cast< UCBlock * >( v_Block.front() ) );
+ return( benders_function->get_inner_block() );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2656,13 +2564,6 @@ UCBlock * InvestmentFunction::get_ucblock() const {
 SDDPBlock * InvestmentFunction::get_sddp_block() const {
  assert( ! v_Block.empty() );
  return( dynamic_cast< SDDPBlock * >( v_Block.front() ) );
-}
-
-/*--------------------------------------------------------------------------*/
-
-TwoStageStochasticBlock * InvestmentFunction::get_tssb_block() const {
- assert( ! v_Block.empty() );
- return( dynamic_cast< TwoStageStochasticBlock * >( v_Block.front() ) );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2675,23 +2576,139 @@ SDDPBlock * InvestmentFunction::get_sddp_block( Index i ) const {
 
 /*--------------------------------------------------------------------------*/
 
-CDASolver * InvestmentFunction::get_ucblock_solver( Index stage ,
-                                                    Index i ) const {
- // for a TwoStageStochasticBlock the Solver to drive is the one of the
- // TwoStageStochasticBlock itself, which solves all the scenarios at once,
- // not the one of any single scenario
- if( const auto tssb = get_tssb_block() ) {
-  if( ! tssb->get_registered_solvers().empty() )
-   return( dynamic_cast< CDASolver * >
-           ( tssb->get_registered_solvers().front() ) );
+CDASolver * InvestmentFunction::get_inner_solver( void ) const {
+ if( v_Block.empty() || ( ! v_Block.front() ) ||
+     v_Block.front()->get_registered_solvers().empty() )
   return( nullptr );
+ return( dynamic_cast< CDASolver * >
+         ( v_Block.front()->get_registered_solvers().front() ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::set_pieces( void ) {
+ v_pieces.clear();
+
+ // an SDDPBlock, or more than one inner Block, is reached by its class
+ // [see get_piece()]; any other inner Block is made of the Blocks of the
+ // class of the methods of the assets, each with its own copy of the
+ // assets, and an inner Block that is not is its own piece, which
+ // resolve_asset_methods() refuses
+ if( ( v_Block.size() == 1 ) && v_Block.front() &&
+     ( ! dynamic_cast< SDDPBlock * >( v_Block.front() ) ) ) {
+  const auto inner = v_Block.front();
+  std::vector< Block * > pieces;
+  if( ! find_pieces( inner , asset_class() , pieces ) )
+   pieces.assign( 1 , inner );
+  for( const auto piece : pieces )
+   v_pieces.emplace_back( piece , inner );
   }
 
- if( auto ucblock = get_ucblock( stage , i ) )
-  if( ! ucblock->get_registered_solvers().empty() )
-   return( dynamic_cast< CDASolver * >
-           ( ucblock->get_registered_solvers().front() ) );
- return( nullptr );
+ set_asset_names();
+}
+
+/*--------------------------------------------------------------------------*/
+
+std::string InvestmentFunction::class_of(
+                               const std::vector< std::string > & setters ) {
+ if( setters.empty() || setters.front().empty() )
+  return( "UCBlock" );
+ return( setters.front().substr( 0 , setters.front().find( "::" ) ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
+std::string InvestmentFunction::asset_class( const netCDF::NcGroup & group ) {
+ Index num_assets = 0;
+ std::vector< std::string > setters;
+ if( deserialize_dim( group , "NumAssets" , num_assets ) )
+  ::deserialize( group , "AssetSetter" , num_assets , setters , true );
+ return( class_of( setters ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
+bool InvestmentFunction::find_pieces( Block * root , const std::string & cls ,
+                                      std::vector< Block * > & pieces )
+{
+ if( root->classname() == cls ) {
+  pieces.push_back( root );
+  return( true );
+  }
+
+ const auto & sub = root->get_nested_Blocks();
+ const auto size = pieces.size();
+ for( const auto block : sub )
+  if( ! find_pieces( block , cls , pieces ) ) {
+   pieces.resize( size );
+   return( false );
+   }
+
+ return( ! sub.empty() );
+}
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::set_asset_names( void ) {
+
+ // names worked out for another inner Block are worked out again
+ if( f_derived_names ) {
+  v_asset_setter_name.clear();
+  v_asset_linearization_name.clear();
+  if( f_derived_cuts )
+   v_asset_feasibility_cut.clear();
+  f_derived_names = f_derived_cuts = false;
+  }
+
+ const auto num_assets = v_asset_indices.size();
+ if( ( ! num_assets ) || ( ! v_asset_setter_name.empty() ) ||
+     v_Block.empty() || ( ! v_Block.front() ) )
+  return;
+ const auto piece = get_piece( 0 , 0 );
+ if( ! piece )
+  return;
+
+ /* An instance that does not name the methods of its assets says only
+  * their type: a unit is then resized if its class offers it, and
+  * replicated otherwise. The units of a UCBlock are its first sub-Blocks.
+  * A name left empty, that of a unit the piece has not, makes deserialize()
+  * fail, or the first compute() after a new inner Block [see
+  * resolve_asset_methods()]. */
+
+ v_asset_setter_name.resize( num_assets );
+ v_asset_linearization_name.resize( num_assets );
+ f_derived_cuts = v_asset_feasibility_cut.empty();
+ if( f_derived_cuts )
+  v_asset_feasibility_cut.assign( num_assets , 1 );
+
+ for( Index i = 0 ; i < num_assets ; ++i ) {
+
+  // a line; else a unit, or the second size of a unit, which takes the
+  // names of its first, the unit being the same
+  if( v_asset_type[ i ] == eLine ) {
+   v_asset_setter_name[ i ] = "UCBlock::resize_line";
+   v_asset_linearization_name[ i ] = "UCBlock::get_resize_line_linearization";
+   continue;
+   }
+
+  if( v_asset_indices[ i ] >= piece->get_number_nested_Blocks() )
+   continue;
+  const auto & cls =
+   piece->get_nested_Block( v_asset_indices[ i ] )->classname();
+
+  if( Block::get_method_fs< double >( cls + "::resize" ) ) {
+   v_asset_setter_name[ i ] = "UCBlock::resize_unit";
+   v_asset_linearization_name[ i ] = "UCBlock::get_resize_unit_linearization";
+   }
+  else {
+   v_asset_setter_name[ i ] = "UCBlock::replicate";
+   v_asset_linearization_name[ i ] = "UCBlock::get_replicate_linearization";
+   if( f_derived_cuts )
+    v_asset_feasibility_cut[ i ] = 0;
+   }
+  }
+
+ f_derived_names = true;
 }
 
 /*--------------------------------------------------------------------------*/
@@ -2750,7 +2767,7 @@ void InvestmentFunction::reset_linearization() {
 Function::FunctionValue
 InvestmentFunction::compute_farkas_value( Index stage ,
                                           Index sub_block_index ) {
- auto block = get_ucblock( stage , sub_block_index );
+ auto block = get_piece( stage , sub_block_index );
  if( ! block )
   return( 0 );
 
@@ -2809,740 +2826,68 @@ InvestmentFunction::compute_farkas_value( Index stage ,
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::scale_linking_terms
-( Index block_index , Index stage , Index sub_block_index ,
-  const std::function< void( const ColVariable * , double ) > & term ,
-  double & constant ) {
-
- /* The scale factor multiplies every term of the UnitBlock in the linking
-  * constraints of the UCBlock (the active and reactive balances of the
-  * carriers, primary and secondary reserve, inertia and pollutant budget)
-  * [see UnitBlock::scale()]: each term of one copy of the unit is given to
-  * term() as its ColVariable and its coefficient times the dual value of
-  * the constraint, and what does not multiply a ColVariable goes in
-  * constant. */
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto network_data = ucblock->get_NetworkData();
- const auto number_nodes = network_data ? network_data->get_number_nodes() : 1;
- const auto time_horizon = ucblock->get_time_horizon();
-
- const auto block = ucblock->get_unit_block( block_index );
-
- constant = 0;
-
- // Add the contribution associated with the balance constraints of all the
- // carriers, active and reactive [see UCBlock::for_each_balance_term()]:
- // each term of the unit, divided by its scale, is factor * var - constant
- // in a row whose dual value is dual
-
- for( const bool reactive : { false , true } )
-  ucblock->for_each_balance_term( block_index , reactive ,
-   [ & ]( const FRowConstraint & row , const ColVariable * var ,
-          double factor , double cst ) {
-    const auto dual = row.get_dual();
-    term( var , dual * factor );
-    constant -= dual * cst;
-    } );
-
- // Add the contribution associated with the primary demand constraints.
-
- const auto & primary_demand_constraints =
-  ucblock->get_primary_demand_constraints();
-
- if( ! primary_demand_constraints.empty() ) {
-
-  const auto number_primary_zones = ucblock->get_number_primary_zones();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-   for( Index zone_id = 0 ; zone_id < number_primary_zones ; ++zone_id ) {
-    for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-     if( ! ucblock->node_belongs_to_primary_zone( node_id , zone_id ) )
-      continue;
-
-     // Compute the index of the first electrical generator of the current
-     // UnitBlock.
-     Index elc_generator = 0;
-     for( Index unit_id = 0 ; unit_id < block_index ; ++unit_id ) {
-      const auto unit_block = ucblock->get_unit_block( unit_id );
-      elc_generator += unit_block->get_number_generators();
-     }
-
-     const auto num_generators = block->get_number_generators();
-
-     for( Index generator = 0 ; generator < num_generators ;
-          ++generator , ++elc_generator ) {
-
-      if( ! ucblock->generator_belongs_to_node( elc_generator , node_id ) )
-       continue;
-
-      if( const auto primary_s_r =
-          block->get_primary_spinning_reserve( generator ) ) {
-
-       term( & primary_s_r[ t ] ,
-             primary_demand_constraints[ t ][ zone_id ].get_dual() );
-      }
-
-     } // end( for each generator )
-    } // end( for each node )
-   } // end( for each zone )
-  } // end( for each time instant )
-
- } // end( non-empty primary demand constraints )
-
- // Add the contribution associated with the secondary demand constraints.
-
- const auto & secondary_demand_constraints =
-  ucblock->get_secondary_demand_constraints();
-
- if( ! secondary_demand_constraints.empty() ) {
-
-  const auto number_secondary_zones = ucblock->get_number_secondary_zones();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-   for( Index zone_id = 0 ; zone_id < number_secondary_zones ; ++zone_id ) {
-    for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-     if( ! ucblock->node_belongs_to_secondary_zone( node_id , zone_id ) )
-      continue;
-
-     // Compute the index of the first electrical generator of the current
-     // UnitBlock.
-     Index elc_generator = 0;
-     for( Index unit_id = 0 ; unit_id < block_index ; ++unit_id ) {
-      const auto unit_block = ucblock->get_unit_block( unit_id );
-      elc_generator += unit_block->get_number_generators();
-     }
-
-     const auto num_generators = block->get_number_generators();
-
-     for( Index generator = 0 ; generator < num_generators ;
-          ++generator , ++elc_generator ) {
-
-      if( ! ucblock->generator_belongs_to_node( elc_generator , node_id ) )
-       continue;
-
-      if( const auto secondary_s_r =
-          block->get_secondary_spinning_reserve( generator ) ) {
-
-       term( & secondary_s_r[ t ] ,
-             secondary_demand_constraints[ t ][ zone_id ].get_dual() );
-      }
-
-     } // end( for each generator )
-    } // end( for each node )
-   } // end( for each zone )
-  } // end( for each time instant )
-
- } // end( non-empty secondary demand constraints )
-
- // Add the contribution associated with the inertia demand constraints.
-
- const auto & inertia_demand_constraints =
-  ucblock->get_inertia_demand_constraints();
-
- if( ! inertia_demand_constraints.empty() ) {
-
-  const auto number_inertia_zones = ucblock->get_number_inertia_zones();
-
-  for( Index t = 0 ; t < time_horizon ; ++t ) {
-   for( Index zone_id = 0 ; zone_id < number_inertia_zones ; ++zone_id ) {
-    for( Index node_id = 0 ; node_id < number_nodes ; ++node_id ) {
-     if( ! ucblock->node_belongs_to_inertia_zone( node_id , zone_id ) )
-      continue;
-
-     // Compute the index of the first electrical generator of the current
-     // UnitBlock.
-     Index elc_generator = 0;
-     for( Index unit_id = 0 ; unit_id < block_index ; ++unit_id ) {
-      const auto unit_block = ucblock->get_unit_block( unit_id );
-      elc_generator += unit_block->get_number_generators();
-     }
-
-     const auto num_generators = block->get_number_generators();
-
-     for( Index generator = 0 ; generator < num_generators ;
-          ++generator , ++elc_generator ) {
-
-      if( ! ucblock->generator_belongs_to_node( elc_generator , node_id ) )
-       continue;
-
-      const auto dual = inertia_demand_constraints[ t ][ zone_id ].get_dual();
-
-      // Commitment variable
-
-      auto commitment = block->get_commitment( generator );
-      auto inertia_commitment = block->get_inertia_commitment( generator );
-
-      if( commitment && inertia_commitment )
-       term( & commitment[ t ] , dual * inertia_commitment[ t ] );
-
-      // Active power variable
-
-      auto active_power = block->get_active_power( generator );
-      auto inertia_power = block->get_inertia_power( generator );
-
-      if( active_power && inertia_power )
-       term( & active_power[ t ] , dual * inertia_power[ t ] );
-
-     } // end( for each generator )
-    } // end( for each node )
-   } // end( for each zone )
-  } // end( for each time instant )
-
- } // end( non-empty inertia demand constraints )
-
- /* Add the contribution associated with the pollutant budget constraints.
-  * In the constraint of zone z of pollutant p the factor multiplies rho * p
-  * for each generator of the UnitBlock in that zone and sigma * v for each
-  * of its storages, which are at the node of its first generator (see
-  * UCBlock::for_each_pollutant_term()). */
-
- const auto & pollutant_constraints =
-  ucblock->get_const_pollutant_constraints();
-
- if( ! pollutant_constraints.empty() ) {
-
-  const auto & number_pollutant_zones = ucblock->get_number_pollutant_zones();
-  const bool has_storage_rho = ! ucblock->get_pollutant_storage_rho().empty();
-
-  // the generators and the storages of the UCBlock are numbered unit after
-  // unit: the index of the first ones of this UnitBlock
-  Index first_generator = 0;
-  Index first_storage = 0;
-  for( Index u = 0 ; u < block_index ; ++u ) {
-   const auto unit = ucblock->get_unit_block( u );
-   first_generator += unit->get_number_generators();
-   first_storage += unit->get_number_storages();
-  }
-
-  for( Index p = 0 ; p < pollutant_constraints.size() ; ++p ) {
-
-   for( Index g = 0 ; g < block->get_number_generators() ; ++g ) {
-    const auto zone = ucblock->get_generator_pollutant_zone( p ,
-							    first_generator + g );
-    if( zone >= number_pollutant_zones[ p ] )
-     continue;  // the generator belongs to no zone of pollutant p
-    const auto active_power = block->get_active_power( g );
-    if( ! active_power )
-     continue;
-    const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
-    for( Index t = 0 ; t < time_horizon ; ++t )
-     term( & active_power[ t ] , dual *
-           ucblock->get_pollutant_rho( t , p , first_generator + g ) );
-   } // end( for each generator )
-
-   if( ! has_storage_rho )
-    continue;
-
-   const auto zone = ucblock->get_storage_pollutant_zone( p , block_index );
-   if( zone >= number_pollutant_zones[ p ] )
-    continue;  // the storages belong to no zone of pollutant p
-   const auto dual = pollutant_constraints[ p ][ zone ].get_dual();
-   for( Index s = 0 ; s < block->get_number_storages() ; ++s )
-    if( const auto level = block->get_storage_level( s ) )
-     for( Index t = 0 ; t < time_horizon ; ++t )
-      term( & level[ t ] , dual *
-            ucblock->get_pollutant_storage_rho( t , p , first_storage + s ) );
-  } // end( for each pollutant )
-
- } // end( non-empty pollutant budget constraints )
-
-} // end( InvestmentFunction::scale_linking_terms )
-
-/*--------------------------------------------------------------------------*/
-
-double InvestmentFunction::compute_scale_linearization
-( Index block_index , Index stage , Index sub_block_index ) {
-
- /* The coefficient is f^1( z ) + y' g^1( z ), the Objective of one copy of
-  * the unit plus its terms in the linking constraints, each times the dual
-  * value y of the constraint, at a z that minimizes it over the feasible set
-  * of one copy [see the class description]. With k > 0 copies the current
-  * solution is such a z, the inner Block being a convex problem whose dual
-  * values are optimal; with no copies it is not, since the unit then weighs
-  * nothing in the inner Block and its solution says nothing, and z is found
-  * by solving a copy of the unit alone against y. */
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto block = ucblock->get_unit_block( block_index );
- const auto scale = block->get_scale();
-
- if( scale == 0 )
-  return( compute_zero_copy_linearization( block_index , stage ,
-                                           sub_block_index ) );
-
- double linearization = 0;
- double constant = 0;
- scale_linking_terms( block_index , stage , sub_block_index ,
-                      [ & ]( const ColVariable * var , double coeff ) {
-                       linearization += coeff * var->get_value();
-                       } , constant );
- linearization += constant;
-
- // the Objective of the unit is k f^1, hence that of one copy is its value
- // divided by k
- if( auto objective =
-     dynamic_cast< FRealObjective * >( block->get_objective() ) ) {
-  objective->compute();
-  linearization += objective->value() / scale;
-  }
-
- return( linearization );
-} // end( InvestmentFunction::compute_scale_linearization )
-
-/*--------------------------------------------------------------------------*/
-
-double InvestmentFunction::compute_zero_copy_linearization
-( Index block_index , Index stage , Index sub_block_index ) {
-
- /* The copy is the mirror of the abstract representation of the unit [see
-  * AbstractBlock::mirror()], taken while the unit is scaled to 1 so that its
-  * Objective is that of one copy, f^1; it then sits in an AbstractBlock whose
-  * Objective holds the terms y' g^1 on the ColVariable of the copy, and the
-  * two Objectives are summed by the Solver of the AbstractBlock. The scale
-  * is put back with no Modification, as if it had never changed. Whatever
-  * the mirror cannot reproduce is left out of the copy, which is then a
-  * relaxation of one copy of the unit: the minimum is not larger than the
-  * true one, and since the number of copies cannot decrease below 0 the
-  * linearization stays below the value function. */
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto block = ucblock->get_unit_block( block_index );
-
- const auto bsc = get_unit_BlockSolverConfig();
-
- auto copy = new AbstractBlock();
- {
-  const auto scale = block->get_scale();
-  block->scale( 1.0 , eNoMod , eNoMod );
-  try {
-   copy->mirror( block );
-   }
-  catch( ... ) {
-   block->scale( scale , eNoMod , eNoMod );
-   delete copy;
-   throw;
-   }
-  block->scale( scale , eNoMod , eNoMod );
-  }
-
- auto wrapper = new AbstractBlock();
- wrapper->add_nested_Block( copy );
-
- LinearFunction::v_coeff_pair terms;
- double constant = 0;
- scale_linking_terms( block_index , stage , sub_block_index ,
-                      [ & ]( const ColVariable * var , double coeff ) {
-                       if( coeff == 0 )
-                        return;
-                       auto cvar = copy->mirror_of( var );
-                       if( ! cvar )
-                        throw( std::logic_error( "InvestmentFunction::"
-                         "compute_zero_copy_linearization: a Variable of "
-                         "the UnitBlock " + std::to_string( block_index ) +
-                         " has no copy" ) );
-                       terms.emplace_back( cvar , coeff );
-                       } , constant );
-
- auto objective = new FRealObjective( wrapper ,
-                               new LinearFunction( std::move( terms ) ) );
- objective->set_sense( copy->get_objective_sense() , eNoMod );
- wrapper->set_objective( objective , eNoMod );
-
- // the Solver is the one the configuration gives for the units [see
- // set_ComputeConfig()], registered for this solution only
- auto cbsc = bsc->clone();
- cbsc->apply( wrapper );
- cbsc->clear();
-
- const auto cleanup = [ & ]() {
-  cbsc->apply( wrapper );
-  delete cbsc;
-  delete wrapper;
-  delete objective;
-  };
-
- if( wrapper->get_registered_solvers().empty() ) {
-  cleanup();
-  throw( std::logic_error( "InvestmentFunction::"
-                           "compute_zero_copy_linearization: the "
-                           "BlockSolverConfig of the units registers no "
-                           "Solver" ) );
-  }
-
- auto solver = wrapper->get_registered_solvers().front();
- double value = 0;
- try {
-  solver->compute();
-  if( ! solver->has_var_solution() )
-   throw( std::logic_error( "InvestmentFunction::"
-                            "compute_zero_copy_linearization: the copy of "
-                            "the UnitBlock " + std::to_string( block_index ) +
-                            " has no solution" ) );
-  value = solver->get_var_value();
-  }
- catch( ... ) {
-  cleanup();
-  throw;
-  }
-
- cleanup();
-
- return( value + constant );
-
-} // end( InvestmentFunction::compute_zero_copy_linearization )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_unit_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & block_indices ,
+void InvestmentFunction::add_asset_linearization
+( Index stage , Index sub_block_index , std::vector< double > & linearization ,
   bool direction ) {
 
- /* The UnitBlocks that are subject to investment can be divided into two
-  * groups, depending on how the investment is represented.
+ const auto piece = get_piece( stage , sub_block_index );
+ if( ! piece )
+  throw( std::logic_error( "InvestmentFunction::update_linearization: the "
+                           "inner Block has no Block in stage " +
+                           std::to_string( stage ) + " of sub-Block " +
+                           std::to_string( sub_block_index ) ) );
+
+ /* A kappa enters the constraints it appears in through their right-hand
+  * side alone, so the set of designs that a certificate of infeasibility
+  * proves infeasible is a half-space, and the certificate is a cut as it
+  * stands. A scale factor instead multiplies the Variable of its UnitBlock
+  * wherever the UCBlock uses them [see UnitBlock::scale()], hence it
+  * multiplies the COLUMNS of that unit: a certificate then holds only over
+  * the scales on which it stays dual feasible, and that interval ends at the
+  * current scale. On a replicated intermittent unit the one column the ray
+  * charges carries - 1 / scale against the linking constraint and 1 against
+  * its own bound, so the sharpest cut the certificate supports is
+  * x >= x_bar and it cuts nothing away. There is therefore nothing to read
+  * here, rather than something hard to read: an investment that can make
+  * the inner Block infeasible has to be represented by a kappa.
   *
-  * The first group is formed by the UnitBlocks whose scale factors represent
-  * the investment: every ThermalUnitBlock and ConversionUnitBlock, and a
-  * BatteryUnitBlock or an IntermittentUnitBlock when
-  * "ReplicateBatteryUnits" or "ReplicateIntermittentUnits" is nonzero. For
-  * these UnitBlocks, the linearization is impacted by their objective
-  * function (as they are scaled) and the linking constraints in the
-  * UCBlock.
-  *
-  * The second group is formed by the UnitBlocks whose kappa constants
-  * represent the investment: a BatteryUnitBlock or an IntermittentUnitBlock
-  * that is not replicated. For these UnitBlocks, the linearization is
-  * impacted only by the constraints in which the kappa constants appear,
-  * which are the constraints defined by themselves.
-  */
+  * Which getter gives a cut is not known here, what it reads being unknown:
+  * the instance says it [see "AssetFeasibilityCut" in serialize()], and
+  * when it does not, the assets that it says to be replicated give none. */
 
- const auto ucblock = get_ucblock( stage , sub_block_index );
+ std::vector< double > answer;
+ std::vector< double > second_answer;
 
- // the two indices are named here, and not by a structured binding of the
- // loop, because a lambda below captures them and a structured binding
- // cannot be captured when OpenMP is on
- for( const auto & el : block_indices ) {
-  const auto block_index = el.first;
-  const auto var_index = el.second;
+ for( const auto & group : v_asset_groups ) {
 
-  auto block = ucblock->get_unit_block( block_index );
+  if( direction && ( ! group.feasibility_cut ) )
+   throw( std::logic_error( "InvestmentFunction::add_asset_linearization: the "
+                            "coefficient of asset " +
+                            std::to_string( group.assets.front() ) +
+                            ", read by '" + group.linearization_name +
+                            "', cannot be read out of an unbounded dual "
+                            "direction." ) );
 
-  /* A kappa enters the constraints it appears in through their right-hand
-   * side alone, so the set of designs that a certificate of infeasibility
-   * proves infeasible is a half-space, and the certificate is a cut as it
-   * stands. A scale factor instead multiplies the Variable of its UnitBlock
-   * wherever the UCBlock uses them [see UnitBlock::scale()], hence it
-   * multiplies the COLUMNS of that unit: a certificate then holds only over
-   * the scales on which it stays dual feasible, and that interval ends at the
-   * current scale. Measured on a replicated IntermittentUnitBlock: the one
-   * column the ray charges carries - 1 / scale against the linking constraint
-   * and 1 against its own bound, at scale 1200 and again at scale 20000, so
-   * the sharpest cut the certificate supports is x >= x_bar and it cuts
-   * nothing away. There is therefore nothing to read here, rather than
-   * something hard to read: an investment that can make the inner Block
-   * infeasible has to be represented by a kappa. */
-  const auto scaled = [ & ]() {
-   if( direction )
-    throw( std::logic_error( "InvestmentFunction::update_linearization: the "
-			     "coefficient of the scaled UnitBlock " +
-			     std::to_string( block_index ) + " cannot be read "
-			     "out of an unbounded dual direction." ) );
-   return( compute_scale_linearization( block_index , stage ,
-					sub_block_index ) );
-   };
-
-  if( dynamic_cast< const ThermalUnitBlock * >( block ) ||
-      dynamic_cast< const ConversionUnitBlock * >( block ) ) {
-   v_linearization[ var_index ] += scaled();
-  }
-  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
-   if( f_replicate_battery )
-    v_linearization[ var_index ] += scaled();
-   else
-    v_linearization[ var_index ] += unit->get_kappa_linearization();
-  }
-  else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
-   if( f_replicate_intermittent )
-    v_linearization[ var_index ] += scaled();
-   else
-    v_linearization[ var_index ] += unit->get_kappa_linearization();
-  }
-  else {
-   // Unrecognized Block
-   auto error_message = "InvestmentFunction::update_linearization: "
-    "unrecognized UnitBlock: " + block->classname();
-   if( ! block->name().empty() )
-    error_message += " with name '" + block->name() + "'";
-   error_message += ".";
-   throw( std::logic_error( error_message ) );
-  }
- } // end( for each UnitBlock )
-} // end( InvestmentFunction::update_linearization_unit_blocks )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_unit_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & block_indices ,
-  std::vector< double > & linearization ) {
-
- // Same body as the v_linearization-targeted overload above, but writes
- // the accumulated terms into the caller-supplied `linearization` vector.
- // Used by the multi-replica path to keep accumulation thread-local
- // (modulo OpenMP critical-section serialization in the caller).
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
-
- for( const auto & [ block_index , var_index ] : block_indices ) {
-
-  auto block = ucblock->get_unit_block( block_index );
-
-  if( dynamic_cast< const ThermalUnitBlock * >( block ) ||
-      dynamic_cast< const ConversionUnitBlock * >( block ) ) {
-   linearization[ var_index ] +=
-    compute_scale_linearization( block_index , stage , sub_block_index );
-  }
-  else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
-   if( f_replicate_battery )
-    linearization[ var_index ] +=
-     compute_scale_linearization( block_index , stage , sub_block_index );
-   else
-    linearization[ var_index ] += unit->get_kappa_linearization();
-  }
-  else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
-   if( f_replicate_intermittent )
-    linearization[ var_index ] +=
-     compute_scale_linearization( block_index , stage , sub_block_index );
-   else
-    linearization[ var_index ] += unit->get_kappa_linearization();
-  }
-  else {
-   auto error_message = "InvestmentFunction::update_linearization: "
-    "unrecognized UnitBlock: " + block->classname();
-   if( ! block->name().empty() )
-    error_message += " with name '" + block->name() + "'";
-   error_message += ".";
-   throw( std::logic_error( error_message ) );
-  }
- }
-} // end( InvestmentFunction::update_linearization_unit_blocks, out variant )
-
-/*--------------------------------------------------------------------------*/
-
-/* A line with a design variable x_l has the flow limits
- * F_l - kappa_l C^v P x_l <= 0 instead of a bound, kappa_l multiplying the
- * Variable x_l: the optimal value is not a convex function of kappa_l, and
- * the derivative of the rows with respect to it depends on the value of
- * x_l, so that the linearization of such a line is not defined (as that of
- * a unit in design mode, see IntermittentUnitBlock::get_kappa_linearization()
- * and BatteryUnitBlock::get_kappa_linearization()). */
-
-static void check_no_design_line( const DCNetworkBlock * network ,
-                                  Block::Index line )
-{
- if( network->get_design( line ) )
-  throw( std::logic_error( "InvestmentFunction::update_linearization_network_"
-                           "blocks: line " + std::to_string( line ) +
-                           " has a design variable, with which the "
-                           "linearization with respect to its kappa is not "
-                           "defined" ) );
- }
-
-/*--------------------------------------------------------------------------*/
-/* The line assets of the UCBlock split by carrier: the lines of the assets
- * of type eLine are numbered carrier after carrier, those of the carrier 0
- * first, as the nodes in UCBlock::set_energy_demand(); entry c has the pairs
- * ( line of the carrier , x ) of the pairs ( line , x ) on carrier c. */
-
-template< class T >
-static std::vector< std::vector< std::pair< Block::Index , T > > >
-lines_by_carrier( const UCBlock * ucblock ,
-		  const std::vector< std::pair< Block::Index , T > > & lines )
-{
- const auto nc = ucblock->get_number_carriers();
- std::vector< Block::Index > first( nc + 1 , 0 );
- for( Block::Index c = 0 ; c < nc ; ++c ) {
-  const auto & nbs = ucblock->get_network_blocks( c );
-  const auto dc = nbs.empty() ? nullptr :
-                  dynamic_cast< const DCNetworkBlock * >( nbs.front() );
-  first[ c + 1 ] = first[ c ] + ( dc ? dc->get_number_lines() : 0 );
-  }
-
- std::vector< std::vector< std::pair< Block::Index , T > > > split( nc );
- for( const auto & [ line , x ] : lines ) {
-  const Block::Index c = std::upper_bound( first.begin() , first.end() ,
-					   line ) - first.begin() - 1;
-  if( c >= nc )
-   throw( std::logic_error( "InvestmentFunction: the line " +
-			    std::to_string( line ) + " of an asset is not a "
-			    "line of the UCBlock" ) );
-  split[ c ].push_back( { line - first[ c ] , x } );
-  }
- return( split );
- }
-
-/*--------------------------------------------------------------------------*/
-/* The NetworkBlock of carrier c of the UCBlock at time t: that of the
- * carrier 0 as UCBlock::get_network_block() gives it, and that of a carrier
- * c > 0 among those of the carrier, which must be one per time instant. */
-
-static NetworkBlock * network_block_at( const UCBlock * ucblock ,
-					Block::Index c , Block::Index t )
-{
- if( c == 0 )
-  return( ucblock->get_network_block( t ) );
- const auto & nbs = ucblock->get_network_blocks( c );
- if( nbs.size() != ucblock->get_time_horizon() )
-  throw( std::logic_error( "InvestmentFunction: a line of Carrier_" +
-			   std::to_string( c ) + " is an asset, while its "
-			   "NetworkBlock are not one per time instant" ) );
- return( nbs[ t ] );
- }
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_network_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & line_indices ) {
-
- // Update the linearization with respect to the lines
-
- if( line_indices.empty() )
-  // There is no investment in lines, so there is nothing to be done.
-  return;
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto time_horizon = ucblock->get_time_horizon();
-
- const auto by_carrier = lines_by_carrier( ucblock , line_indices );
- for( Index c = 0 ; c < by_carrier.size() ; ++c )
-  for( Index t = 0 ; ( t < time_horizon ) && ( ! by_carrier[ c ].empty() ) ;
-       ++t ) {
-
-  const auto network_block = network_block_at( ucblock , c , t );
-
-  if( const auto dc_network =
-      dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
-
-   // the box of the flow of every line, which DCNetworkBlock writes on the
-   // flow Variable whatever the susceptance of the line and the formulation
-   // of the network: the derivative of its bounds is the same for the lines
-   // of a meshed grid as for the HVDC ones
-   const auto & constraints = dc_network->get_power_flow_limit_HVDC_bounds();
-
-   if( constraints.empty() )
-    continue;
-
-   /* For each line l, the flow limit constraints on that line are:
-    *
-    *     kappa_l * Pmin_l <= power_flow_l <= kappa_l * Pmax_l
-    *
-    * where power_flow_l is the power flow on the line l and Pmin_l and Pmax_l
-    * are the minimum and maximum power flow on the line l, respectively. */
-
-   /* The dual value of the flow limit constraint on the power flow is
-    * associated with either the lower bound or the upper bound
-    * constraint. This will help determine to which bound the dual is
-    * associated with. */
-   const auto obj_sign =
-    ( dc_network->get_objective_sense() == Objective::eMin ) ? - 1 : 1;
-
-   /* The bounds read kappa C^v P, with C^v the factor the DCNetworkBlock
-    * scales its flow limits by, so the derivative of a bound with respect to
-    * the design is C^v P: leaving the factor out is right only while it is 1,
-    * which is its default but not its only value. */
-   const auto scale = dc_network->get_C_v_scal();
-
-   for( const auto & [ line , var_index ] : by_carrier[ c ] ) {
-
-    check_no_design_line( dc_network , line );
-
-    const auto dual = constraints[ line ].get_dual();
-    const auto min_flow = scale * dc_network->get_min_power_flow( line );
-    const auto max_flow = scale * dc_network->get_max_power_flow( line );
-
-    auto bound = max_flow;
-    if( obj_sign * dual > 0 )
-     // The dual value is associated with the lower bound constraint.
-     bound = min_flow;
-
-    // Finally, update the linearization.
-
-    v_linearization[ var_index ] += - dual * bound;
-   } // end( for each line )
-  } // end( dynamic_cast< const DCNetworkBlock * > )
-  else {
-   // Unrecognized NetworkBlock
-   auto error_message = "InvestmentFunction::update_linearization_network_"
-    "blocks: unrecognized NetworkBlock: " + network_block->classname() + ".";
-   throw( std::logic_error( error_message ) );
-  }
- } // end( for each time instant )
-
-} // end( InvestmentFunction::update_linearization_network_blocks )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::update_linearization_network_blocks
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & line_indices ,
-  std::vector< double > & linearization ) {
-
- // Same body as the v_linearization-targeted overload above, but writes
- // into the caller-supplied `linearization` vector.
-
- if( line_indices.empty() )
-  return;
-
- const auto ucblock = get_ucblock( stage , sub_block_index );
- const auto time_horizon = ucblock->get_time_horizon();
-
- const auto by_carrier = lines_by_carrier( ucblock , line_indices );
- for( Index c = 0 ; c < by_carrier.size() ; ++c )
-  for( Index t = 0 ; ( t < time_horizon ) && ( ! by_carrier[ c ].empty() ) ;
-       ++t ) {
-
-  const auto network_block = network_block_at( ucblock , c , t );
-
-  if( const auto dc_network =
-      dynamic_cast< const DCNetworkBlock * >( network_block ) ) {
-
-   // the box of the flow of every line [see the other overload]
-   const auto & constraints = dc_network->get_power_flow_limit_HVDC_bounds();
-
-   if( constraints.empty() )
-    continue;
-
-   const auto obj_sign =
-    ( dc_network->get_objective_sense() == Objective::eMin ) ? - 1 : 1;
-
-   // the flow limits carry the scaling factor, and so does their derivative
-   // [see the other overload]
-   const auto scale = dc_network->get_C_v_scal();
-
-   for( const auto & [ line , var_index ] : by_carrier[ c ] ) {
-
-    check_no_design_line( dc_network , line );
-
-    const auto dual = constraints[ line ].get_dual();
-    const auto min_flow = scale * dc_network->get_min_power_flow( line );
-    const auto max_flow = scale * dc_network->get_max_power_flow( line );
-
-    auto bound = max_flow;
-    if( obj_sign * dual > 0 )
-     bound = min_flow;
-
-    linearization[ var_index ] += - dual * bound;
-    }
+  answer.resize( group.indices.size() );
+  if( group.pair_linearization ) {
+   // the two sizes of each unit, the second to the asset of type 2
+   second_answer.resize( group.indices.size() );
+   std::invoke( *group.pair_linearization , piece ,
+                Block::MF_dbl_msp( answer ) ,
+                Block::MF_dbl_msp( second_answer ) , group.indices ,
+                group.ordered );
+   for( Index k = 0 ; k < group.second_assets.size() ; ++k )
+    linearization[ asset_var( group.second_assets[ k ] ) ] +=
+     second_answer[ k ];
    }
-  else {
-   auto error_message = "InvestmentFunction::update_linearization_network_"
-    "blocks: unrecognized NetworkBlock: " + network_block->classname() + ".";
-   throw( std::logic_error( error_message ) );
-   }
+  else
+   std::invoke( *group.linearization , piece , Block::MF_dbl_msp( answer ) ,
+                group.indices , group.ordered );
+
+  for( Index k = 0 ; k < group.assets.size() ; ++k )
+   linearization[ asset_var( group.assets[ k ] ) ] += answer[ k ];
   }
-} // end( InvestmentFunction::update_linearization_network_blocks, out variant )
+} // end( InvestmentFunction::add_asset_linearization )
 
 /*--------------------------------------------------------------------------*/
 
@@ -3551,38 +2896,6 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
 
  const auto num_stages = get_number_stages();
 
- // The indices of the UnitBlocks and the indices of their variables
- std::vector< std::pair< Index , Index > > block_indices;
- block_indices.reserve( v_asset_indices.size() );
-
- // The indices of the transmission lines and the indices of their variables
- std::vector< std::pair< Index , Index > > line_indices;
- line_indices.reserve( v_asset_indices.size() );
-
- // The indices of the batteries whose converter is an asset, and the indices
- // of their variables
- std::vector< std::pair< Index , Index > > conv_indices;
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-
-  const auto asset_type = v_asset_type[ i ];
-  const auto asset_index = v_asset_indices[ i ];
-
-  if( asset_type == eUnitBlock ) {
-   block_indices.push_back( { asset_index , i } );
-  }
-  else if( asset_type == eLine ) {
-   line_indices.push_back( { asset_index , i } );
-  }
-  else if( asset_type == eConverter ) {
-   conv_indices.push_back( { asset_index , i } );
-  }
-  else {
-   throw( std::logic_error( "InvestmentFunction::update_linearization: invalid"
-                            " asset type: " + std::to_string( asset_type ) ) );
-  }
- } // end( for each asset )
-
  // which Solver produced the solution is already told by the state: the
  // greedy ones are built only in the SDDPBlock branch of compute(), which
  // has dispatched upstream, so an empty v_greedy_solvers *is* the answer.
@@ -3590,7 +2903,7 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
  // TwoStageStochasticBlock in particular, for which both casts are null
  auto * solver = f_simulated_solver ? f_simulated_solver
                  : v_greedy_solvers.empty()
-                 ? get_ucblock_solver( 0 , sub_block_index )
+                 ? get_inner_solver()
                  : get_solver< CDASolver >( v_greedy_solvers[
 						      sub_block_index ] );
 
@@ -3600,7 +2913,7 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
  // Solver the Solver is the same for every sub-Block, that of the inner
  // Block (of the whole tree, for a TwoStageStochasticBlock), and it writes
  // the solution of all of them at once: it is asked for it with the first
- // sub-Block, and the others only read it [see compute_UCBlock()]
+ // sub-Block, and the others only read it [see compute_pieces()]
 
  const bool ask = f_simulated_solver || ( ! v_greedy_solvers.empty() ) ||
                   ( sub_block_index == 0 );
@@ -3616,7 +2929,8 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
 
   // Retrieve the primal solution.
 
-  if( ! block_indices.empty() ) {
+  if( std::find( v_asset_type.begin() , v_asset_type.end() , eUnitBlock ) !=
+      v_asset_type.end() ) {
    // The primal solution may only be necessary if there are UnitBlocks
    // subject to investment.
    if( solver && solver->has_var_solution() )
@@ -3627,13 +2941,9 @@ void InvestmentFunction::update_linearization( Index sub_block_index ,
   }
  }
 
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
-				    direction );
-  update_linearization_network_blocks( stage , sub_block_index , line_indices );
-  update_linearization_converters( stage , sub_block_index , conv_indices ,
-                                   v_linearization );
- } // end( for each stage )
+ for( Index stage = 0 ; stage < num_stages ; ++stage )
+  add_asset_linearization( stage , sub_block_index , v_linearization ,
+                           direction );
 
 }  // end( InvestmentFunction::update_linearization() )
 
@@ -3662,27 +2972,6 @@ void InvestmentFunction::update_linearization
 
  const auto num_stages = sddp_block->get_time_horizon();
 
- std::vector< std::pair< Index , Index > > block_indices;
- block_indices.reserve( v_asset_indices.size() );
- std::vector< std::pair< Index , Index > > line_indices;
- line_indices.reserve( v_asset_indices.size() );
- std::vector< std::pair< Index , Index > > conv_indices;
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-  const auto asset_type = v_asset_type[ i ];
-  const auto asset_index = v_asset_indices[ i ];
-  if( asset_type == eUnitBlock )
-   block_indices.push_back( { asset_index , i } );
-  else if( asset_type == eLine )
-   line_indices.push_back( { asset_index , i } );
-  else if( asset_type == eConverter )
-   conv_indices.push_back( { asset_index , i } );
-  else
-   throw( std::logic_error( "InvestmentFunction::update_linearization: "
-                            "invalid asset type: " +
-                            std::to_string( asset_type ) ) );
-  }
-
  auto solver = f_simulated_solver ? f_simulated_solver
                                    : get_solver< CDASolver >( sub_block_index );
 
@@ -3692,7 +2981,8 @@ void InvestmentFunction::update_linearization
   throw( std::logic_error( "InvestmentFunction::update_linearization: "
                            "dual solution not available." ) );
 
- if( ! block_indices.empty() ) {
+ if( std::find( v_asset_type.begin() , v_asset_type.end() , eUnitBlock ) !=
+     v_asset_type.end() ) {
   if( solver && solver->has_var_solution() )
    solver->get_var_solution();
   else
@@ -3700,214 +2990,204 @@ void InvestmentFunction::update_linearization
                             "primal solution not available." ) );
   }
 
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  update_linearization_unit_blocks( stage , sub_block_index , block_indices ,
-                                    linearization );
-  update_linearization_network_blocks( stage , sub_block_index , line_indices ,
-                                       linearization );
-  update_linearization_converters( stage , sub_block_index , conv_indices ,
-                                   linearization );
-  }
+ for( Index stage = 0 ; stage < num_stages ; ++stage )
+  add_asset_linearization( stage , sub_block_index , linearization );
 
 }  // end( InvestmentFunction::update_linearization, out variant )
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::update_unit_block( UnitBlock * block ,
-                                            double investment ) {
- if( dynamic_cast< const ThermalUnitBlock * >( block ) ||
-     dynamic_cast< const ConversionUnitBlock * >( block ) ) {
-  block->scale( investment );
- }
- else if( auto unit = dynamic_cast< BatteryUnitBlock * >( block ) ) {
-  if( f_replicate_battery )
-   unit->scale( investment );
-  else
-   unit->set_kappa( investment );
- }
- else if( auto unit = dynamic_cast< IntermittentUnitBlock * >( block ) ) {
-  if( f_replicate_intermittent )
-   unit->scale( investment );
-  else
-   unit->set_kappa( investment );
- }
- else {
-  // Unrecognized UnitBlock
-  auto error_message = "InvestmentFunction::update_unit_block: "
-   "unrecognized UnitBlock: " + block->classname();
-  if( ! block->name().empty() )
-   error_message += " with name '" + block->name() + "'";
-  error_message += ".";
-  throw( std::logic_error( error_message ) );
- }
-}
+void InvestmentFunction::check_indices( const std::vector< Index > & indices ,
+                                        Index n , const std::string & what ) {
+ for( const auto j : indices )
+  if( j >= n )
+   throw( std::logic_error( what + " " + std::to_string( j ) +
+                            " is out of range (there are " +
+                            std::to_string( n ) + " active variables)" ) );
+}  // end( InvestmentFunction::check_indices )
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::update_unit_blocks
-( Index sub_block_index ,
-  const std::vector< Index > & block_indices ,
-  const std::vector< double > & investment ) {
+void InvestmentFunction::resolve_asset_methods( void ) {
 
- assert( block_indices.size() == investment.size() );
-
- if( block_indices.empty() )
+ if( f_methods_resolved )
   return;
 
- const auto num_stages = get_number_stages();
+ const auto num_assets = v_asset_indices.size();
 
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  auto ucblock = get_ucblock( stage , sub_block_index );
-  for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-   auto block = ucblock->get_unit_block( block_indices[ i ] );
-   update_unit_block( block , investment[ i ] );
-  } // end( for each UnitBlock )
- } // end( for each stage )
-} // end( InvestmentFunction::update_unit_blocks )
+ for( Index i = 0 ; i < num_assets ; ++i )
+  if( ( v_asset_type[ i ] != eUnitBlock ) && ( v_asset_type[ i ] != eLine ) &&
+      ( v_asset_type[ i ] != eSecondSize ) )
+   throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                            "invalid type of asset " + std::to_string( i ) +
+                            ": " + std::to_string( v_asset_type[ i ] ) ) );
 
-/*--------------------------------------------------------------------------*/
+ // the pairs: the second size of a unit (type 2) and its first (type 0)
 
-void InvestmentFunction::update_network_blocks
-( Index sub_block_index , const std::vector< Index > & line_indices ,
-  const std::vector< double > & investment ) {
-
- assert( line_indices.size() == investment.size() );
-
- if( line_indices.empty() )
-  return;
-
- const auto num_stages = get_number_stages();
-
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-
-  auto ucblock = get_ucblock( stage , sub_block_index );
-  const auto time_horizon = ucblock->get_time_horizon();
-
-  // the lines and their investment, carrier by carrier
-  std::vector< std::pair< Index , double > > lines( line_indices.size() );
-  for( Index i = 0 ; i < line_indices.size() ; ++i )
-   lines[ i ] = { line_indices[ i ] , investment[ i ] };
-  const auto by_carrier = lines_by_carrier( ucblock , lines );
-
-  for( Index c = 0 ; c < by_carrier.size() ; ++c )
-   for( Index t = 0 ; ( t < time_horizon ) && ( ! by_carrier[ c ].empty() ) ;
-	++t ) {
-
-   auto network_block = network_block_at( ucblock , c , t );
-
-   if( auto dc_network = dynamic_cast< DCNetworkBlock * >( network_block ) ) {
-    Subset subset;
-    std::vector< double > kappa;
-    for( const auto & [ line , x ] : by_carrier[ c ] ) {
-     subset.push_back( line );
-     kappa.push_back( x );
-     }
-    dc_network->set_kappa( kappa.cbegin() , std::move( subset ) );
+ std::vector< Index > second( num_assets , Inf< Index >() );
+ for( Index j = 0 ; j < num_assets ; ++j )
+  if( v_asset_type[ j ] == eSecondSize ) {
+   const auto i = first_size_of( j );
+   if( i == Inf< Index >() )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "asset " + std::to_string( j ) + " is the "
+                             "second size of unit " +
+                             std::to_string( v_asset_indices[ j ] ) + ", "
+                             "which has no asset of type 0" ) );
+   second[ i ] = j;
    }
-   else {
-    // Unrecognized NetworkBlock
-    auto error_message = "InvestmentFunction::update_network_blocks: "
-     "unrecognized NetworkBlock: " + network_block->classname() + ".";
-    throw( std::logic_error( error_message ) );
+
+ // the names of the two methods of each asset, and whether its getter gives
+ // a feasibility cut: those of the instance, or worked out of the classes of
+ // the units when the inner Block was set [see set_asset_names()]
+
+ for( Index i = 0 ; i < num_assets ; ++i )
+  if( ( i >= v_asset_setter_name.size() ) || v_asset_setter_name[ i ].empty() )
+   throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                            "asset " + std::to_string( i ) + " names no "
+                            "method, and none could be worked out of the "
+                            "class of its unit in the inner Block" ) );
+
+ // the two assets of a pair name the same methods
+
+ for( Index j = 0 ; j < num_assets ; ++j )
+  if( v_asset_type[ j ] == eSecondSize ) {
+   const auto i = first_size_of( j );
+   const bool cut_i = v_asset_feasibility_cut.empty() ||
+                      v_asset_feasibility_cut[ i ];
+   const bool cut_j = v_asset_feasibility_cut.empty() ||
+                      v_asset_feasibility_cut[ j ];
+   if( ( v_asset_setter_name[ j ] != v_asset_setter_name[ i ] ) ||
+       ( v_asset_linearization_name[ j ] != v_asset_linearization_name[ i ] )
+       || ( cut_j != cut_i ) )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "assets " + std::to_string( i ) + " and " +
+                             std::to_string( j ) + " are the two sizes of "
+                             "unit " + std::to_string( v_asset_indices[ i ] )
+                             + ", and name different methods" ) );
    }
-  } // end( for each time instant )
- } // end( for each stage )
-} // end( InvestmentFunction::update_network_blocks )
 
-/*--------------------------------------------------------------------------*/
+ // the assets naming the same methods go together, and are written and read
+ // back with one call each [see update_blocks()]; a pair, by its asset of
+ // type 0, goes with the pairs naming the same methods
 
-void InvestmentFunction::update_converters
-( Index sub_block_index , const std::vector< Index > & block_indices ,
-  const std::vector< double > & investment ) {
+ v_asset_groups.clear();
 
- assert( block_indices.size() == investment.size() );
+ for( Index i = 0 ; i < num_assets ; ++i ) {
 
- if( block_indices.empty() )
-  return;
+  if( v_asset_type[ i ] == eSecondSize )
+   continue;  // it goes with its first
 
- if( f_replicate_battery )
-  throw( std::logic_error( "InvestmentFunction::update_converters: the "
-                           "converter of a replicated battery is not an "
-                           "asset of its own" ) );
+  const bool cut = v_asset_feasibility_cut.empty() ||
+                   v_asset_feasibility_cut[ i ];
+  const bool pair = ( second[ i ] != Inf< Index >() );
 
- const auto num_stages = get_number_stages();
+  auto group = std::find_if( v_asset_groups.begin() , v_asset_groups.end() ,
+                             [ & ]( const AssetGroup & g ) {
+                              return( ( g.setter_name ==
+                                        v_asset_setter_name[ i ] ) &&
+                                      ( g.linearization_name ==
+                                        v_asset_linearization_name[ i ] ) &&
+                                      ( g.feasibility_cut == cut ) &&
+                                      ( ( g.pair_setter != nullptr ) ==
+                                        pair ) );
+                              } );
 
- for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-  auto ucblock = get_ucblock( stage , sub_block_index );
-  for( Index i = 0 ; i < block_indices.size() ; ++i ) {
-   auto unit = dynamic_cast< BatteryUnitBlock * >(
-                              ucblock->get_unit_block( block_indices[ i ] ) );
-   if( ! unit )
-    throw( std::logic_error( "InvestmentFunction::update_converters: the "
-                             "UnitBlock " +
-                             std::to_string( block_indices[ i ] ) +
-                             " is not a BatteryUnitBlock" ) );
-   unit->set_converter_kappa( investment[ i ] );
-   }
-  }
-} // end( InvestmentFunction::update_converters )
+  if( group == v_asset_groups.end() ) {
 
-/*--------------------------------------------------------------------------*/
+   AssetGroup g;
+   g.setter_name = v_asset_setter_name[ i ];
+   g.linearization_name = v_asset_linearization_name[ i ];
+   g.feasibility_cut = cut;
 
-void InvestmentFunction::prepare_converter_assets( void ) {
+   // throws for a method of the asset, or pair, that the methods factory
+   // does not have in the form it is called with
+   const auto throw_missing = [ & ]( const char * verb ,
+                                     const std::string & name ,
+                                     const char * form ) {
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: " +
+                             ( pair ? "assets " + std::to_string( i ) +
+                                      " and " + std::to_string( second[ i ] )
+                                      + " are " :
+                                      "asset " + std::to_string( i ) +
+                                      " is " ) + verb + " by '" + name +
+                             "', which the methods factory does not have as "
+                             "a " + form + "." ) );
+    };
 
- if( v_Block.empty() || ( ! v_Block.front() ) ||
-     std::none_of( v_asset_type.cbegin() , v_asset_type.cend() ,
-                   []( AssetType t ) { return( t == eConverter ); } ) )
-  return;
+   if( pair ) {
+    g.pair_setter = Block::get_method_fs< Block::MF_dbl_sp , Block::MF_dbl_sp ,
+                                          Block::Subset && , bool >
+                     ( g.setter_name );
+    if( ! g.pair_setter )
+     throw_missing( "written" , g.setter_name ,
+                    "setter taking two spans and a Subset" );
 
- if( f_replicate_battery )
-  throw( std::invalid_argument( "InvestmentFunction::prepare_converter_"
-                                "assets: the converter of a replicated "
-                                "battery is not an asset of its own" ) );
-
- const auto num_stages = get_number_stages();
-
- for( Index sb = 0 ; sb < get_number_investment_sub_blocks() ; ++sb )
-  for( Index stage = 0 ; stage < num_stages ; ++stage ) {
-   auto ucblock = get_ucblock( stage , sb );
-   if( ! ucblock )
-    continue;  // not there yet: update_converters() will tell
-   for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-    if( v_asset_type[ i ] != eConverter )
-     continue;
-    auto unit = dynamic_cast< BatteryUnitBlock * >(
-                           ucblock->get_unit_block( v_asset_indices[ i ] ) );
-    if( ! unit )
-     throw( std::invalid_argument( "InvestmentFunction::prepare_converter_"
-                                   "assets: the UnitBlock " +
-                                   std::to_string( v_asset_indices[ i ] ) +
-                                   " is not a BatteryUnitBlock" ) );
-    if( unit->converter_follows_kappa() )
-     unit->set_converter_kappa( unit->get_converter_kappa() , eNoMod ,
-                                eNoMod );
+    g.pair_linearization = Block::get_query_fs< Block::MF_dbl_msp ,
+                                                Block::MF_dbl_msp ,
+                                                Block::c_Subset & , bool >
+                            ( g.linearization_name );
+    if( ! g.pair_linearization )
+     throw_missing( "read" , g.linearization_name ,
+                    "getter taking two spans and a Subset" );
     }
+   else {
+    g.setter = Block::get_method_fs< Block::MF_dbl_sp , Block::Subset && ,
+                                     bool >( g.setter_name );
+    if( ! g.setter )
+     throw_missing( "written" , g.setter_name ,
+                    "setter taking a span and a Subset" );
+
+    g.linearization = Block::get_query_fs< Block::MF_dbl_msp ,
+                                           Block::c_Subset & , bool >
+                       ( g.linearization_name );
+    if( ! g.linearization )
+     throw_missing( "read" , g.linearization_name , "getter taking a Subset" );
+    }
+
+   v_asset_groups.push_back( std::move( g ) );
+   group = std::prev( v_asset_groups.end() );
    }
-} // end( InvestmentFunction::prepare_converter_assets )
+
+  group->assets.push_back( i );
+  if( pair )
+   group->second_assets.push_back( second[ i ] );
+  group->indices.push_back( v_asset_indices[ i ] );
+  }
+
+ for( auto & g : v_asset_groups )
+  g.ordered = std::is_sorted( g.indices.begin() , g.indices.end() );
+
+ // a name is that of a method of a class, "<class>::<method>", which the
+ // methods factory calls on any Block it is given as if it were of that
+ // class: it is called only on the pieces of that class [see get_piece()]
+ for( const auto & g : v_asset_groups )
+  for( const auto & name : { g.setter_name , g.linearization_name } ) {
+   const auto cls = name.substr( 0 , name.find( "::" ) );
+   for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+    for( Index stage = 0 ; stage < get_number_stages() ; ++stage )
+     if( const auto piece = get_piece( stage , i ) ;
+         piece && ( piece->classname() != cls ) )
+      throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: '"
+                               + name + "' is a method of " + cls + ", and "
+                               "the Block of sub-Block " + std::to_string( i )
+                               + " in stage " + std::to_string( stage ) +
+                               " is a " + piece->classname() ) );
+   }
+
+ f_methods_resolved = true;
+
+} // end( InvestmentFunction::resolve_asset_methods )
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::update_linearization_converters
-( Index stage , Index sub_block_index ,
-  const std::vector< std::pair< Index , Index > > & conv_indices ,
-  std::vector< double > & linearization ) {
-
- // the kappa of a converter enters right-hand sides alone, hence its
- // coefficient is read out of the dual values, or out of an unbounded dual
- // direction as they are [see BatteryUnitBlock::
- // get_converter_kappa_linearization()]
- const auto ucblock = get_ucblock( stage , sub_block_index );
-
- for( const auto & [ block_index , var_index ] : conv_indices ) {
-  auto unit = dynamic_cast< BatteryUnitBlock * >(
-                                     ucblock->get_unit_block( block_index ) );
-  if( ! unit )
-   throw( std::logic_error( "InvestmentFunction::update_linearization: the "
-                            "UnitBlock " + std::to_string( block_index ) +
-                            " is not a BatteryUnitBlock" ) );
-  linearization[ var_index ] += unit->get_converter_kappa_linearization();
-  }
-} // end( InvestmentFunction::update_linearization_converters )
+Block::Index InvestmentFunction::first_size_of( Index j ) const {
+ for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
+  if( ( v_asset_type[ i ] == eUnitBlock ) &&
+      ( v_asset_indices[ i ] == v_asset_indices[ j ] ) )
+   return( i );
+ return( Inf< Index >() );
+} // end( InvestmentFunction::first_size_of )
 
 /*--------------------------------------------------------------------------*/
 
@@ -3917,57 +3197,58 @@ void InvestmentFunction::update_blocks() {
  // own: they are ignored up to the end, whichever way the end comes
  FlagGuard ignore_modifications( f_ignore_modifications , true );
 
- // The indices of the UnitBlocks
- std::vector< Index > block_indices;
- block_indices.reserve( v_asset_indices.size() );
+ // the names are resolved once, the first time the investment is written
+ resolve_asset_methods();
 
- // The investment to be made in the UnitBlocks
- std::vector< double > block_investment;
- block_investment.reserve( v_asset_indices.size() );
-
- // The indices of the transmission lines
- std::vector< Index > line_indices;
- line_indices.reserve( v_asset_indices.size() );
-
- // The investment to be made in the transmission lines
- std::vector< double > line_investment;
- line_investment.reserve( v_asset_indices.size() );
-
- // The batteries whose converter is an asset, and the investment in them
- std::vector< Index > conv_indices;
- std::vector< double > conv_investment;
-
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
-
-  const auto asset_type =  v_asset_type[ i ];
-  const auto asset_index =  v_asset_indices[ i ];
-  const auto var_value = get_var_value( i , false );
-
-  if( asset_type == eUnitBlock ) {
-   block_indices.push_back( asset_index );
-   block_investment.push_back( var_value );
+ // the investment in the assets of each group, in the order of the group,
+ // and in a group of pairs that in their second sizes
+ std::vector< std::vector< double > > investment( v_asset_groups.size() );
+ std::vector< std::vector< double > > second_investment(
+                                                     v_asset_groups.size() );
+ for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
+  investment[ g ].reserve( v_asset_groups[ g ].assets.size() );
+  for( const auto asset : v_asset_groups[ g ].assets )
+   investment[ g ].push_back( get_var_value( asset_var( asset ) , false ) );
+  for( const auto asset : v_asset_groups[ g ].second_assets )
+   second_investment[ g ].push_back( get_var_value( asset_var( asset ) ,
+                                                    false ) );
   }
-  else if( asset_type == eLine ) {
-   line_indices.push_back( asset_index );
-   line_investment.push_back( var_value );
-  }
-  else if( asset_type == eConverter ) {
-   conv_indices.push_back( asset_index );
-   conv_investment.push_back( var_value );
-  }
-  else {
-   throw( std::logic_error( "InvestmentFunction::update_blocks: invalid asset"
-                            " type: " + std::to_string( asset_type ) ) );
-  }
- } // end( for each asset )
 
- for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
-  update_unit_blocks( i , block_indices , block_investment );
-  update_network_blocks( i , line_indices , line_investment );
-  // after the batteries, whose kappa the converter follows until it has
-  // one of its own
-  update_converters( i , conv_indices , conv_investment );
- }
+ const auto num_stages = get_number_stages();
+
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+  for( Index stage = 0 ; stage < num_stages ; ++stage ) {
+
+   const auto piece = get_piece( stage , i );
+   if( ! piece )
+    throw( std::logic_error( "InvestmentFunction::update_blocks: the inner "
+                             "Block has no Block in stage " +
+                             std::to_string( stage ) + " of sub-Block " +
+                             std::to_string( i ) ) );
+
+   for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
+    const auto & group = v_asset_groups[ g ];
+    try {
+     if( group.pair_setter )
+      std::invoke( *group.pair_setter , piece ,
+                   Block::MF_dbl_sp( investment[ g ] ) ,
+                   Block::MF_dbl_sp( second_investment[ g ] ) ,
+                   Subset( group.indices ) , group.ordered , eNoBlck ,
+                   eNoBlck );
+     else
+      std::invoke( *group.setter , piece ,
+                   Block::MF_dbl_sp( investment[ g ] ) ,
+                   Subset( group.indices ) , group.ordered , eNoBlck ,
+                   eNoBlck );
+     }
+    catch( const std::exception & e ) {
+     throw( std::logic_error( "InvestmentFunction::update_blocks: writing "
+                              "asset " + std::to_string( group.assets.front() )
+                              + " and the others written by '" +
+                              group.setter_name + "': " + e.what() ) );
+     }
+    }
+   }
 
  f_blocks_are_updated = true;
 }  // end( InvestmentFunction::update_blocks )
@@ -3975,13 +3256,8 @@ void InvestmentFunction::update_blocks() {
 /*--------------------------------------------------------------------------*/
 
 Index InvestmentFunction::get_number_investment_sub_blocks( void ) const {
- if( get_ucblock() )
-  return( 1 );
- if( const auto tssb = get_tssb_block() )
-  // the investment is the same in every leaf, being here-and-now, but it has
-  // to be written into each of them, and their number is not the number of
-  // scenarios once a scenario carries a subtree of its own
-  return( tssb->get_number_leaves() );
+ if( ! v_pieces.empty() )
+  return( v_pieces.size() );
  return( f_num_sub_blocks_per_stage );
 }  // end( InvestmentFunction::get_number_investment_sub_blocks )
 
@@ -3992,6 +3268,10 @@ void InvestmentFunction::send_nuclear_modification
  // "nuclear modification" for Function: everything changed
  global_pool.invalidate();
  f_blocks_are_updated = false;
+ // what the names of the assets resolve to may depend on the inner Block,
+ // when they are worked out of the classes of its units
+ v_asset_groups.clear();
+ f_methods_resolved = false;
  if( f_Observer )
   f_Observer->add_Modification
    ( std::make_shared< FunctionMod >( this , FunctionMod::NaNshift ) , chnl );
@@ -4003,7 +3283,13 @@ void InvestmentFunction::send_nuclear_modification
 Index InvestmentFunction::get_number_scenarios() const {
  if( v_Block.empty() )
   return( 0 );
- const auto sddp_block = static_cast< SDDPBlock * >( v_Block.front() );
+ // the cast has to be the checked one: this is called from the SDDP paths,
+ // but nothing in the signature says so, and a static_cast of an inner Block
+ // that is a UCBlock or a TwoStageStochasticBlock is undefined behaviour
+ const auto sddp_block = get_sddp_block();
+ if( ! sddp_block )
+  throw( std::logic_error( "InvestmentFunction::get_number_scenarios: the "
+                           "inner Block is not an SDDPBlock." ) );
  return( sddp_block->get_scenario_set().size() );
 }
 
@@ -4012,6 +3298,8 @@ Index InvestmentFunction::get_number_scenarios() const {
 Index InvestmentFunction::get_number_stages() const {
  if( v_Block.empty() )
   return( 0 );
+ if( ! v_pieces.empty() )
+  return( 1 );
  if( const auto sddp_block = get_sddp_block() )
   return( sddp_block->get_time_horizon() );
  return( 1 );
