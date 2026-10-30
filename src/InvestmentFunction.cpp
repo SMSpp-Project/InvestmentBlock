@@ -527,17 +527,17 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  // Block are known [see set_pieces()], so that an inner Block they cannot be
  // called on is refused here and not at the first compute(): the one read
  // here is then deleted, and the one given from outside handed back to its
- // owner. An SDDPBlock has no pieces, and waits for compute()
- if( ! v_pieces.empty() )
-  try {
+ // owner, as when Block::deserialize() refuses the group (a weight that is
+ // not positive). An SDDPBlock has no pieces, and waits for compute()
+ try {
+  if( ! v_pieces.empty() )
    resolve_asset_methods();
-   }
-  catch( ... ) {
-   set_inner_block( nullptr , ! f_external_inner_block );
-   throw;
-   }
-
- Block::deserialize( group );
+  Block::deserialize( group );
+  }
+ catch( ... ) {
+  set_inner_block( nullptr , ! f_external_inner_block );
+  throw;
+  }
 
 }  // end( InvestmentFunction::deserialize )
 

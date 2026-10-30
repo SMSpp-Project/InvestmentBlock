@@ -240,6 +240,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `InvestmentFunction::deserialize( group , inner )` hands the inner Block
+  back also when `Block::deserialize()` refuses the group (a weight of the
+  Objective that is not positive), as when the methods of the assets
+  cannot be called on it: the function deleted it, and the caller used it
+  after, when splitting an inner Block, or deleted it twice, when
+  expanding a template
+
 - `makefile-c` and `makefile-s` include the basic makefile of
   TwoStageStochasticBlock, whose StochasticBlock comes with SDDPBlock
   already: with both makefile-s it was compiled twice, from two paths, and
