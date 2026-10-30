@@ -266,11 +266,11 @@ public:
   *   InvestmentBlock is an FRealObjective whose Function is an
   *   InvestmentFunction.
   *
-  * - The dimension "ScenarioDecomposition", which indicates whether a
-  *   TwoStageStochasticBlock or MultiStageStochasticBlock inner Block, of the
-  *   root or of a component, is separated into one component per scenario
-  *   when its scenarios share nothing [see split_inner()]. If it is
-  *   zero, then it is left whole. If it is one, then it is separated. Any
+  * - The dimension "ScenarioDecomposition", which indicates whether an
+  *   inner Block made of Blocks of the class of the methods of its assets,
+  *   of the root or of a component, is split into one component per such
+  *   Block [see split_inner()]. If it is zero, then it is left whole. If
+  *   it is one, then it is separated. Any
   *   other value is an error. This dimension is optional. If it is not
   *   provided, then it is assumed to be one. A StochasticBlock template is
   *   expanded regardless.
@@ -356,11 +356,15 @@ public:
   *   expand_stochastic_template()]; a
   *   "ScenarioGenerator" at the root with no template to feed is refused.
   *
-  * - A TwoStageStochasticBlock, or a MultiStageStochasticBlock, whose
-  *   scenarios share nothing makes one component for each scenario, or leaf,
-  *   weighted by the weights of the Objective from the scenario, whose own
-  *   is its probability, up to the inner Block, unless
-  *   "ScenarioDecomposition" is 0 [see split_inner()].
+  * - A Block made of Blocks of the class of the methods of its assets,
+  *   other than itself [see InvestmentFunction::find_pieces()], such as a
+  *   TwoStageStochasticBlock or a MultiStageStochasticBlock of UCBlock,
+  *   makes one component for each of them, weighted by the weights of the
+  *   Objective from it up to this InvestmentBlock, the probability of a
+  *   scenario, unless "ScenarioDecomposition" is 0 [see split_inner()]. If
+  *   the Block, or one between it and those it is made of, has Variable or
+  *   Constraint of its own, which tie them, the InvestmentBlock refuses it
+  *   when it generates its Constraint [see check_parked()].
   *
   * When the inner Block at the root makes the components, an
   * "ObjectiveSense" of size 0 is refused as well.
@@ -860,8 +864,8 @@ protected:
 
  int f_objective_sense = Objective::eMin;  ///< the sense of the Objective
 
- /// whether a TwoStageStochasticBlock or MultiStageStochasticBlock inner Block
- /// is separated into components [see split_inner()]
+ /// whether an inner Block made of pieces is split into components [see
+ /// split_inner()]
  bool f_scenario_decomposition = true;
 
  /// indicates whether the bound constraints must be reformulated

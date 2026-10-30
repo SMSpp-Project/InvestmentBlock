@@ -75,8 +75,9 @@ namespace SMSpp_di_unipi_it
  *   its index in the NetworkData [see serialize()].
  *
  * - The inner Block is the operational problem. It is either a UCBlock, or
- *   a TwoStageStochasticBlock whose scenarios (more precisely, the leaves
- *   of its tree of scenarios) are UCBlock, or an SDDPBlock whose stages are
+ *   a Block made of UCBlock, such as a TwoStageStochasticBlock whose
+ *   scenarios (more precisely, the leaves of its tree of scenarios) are
+ *   UCBlock [see find_pieces()], or an SDDPBlock whose stages are
  *   UCBlock inside a BendersBFunction; several identical SDDPBlock can also
  *   be given, in which case the scenarios are divided among them. The same
  *   investment is written into each of these UCBlock, hence it is the same
@@ -169,8 +170,8 @@ namespace SMSpp_di_unipi_it
  *
  * - with a TwoStageStochasticBlock, it is the value given by the Solver of
  *   the TwoStageStochasticBlock, i.e., the expected operational cost over
- *   its scenarios (whose probabilities are in the Objective of their
- *   UCBlock);
+ *   its scenarios (whose probabilities are the weights of the Objective of
+ *   their UCBlock [see Block::get_objective_weight()]);
  *
  * - with an SDDPBlock, the cuts of the future cost functions are first
  *   computed by the SDDPSolver registered to the SDDPBlock, if any (after
@@ -1812,8 +1813,9 @@ class InvestmentFunction : public C05Function , public Block {
   *   in the i-th asset and of the one that reads back the derivative of the
   *   value of the inner Block with respect to it. Both are called on the
   *   UCBlock at the root of the inner Block, or on each of them when there
-  *   are several (the leaves of a TwoStageStochasticBlock, the stages of an
-  *   SDDPBlock), with the index of the asset in "Assets": for instance
+  *   are several (the pieces of the inner Block [see find_pieces()], the
+  *   stages of an SDDPBlock), with the index of the asset in "Assets": for
+  *   instance
   *   "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization",
   *   "UCBlock::replicate" and "UCBlock::get_replicate_linearization", or
   *   "UCBlock::resize_line" and "UCBlock::get_resize_line_linearization".

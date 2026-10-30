@@ -763,8 +763,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     continue;
     }
 
-   // a TwoStageStochasticBlock whose scenarios share nothing is separated in
-   // the same way, one component per scenario
+   // an inner Block made of Blocks of the class of the methods of the assets
+   // is split, one component per such Block [see split_inner()]
    if( split_inner( grp_k , k , num_components , all_unit_weights ) )
     continue;
 
@@ -872,8 +872,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 	  "'ScenarioGenerator' group is present, but the inner Block is not a "
 	  "StochasticBlock to expand with it." ) );
 
-  // a TwoStageStochasticBlock whose scenarios share nothing is separated as
-  // a Component_0 one is
+  // an inner Block at the root is split as that of a Component_0 is
   if( split_inner( group , 0 , num_components , all_unit_weights ) ) {
    refuse_maximization();
    Block::deserialize( group );
