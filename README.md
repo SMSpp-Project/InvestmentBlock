@@ -13,14 +13,14 @@ defined in `UCBlock`, like generating units and transmission lines.
 > being extended from a single `InvestmentFunction` to a weighted sum of K of
 > them, exposed separately to `BundleSolver` instead of one aggregated function.
 >
-> It can be built programmatically (`add_component`, `set_weight`,
+> It can be built programmatically (`add_component`,
 > `set_asset_variable_indices`, `set_asset_baseline_variable_indices`,
 > `set_implicit_constraints`) or from netCDF: the (1:K) schema is
 > "legacy × K" — one `Component_<k>` sub-group per component (the presence of
 > `Component_0` is what selects the disaggregated format; the component count
 > is implicit in the suffixes), each a self-contained legacy
-> `InvestmentFunction` description carrying its own `Weight` attribute and,
-> for the multi-period case, its own `AssetVarIndex` and
+> `InvestmentFunction` description, weighted by the `ObjectiveWeight` of its
+> `InnerBlock`, and, for the multi-period case, its own `AssetVarIndex` and
 > `AssetBaselineVarIndex` mappings (the latter makes the transition cost of
 > an asset charge against another design variable — typically the same
 > asset's variable in the previous period — instead of the
@@ -35,8 +35,9 @@ defined in `UCBlock`, like generating units and transmission lines.
 > deserialize expands it into one component per scenario of its
 > `ScenarioGenerator` (looked up in the component first, then at the root),
 > each with its own inner materialized on that scenario and weighted by
-> probability times the component's `Weight` — so a file of T such templates
-> is a T periods x K scenarios problem. This works both inside a `Component_<k>`
+> probability times the `ObjectiveWeight` of the template's `InnerBlock` — so
+> a file of T such templates is a T periods x K scenarios problem. This works
+> both inside a `Component_<k>`
 > and as the InvestmentBlock's *direct* inner (no `Component_0`), which expands
 > identically. The implicit `Constraints_*` of a component are per-ASSET
 > (column j applies to the variable of asset j through the mapping); the

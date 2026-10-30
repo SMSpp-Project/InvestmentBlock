@@ -62,7 +62,6 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
-class TwoStageStochasticBlock;  // forward declaration of TwoStageStochasticBlock
 
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
@@ -126,7 +125,7 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
- /// adds one weighted component to the disaggregated (1:K) structure
+ /// adds one component to the disaggregated (1:K) structure
  /** Wraps \p f in a bare AbstractBlock sub-Block holding an FRealObjective
   * over it (one BundleSolver component per sub-Block). Call it once per
   * component to assemble the disaggregated (1:K) structure, be it
@@ -139,20 +138,19 @@ public:
   * subset (or a different order) of active Variable must set them on \p f
   * BEFORE calling this method; they are then left untouched.
   *
-  * \p weight is validated ( > 0 ) and applied to the component (value and
-  * diagonal linearization) via InvestmentFunction::set_weight(). This must
-  * be called before the abstract representation is generated.
+  * The component is weighted by the weight of the Objective of the inner
+  * Block of \p f [see Block::get_objective_weight()], which \p f applies to
+  * its value and diagonal linearization. This must be called before the
+  * abstract representation is generated.
   *
-  * @param f      the InvestmentFunction of the component; ownership is taken
-  *               (handed to an FRealObjective, or deleted on failure).
-  *
-  * @param weight the component weight w ( > 0 ). */
+  * @param f the InvestmentFunction of the component; ownership is taken
+  *          (handed to an FRealObjective, or deleted on failure). */
 
- void add_component( InvestmentFunction * f , double weight );
+ void add_component( InvestmentFunction * f );
 
 /*--------------------------------------------------------------------------*/
  /// adds a component bound to a SUBSET of the design Variable
- /** As add_component( f , weight ), but wires the active Variable of \p f to
+ /** As add_component( f ), but wires the active Variable of \p f to
   * the given \p actives subset (by index, in the given order) of the design
   * ColVariable of this InvestmentBlock. This is the per-period binding of
   * the multi-period (1:K) scheme: the component of period t declares only
@@ -168,11 +166,9 @@ public:
   * @param f       the InvestmentFunction of the component (ownership taken);
   *                it must not have active Variable yet.
   *
-  * @param weight  the component weight w ( > 0 ).
-  *
   * @param actives the indices of the design Variable this component sees. */
 
- void add_component( InvestmentFunction * f , double weight ,
+ void add_component( InvestmentFunction * f ,
                      const std::vector< Index > & actives ) {
   if( ! f )
    throw( std::invalid_argument( "InvestmentBlock::add_component: "
@@ -185,7 +181,7 @@ public:
   if( actives.empty() ) {
    delete f;
    throw( std::invalid_argument( "InvestmentBlock::add_component: empty "
-                                 "active subset (use the two-parameter "
+                                 "active subset (use the one-parameter "
                                  "overload for the dense wiring)" ) );
    }
   std::vector< ColVariable * > p;
@@ -213,7 +209,7 @@ public:
    delete f;
    throw;
    }
-  add_component( f , weight );
+  add_component( f );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -273,7 +269,7 @@ public:
   * - The dimension "ScenarioDecomposition", which indicates whether a
   *   TwoStageStochasticBlock or MultiStageStochasticBlock inner Block, of the
   *   root or of a component, is separated into one component per scenario
-  *   when its scenarios share nothing [see expand_two_stage()]. If it is
+  *   when its scenarios share nothing [see split_inner()]. If it is
   *   zero, then it is left whole. If it is one, then it is separated. Any
   *   other value is an error. This dimension is optional. If it is not
   *   provided, then it is assumed to be one. A StochasticBlock template is
@@ -328,8 +324,10 @@ public:
   * - The groups "Component_0", "Component_1", ..., numbered consecutively
   *   from 0, each the description of an InvestmentFunction [see
   *   InvestmentFunction::serialize()], which becomes a component weighted by
-  *   its attribute "Weight" (> 0, 1 if it is not provided). In each of them
-  *   the optional variables "AssetVarIndex" and "AssetBaselineVarIndex",
+  *   the weight of the Objective of its inner Block, the attribute
+  *   "ObjectiveWeight" of its group "InnerBlock" [see Block::deserialize()].
+  *   In each of them the optional variables "AssetVarIndex" and
+  *   "AssetBaselineVarIndex",
   *   scalar or indexed over its "NumAssets", give for each asset the index,
   *   among the ColVariable of this InvestmentBlock, of the one that sizes
   *   the asset and of the one that is its baseline [see
@@ -353,14 +351,16 @@ public:
   *
   * - A StochasticBlock is a template, which makes one component for each
   *   scenario of the group "ScenarioGenerator" of its own group or, if there
-  *   is none, of the root, weighted by the "Weight" of the template times
-  *   the probability of the scenario [see expand_stochastic_template()]; a
+  *   is none, of the root, weighted by the weight of the Objective of the
+  *   inner Block of the template times the probability of the scenario [see
+  *   expand_stochastic_template()]; a
   *   "ScenarioGenerator" at the root with no template to feed is refused.
   *
   * - A TwoStageStochasticBlock, or a MultiStageStochasticBlock, whose
   *   scenarios share nothing makes one component for each scenario, or leaf,
-  *   weighted by the "Weight" of its group times the probability of the
-  *   scenario, unless "ScenarioDecomposition" is 0 [see expand_two_stage()].
+  *   weighted by the weights of the Objective from the scenario, whose own
+  *   is its probability, up to the inner Block, unless
+  *   "ScenarioDecomposition" is 0 [see split_inner()].
   *
   * When the inner Block at the root makes the components, an
   * "ObjectiveSense" of size 0 is refused as well.
@@ -374,28 +374,6 @@ public:
 
  void deserialize( const netCDF::NcGroup & group ) override;
 
-/*--------------------------------------------------------------------------*/
- /// tells whether the scenarios of a stochastic Block can be solved one by one
- /** Tells whether the scenarios of \p block, a TwoStageStochasticBlock or a
-  * MultiStageStochasticBlock, can become independent components of an
-  * InvestmentBlock, which writes one investment into all of them. They can
-  * if every Variable that \p block makes first-stage, following its
-  * StaticAbstractPath, is the design Variable of an asset, which the
-  * investment replaces, and if every inner TwoStageStochasticBlock with more
-  * than one scenario shares among them exactly these Variable: any other
-  * that it shares is a decision of a later stage, a state or a design, which
-  * one investment for all the scenarios cannot be, and one that it does not
-  * share is free in its scenarios. A design Variable is told by the name of
-  * its group, which the classes of the assets give it. The paths are
-  * resolved by AbstractPath itself, as \p block resolves them, whose
-  * abstract Variable are generated if they are not yet.
-  *
-  * @param block the stochastic Block; any other Block is not separable.
-  *
-  * @param why if not nullptr, the cause is written there when the answer is
-  *        false. */
-
- static bool is_separable( Block * block , std::string * why = nullptr );
 
 /**@} ----------------------------------------------------------------------*/
 /*-------------------------- OTHER INITIALIZATIONS -------------------------*/
@@ -883,7 +861,7 @@ protected:
  int f_objective_sense = Objective::eMin;  ///< the sense of the Objective
 
  /// whether a TwoStageStochasticBlock or MultiStageStochasticBlock inner Block
- /// is separated into components [see expand_two_stage()]
+ /// is separated into components [see split_inner()]
  bool f_scenario_decomposition = true;
 
  /// indicates whether the bound constraints must be reformulated
@@ -966,8 +944,9 @@ protected:
   * TEMPLATE: builds its ScenarioGenerator (looked up in \p grp first, then at
   * \p root), and for each scenario materializes the inner Block, wraps it in a
   * fresh InvestmentFunction (deserialized from \p grp with that inner), wires
-  * its actives and adds it as a component weighted by
-  * (scenario probability) x (the template's own Weight). Returns true and
+  * its actives and adds it as a component weighted by (scenario
+  * probability) x (the weight of the Objective of the inner Block of the
+  * template). Returns true and
   * increments \p num_components accordingly; returns false (adding nothing) if
   * the inner is not a StochasticBlock, so the caller can fall through to the
   * ordinary component / legacy handling.
@@ -985,33 +964,50 @@ protected:
 
 /*--------------------------------------------------------------------------*/
 
- /// separates a TwoStageStochasticBlock into one component per leaf
- /** If the "InnerBlock" of \p grp is a TwoStageStochasticBlock or a
-  * MultiStageStochasticBlock (the exact classes), builds it and makes each
-  * of its leaves [see TwoStageStochasticBlock::get_leaf_block()], those of
-  * the whole tree for a MultiStageStochasticBlock, the inner Block of an
+ /// splits an inner Block into components, one per unit
+ /** If the "InnerBlock" of \p grp is made of Blocks of the class of the
+  * methods of its assets [see InvestmentFunction::find_pieces()], other than
+  * itself, builds it and makes each of those pieces the inner Block of an
   * InvestmentFunction deserialized out of \p grp, added as a component
-  * weighted by (probability of the leaf) x (its Weight). The
-  * TwoStageStochasticBlock never generates its Objective, which would write
-  * the probabilities into the costs of the leaves: it is kept, believing it
-  * still has its leaves, until ~InvestmentBlock() gives them back to it to
-  * delete them, and serialize() writes it in place of its components.
-  *
-  * This is right only if the scenarios share nothing: if it has first-stage
-  * AbstractPath, at the root or in an inner Block, or no scenarios to weigh
-  * its copies with (a DiscreteScenarioSet, or the scenario tree of a
-  * MultiStageStochasticBlock, or one in each of its inner Blocks), or no
-  * scenario at all, it is left whole, with a warning saying why, and false
-  * is returned, adding nothing. It is left whole with no warning if the
-  * file asks so, with a ScenarioDecomposition of zero [see deserialize()].
+  * weighted by the product of the weights of the Objective from the piece
+  * up to this InvestmentBlock [see Block::get_objective_weight()], which
+  * becomes the weight of the piece. Nothing is generated here, and what ties
+  * the pieces is seen only once they are: a split inner Block whose pieces
+  * something ties
+  * is refused then [see check_parked()]. The inner Block is kept,
+  * believing it still has its pieces, until ~InvestmentBlock() gives them
+  * back to it to delete them, and serialize() writes it in place of its
+  * components. An inner Block of that class, an SDDPBlock, or one that is
+  * not made of such Blocks is not split, and false is returned, adding
+  * nothing; so it is if the file asks so, with a ScenarioDecomposition of
+  * zero [see deserialize()].
   *
   * @param grp the component (or root) group that may hold it;
   * @param k its index, for the messages and the wiring of the actives;
-  * @param num_components incremented by the number of leaves added;
+  * @param num_components incremented by the number of pieces added;
   * @param all_unit_weights cleared if any added weight differs from 1.0. */
 
- bool expand_two_stage( const netCDF::NcGroup & grp , Index k ,
-                        Index & num_components , bool & all_unit_weights );
+ bool split_inner( const netCDF::NcGroup & grp , Index k ,
+                   Index & num_components , bool & all_unit_weights );
+
+/*--------------------------------------------------------------------------*/
+ /// refuses a split inner Block whose pieces something ties
+ /** For each inner Block split by split_inner(), throws if one of its pieces
+  * has no Solver registered yet, since the pieces must be generated by their
+  * own Solver, with their BlockConfig, before anything else generates them;
+  * then generates the Variable and the Constraint of the inner Block, not
+  * its Objective, and throws if it, or a Block between it and the pieces,
+  * has any of its own [see first_with_own()]: they tie the pieces, which are
+  * then not separable. Called by generate_abstract_constraints(). */
+
+ void check_parked( void );
+
+/*--------------------------------------------------------------------------*/
+ /// the first Block from \p block down to \p pieces that has Variable or
+ /// Constraint of its own, nullptr if none
+
+ static const Block * first_with_own( const Block * block ,
+                                      const std::vector< Block * > & pieces );
 
 /*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE FIELDS --------------------------------*/
@@ -1026,17 +1022,18 @@ protected:
  static constexpr unsigned char HasObj = 4;
  ///< third bit of AR == 1 if the Objective has been constructed
 
- /// a TwoStageStochasticBlock whose leaves are components
- /** [see expand_two_stage()] */
- struct ParkedTSSB {
-  TwoStageStochasticBlock * tssb;  ///< deleted, with its leaves, at the end
-  Index first;                     ///< the component of its first leaf
-  double weight;                   ///< the Weight of its group in the file
-  std::vector< Block * > fathers;  ///< the father of each leaf, to go back to
+ /// an inner Block whose pieces are components [see split_inner()]
+ struct Parked {
+  Block * root;                    ///< deleted, with its pieces, at the end
+  Index first;                     ///< the component of its first piece
+  Index k;                         ///< its group, for the messages
+  std::vector< Block * > pieces;   ///< its pieces, one per component
+  std::vector< Block * > fathers;  ///< the father of each piece, to go back to
+  bool checked = false;            ///< whether check_parked() found it free
   };
 
- /// the TwoStageStochasticBlock whose leaves are components, in their order
- std::vector< ParkedTSSB > v_parked_tssb;
+ /// the inner Blocks whose pieces are components, in their order
+ std::vector< Parked > v_parked;
 
  SMSpp_insert_in_factory_h;
 

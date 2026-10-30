@@ -57,20 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrecognized; the unit test checks its linearization
 
 - `ScenarioDecomposition` (netCDF), an optional dimension of the root: 0
-  keeps a TwoStageStochasticBlock or MultiStageStochasticBlock inner Block
-  whole, 1, the default, separates it into components when its scenarios
-  share nothing; a `StochasticBlock` template is expanded regardless, and
+  keeps the inner Block whole, 1, the default, splits it into components
+  [see below]; a `StochasticBlock` template is expanded regardless, and
   serialize writes the dimension only when it is 0
-
-- `is_separable()` tells whether the scenarios of a TwoStageStochasticBlock
-  or MultiStageStochasticBlock can be solved one by one under a single
-  investment, and why not: every first-stage Variable has to be the design of
-  an asset, and every inner stochastic Block has to share exactly those among
-  its scenarios
 
 - `add_component()` to build an InvestmentBlock as a weighted sum of several
   InvestmentFunction components, each exposed separately to BundleSolver (the
-  disaggregated path); an InvestmentBlock with components is a minimization
+  disaggregated path), each weighted by the weight of the Objective of its
+  inner Block [see `Block::get_objective_weight()`], which the
+  InvestmentFunction applies to its value and its diagonal linearization;
+  an InvestmentBlock with components is a minimization
   [see `get_objective_sense()`], so that a Solver reports the value of the
   solution it writes, and `set_number_sub_blocks()` and
   `set_num_sub_blocks_per_stage()` hold only without components.
@@ -79,7 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hold one `Component_<k>` sub-group per component (the presence of
   `Component_0` selects the disaggregated path; the component count is
   implicit in the suffixes), each a legacy InvestmentFunction description
-  with its own `Weight` attribute and, for the multi-period case, its own
+  weighted by the `ObjectiveWeight` of its `InnerBlock` and, for the
+  multi-period case, its own
   `AssetVarIndex` and `AssetBaselineVarIndex` variables; all variable indices
   in the file are GLOBAL (positions in the design array of the root); both
   deserialize and serialize support it, the comment of
@@ -95,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mirrored subgradient entry on the baseline variable; cannot be combined
   with `InstalledQuantity`
 
-- `add_component( f , weight , actives )` overload binding a component to a
+- `add_component( f , actives )` overload binding a component to a
   SUBSET of the design variables (per-period binding; the component's
   mappings are then local positions in that subset)
 
@@ -113,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a template that deserialize expands into one component per scenario of its
   ScenarioGenerator (looked up in the component first, then at the root), each
   carrying its own inner Block materialized on that scenario and weighted by
-  (scenario probability) x (`Weight`). This works both inside a `Component_<k>`
+  (scenario probability) x (the `ObjectiveWeight` of the `InnerBlock` of the
+  template). This works both inside a `Component_<k>`
   and as the InvestmentBlock's direct inner (no `Component_0`) — the two speak
   the same template format and expand identically. The caller of every
   DataMapping is resolved against the inner Block before a scenario is
@@ -127,39 +125,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Block from outside instead of creating it out of the `InnerBlock` group
   (this is what the expansion above hands each scenario component)
 
-- a TwoStageStochasticBlock as the `InnerBlock` of a `Component_<k>`, or as
-  the direct inner Block, is separated by deserialize into one component per
-  scenario, weighted by (probability of the scenario) x (`Weight`), when its
-  scenarios share nothing, i.e., when it has a `DiscreteScenarioSet` and no
-  first-stage path; otherwise it is solved whole, with a warning saying why.
-  The components take the Blocks of the scenarios that the
-  TwoStageStochasticBlock has built, before it generates its Objective, which
-  would write the probabilities into their costs; it is kept until the
-  InvestmentBlock is destroyed, and serialize() writes it whole in their
-  place, as one `Component_<k>`; when the one at the root is separated, a
-  maximization asked at the root is rejected
-
-- a MultiStageStochasticBlock as the `InnerBlock` is separated as a
-  TwoStageStochasticBlock is, into one component per leaf of the whole tree,
-  weighted by the product of the probabilities along its path, when nothing
-  ties the scenarios: no first-stage path, neither at the root nor in an
-  inner TwoStageStochasticBlock, and scenarios to weigh the copies with (the
-  scenario tree, or a `DiscreteScenarioSet` in each inner Block); each leaf
-  goes back to the inner TwoStageStochasticBlock it was taken from
+- an inner Block, the `InnerBlock` of a `Component_<k>` or the direct one,
+  made of Blocks of the class of the methods of its assets other than
+  itself, found going down from it only through Blocks whose sub-Blocks are
+  all of that class or made so in turn [see
+  `InvestmentFunction::find_pieces()`], such as a TwoStageStochasticBlock or
+  a MultiStageStochasticBlock of UCBlock, is split by deserialize into one
+  component per such Block, with no cast to its class: each piece is
+  weighted by the weights of the Objective from it up to the
+  InvestmentBlock, the probability of a scenario or of a leaf. Nothing is
+  generated at load: when the InvestmentBlock generates its Constraint, once
+  the Solver of every piece is registered, a split inner Block, or a Block
+  between it and the pieces, with Variable or Constraint of its own, which
+  tie the pieces, is refused, asking for a `ScenarioDecomposition` of 0.
+  The inner Block is kept until the InvestmentBlock is destroyed, and
+  serialize() writes it whole in place of its components, as one
+  `Component_<k>`; when the one at the root is split, a maximization asked
+  at the root is rejected
 
 - `get_investment_functions()` on InvestmentBlock, which returns its
   InvestmentFunction, or that of each of its components
 
-- `InvestmentFunction::serialize( group , inner , weight )`, which writes the
-  InvestmentFunction with the given inner Block and weight
+- `InvestmentFunction::serialize( group , inner )`, which writes the
+  InvestmentFunction with the given inner Block
 
 - `InvestmentBlockSolution` now carries one inner Solution per component,
   serialized as `InnerSolution_<k>` groups with a `NumInnerSolutions`
   round-trip guardrail; the legacy single-`InnerSolution` format is unchanged
-
-- `set_weight()` on InvestmentFunction, to weight a component (> 0); a new
-  weight is refused once the function has been computed, its value and its
-  linearizations being weighted by the previous one
 
 - `set_asset_variable_indices()` on InvestmentFunction, mapping each asset to the
   design variable it invests in, so several components can share the same design

@@ -38,7 +38,6 @@
 
 #include "Group.h"
 
-#include "TwoStageStochasticBlock.h"
 
 #include <algorithm>
 
@@ -166,178 +165,6 @@ static std::map< std::tuple< Block::Index , Block::Index , double > ,
    }
   }
  return( limits );
- }
-
-/*--------------------------------------------------------------------------*/
-/*------------------ FILE-LOCAL: THE DESIGN OF THE ASSETS ------------------*/
-/*--------------------------------------------------------------------------*/
-
-// whether v is the design Variable of an asset. The classes of the assets
-// register it in a group with one of these names, which the classes deriving
-// from them inherit (a NuclearUnitBlock has the x_thermal of the
-// ThermalUnitBlock it derives from): the name of the group, not the class of
-// the Block, tells a design
-
-static bool is_design( const ColVariable * v )
-{
- static const std::set< std::string > designs = {
-  "x_intermittent" , "x_thermal" , "x_battery" , "x_converter" ,
-  "x_network" };
-
- const auto group = v->get_Group();
- return( group && designs.count( group->get_name() ) );
- }
-
-/*--------------------------------------------------------------------------*/
-
-// v as a cause names it: its group and the class of the Block of the group
-
-static std::string name_of( const ColVariable * v )
-{
- const auto group = v->get_Group();
- if( ! group )
-  return( "a Variable in no group" );
- return( "'" + group->get_name() + "' of the " +
-         group->get_Block()->classname() );
- }
-
-/*--------------------------------------------------------------------------*/
-
-// the ColVariable that paths reach in block, each with the index of its path;
-// a path that reaches none gives a nullptr
-
-static std::vector< std::pair< const ColVariable * , Block::Index > >
- reached( const std::vector< std::unique_ptr< AbstractPath > > & paths ,
-          Block * block )
-{
- std::vector< std::pair< const ColVariable * , Block::Index > > vars;
- for( Block::Index k = 0 ; k < paths.size() ; ++k ) {
-  const auto n = paths[ k ]->get_number_elements< ColVariable >( block );
-  for( Block::Index j = 0 ; j < n ; ++j ) {
-   const auto v = paths[ k ]->get_element< ColVariable >( block , j );
-   vars.emplace_back( v , k );
-   if( ! v )  // an empty path has an infinite number of elements
-    break;
-   }
-  }
- return( vars );
- }
-
-/*--------------------------------------------------------------------------*/
-
-// why the scenarios below node, root or a TwoStageStochasticBlock inside it,
-// cannot be separated, the empty string if they can. What root makes
-// first-stage is the investment, one in every leaf: it has to be made of
-// designs, and every node with more than one scenario has to share among
-// them exactly the investment, read in the Block its paths are resolved
-// against; any other Variable it shares is a decision of a later stage, and
-// an investment it does not share is free in all its scenarios but the
-// first one
-
-// whether a first-stage AbstractPath of node, or of any
-// TwoStageStochasticBlock below it, ties the scenarios: the inner Block of a
-// MultiStageStochasticBlock may be one in turn, whose paths tie the scenarios
-// below it
-
-static bool has_first_stage_paths( const TwoStageStochasticBlock * node )
-{
- if( ! node->get_paths_to_static_here_and_now_vars().empty() )
-  return( true );
-
- for( Block::Index l = 0 ; l < node->get_number_nested_Blocks() ; ++l )
-  if( const auto sub = dynamic_cast< const TwoStageStochasticBlock * >(
-                                            node->get_nested_Block( l ) ) )
-   if( has_first_stage_paths( sub ) )
-    return( true );
-
- return( false );
- }
-
-/*--------------------------------------------------------------------------*/
-
-static std::string first_stage_obstacle( const TwoStageStochasticBlock * root ,
-                                         const TwoStageStochasticBlock * node ,
-                                         const std::string & where )
-{
- // the deserialize of a TwoStageStochasticBlock refuses them for now; the
- // day it reads them, they must not pass unread
- if( ! node->get_paths_to_dynamic_here_and_now_vars().empty() )
-  return( where + " has dynamic first-stage Variable, which are not read" );
-
- const auto & paths = root->get_paths_to_static_here_and_now_vars();
- if( ( node == root ) ? ( ! paths.empty() )
-                      : ( node->get_number_scenarios() > 1 ) ) {
-  const auto leaf = node->get_first_stage_block( 0 );
-  const auto investment = reached( paths , leaf );
-  std::set< const ColVariable * > in_investment;
-  for( const auto & [ v , k ] : investment ) {
-   const auto at = where + ", first-stage path " + std::to_string( k ) +
-                   ( node == root ? ": " : " of the root: " );
-   if( ! v )
-    return( at + "it does not reach a ColVariable" );
-   if( ( node == root ) && ( ! is_design( v ) ) )
-    return( at + name_of( v ) + " is not the design of an asset, so the "
-            "scenarios share an operational decision" );
-   in_investment.insert( v );
-   }
-
-  if( node != root ) {
-   std::set< const ColVariable * > shared;
-   for( const auto & [ v , k ] :
-          reached( node->get_paths_to_static_here_and_now_vars() , leaf ) ) {
-    const auto at = where + ", first-stage path " + std::to_string( k ) +
-                    ": ";
-    if( ! v )
-     return( at + "it does not reach a ColVariable" );
-    if( ! is_design( v ) )
-     return( at + name_of( v ) + " is shared by the scenarios below it, a "
-             "state between the stages" );
-    if( ! in_investment.count( v ) )
-     return( at + name_of( v ) + " is shared only by the scenarios below "
-             "it, the design of a later stage, which the investment is not" );
-    shared.insert( v );
-    }
-   for( const auto & p : investment )
-    if( ! shared.count( p.first ) )
-     return( where + ": " + name_of( p.first ) + " is first-stage, but the "
-             "scenarios below it do not share it" );
-   }
-  }
-
- for( Block::Index l = 0 ; l < node->get_number_nested_Blocks() ; ++l )
-  if( const auto sub = dynamic_cast< const TwoStageStochasticBlock * >(
-                                            node->get_nested_Block( l ) ) ) {
-   auto cause = first_stage_obstacle( root , sub , where + ", sub-Block " +
-                                      std::to_string( l ) );
-   if( ! cause.empty() )
-    return( cause );
-   }
-
- return( "" );
- }
-
-/*--------------------------------------------------------------------------*/
-
-// whether the stochastic Block described by \p g has scenarios to weigh its
-// copies with: a TwoStageStochasticBlock its DiscreteScenarioSet, a
-// MultiStageStochasticBlock its scenario tree, or else one in each of its
-// inner Blocks
-
-static bool has_scenarios( const netCDF::NcGroup & g )
-{
- std::string type;
- if( auto att = g.getAtt( "type" ) ; ! att.isNull() )
-  att.getValues( type );
- if( type == "TwoStageStochasticBlock" )
-  return( ! g.getGroup( "DiscreteScenarioSet" ).isNull() );
- if( ! g.getGroup( "ScenarioGenerator" ).isNull() )
-  return( true );
- Block::Index n = 0;
- deserialize_dim( g , "NumberSubBlocks" , n , false );
- for( Block::Index l = 0 ; l < n ; ++l )
-  if( ! has_scenarios( g.getGroup( "Block_" + std::to_string( l ) ) ) )
-   return( false );
- return( n > 0 );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -486,8 +313,9 @@ bool InvestmentBlock::expand_stochastic_template(
  // a group whose "InnerBlock" is a StochasticBlock is a TEMPLATE: it expands
  // into one component per scenario of its ScenarioGenerator (looked up in grp
  // first, then at root), each carrying the inner materialized on that scenario
- // and weighted by (probability) x (Weight). Shared by the Component_k loop and
- // the legacy path, so a direct StochasticBlock inner expands like a Component_0.
+ // and weighted by (probability) x (its weight in the template). Shared by the
+ // Component_k loop and the legacy path, so a direct StochasticBlock inner
+ // expands like a Component_0.
  const auto inner_grp = grp.getGroup( "InnerBlock" );
  std::string inner_type;
  if( ! inner_grp.isNull() ) {
@@ -568,10 +396,16 @@ bool InvestmentBlock::expand_stochastic_template(
   const std::vector< double > data( scenario.begin() , scenario.end() );
   sb->set_data( data );
 
+  // the weight of the component: the weights of the Objective from the inner
+  // Block up to this InvestmentBlock [see Block::get_objective_weight()],
+  // taken before the inner Block leaves the template, times the probability
+  const auto weight = inner_raw->get_objective_weight( this ) * probability;
+  inner_raw->set_objective_weight( weight , eNoMod );
+
   sb->set_inner_block( nullptr , false );   // detach, do not destroy
 
   // once detached, inner is owned by nobody until f_s->deserialize() adopts it
-  // as its last act; hold it so a throw in between (bad Weight/AssetType/...)
+  // as its last act; hold it so a throw in between (bad AssetType/...)
   // frees the subtree instead of leaking it. Release only after adoption.
   std::unique_ptr< Block > inner( inner_raw );
 
@@ -580,11 +414,10 @@ bool InvestmentBlock::expand_stochastic_template(
   inner.release();                        // adopted by f_s
   wire_component_actives( f_s.get() , k );
 
-  // weight = Weight (period discount) x scenario probability. add_component()
-  // adopts f_s on success and deletes it on failure (weight <= 0), so release
-  // BEFORE the call or the unique_ptr would double-free on the throw path.
-  const auto weight = f_s->get_weight() * probability;
-  add_component( f_s.release() , weight );
+  // add_component() adopts f_s on success and deletes it on failure, so
+  // release BEFORE the call or the unique_ptr would double-free on the throw
+  // path.
+  add_component( f_s.release() );
   if( weight != 1.0 )
    all_unit_weights = false;
   ++num_components;
@@ -597,85 +430,60 @@ bool InvestmentBlock::expand_stochastic_template(
 
 /*--------------------------------------------------------------------------*/
 
-bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
-                                        Index & num_components ,
-                                        bool & all_unit_weights )
+bool InvestmentBlock::split_inner( const netCDF::NcGroup & grp , Index k ,
+                                   Index & num_components ,
+                                   bool & all_unit_weights )
 {
  if( ! f_scenario_decomposition )
   return( false );   // left whole, as the file asks
 
+ // an inner Block of the class of the methods of the assets is its own
+ // piece, and an SDDPBlock has none [see InvestmentFunction::set_pieces()]:
+ // neither is built here, so that it is built once
  const auto inner_grp = grp.getGroup( "InnerBlock" );
- std::string inner_type;
- if( ! inner_grp.isNull() ) {
-  auto att = inner_grp.getAtt( "type" );
-  if( ! att.isNull() )
-   att.getValues( inner_type );
-  }
-
- // the exact classes: a MultiStageStochasticBlock is a TwoStageStochasticBlock
- // whose scenarios are inner TwoStageStochasticBlock, whose leaves are those
- // of the whole tree [see get_leaf_block()]
- if( ( inner_type != "TwoStageStochasticBlock" ) &&
-     ( inner_type != "MultiStageStochasticBlock" ) )
+ if( inner_grp.isNull() )
+  return( false );
+ const auto cls = InvestmentFunction::asset_class( grp );
+ const auto type = type_of( inner_grp );
+ if( ( type == cls ) || ( type == "SDDPBlock" ) )
   return( false );
 
- const auto whole = [ k , & inner_type ]( const std::string & why ) {
-  std::cerr << "InvestmentBlock::deserialize: WARNING - the " << inner_type
-            << " of Component_" << k << " is solved whole rather than one "
-               "scenario at a time: " << why << std::endl;
+ // any other is built, and split if it is made of the Blocks of that class,
+ // each a copy of the assets [see InvestmentFunction::find_pieces()]: one
+ // component per piece, as nothing is generated yet. What ties the pieces is
+ // seen only once they are generated, after their BlockConfig, and a split
+ // inner Block whose pieces something ties is refused then [see
+ // check_parked()]
+ std::unique_ptr< Block > root( Block::new_Block( inner_grp , this ) );
+ std::vector< Block * > pieces;
+ if( ( ! root ) ||
+     ( ! InvestmentFunction::find_pieces( root.get() , cls , pieces ) ) ||
+     ( ( pieces.size() == 1 ) && ( pieces.front() == root.get() ) ) ) {
   return( false );
-  };
-
- // without scenarios the stochastic Block sums identical copies with no
- // probability, which is not a weighted sum of scenarios
- if( ! has_scenarios( inner_grp ) )
-  return( whole( "it has no scenarios to weigh its copies with" ) );
-
- std::unique_ptr< Block > block( Block::new_Block( inner_grp , this ) );
- const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( block.get() );
- if( ! tssb )
-  throw( std::logic_error( "InvestmentBlock::deserialize: it was not "
-	 "possible to create the TwoStageStochasticBlock of Component_" +
-	 std::to_string( k ) + "." ) );
-
- // the scenarios can be solved one at a time only if they share nothing: a
- // first-stage AbstractPath, of the root or of a Block at any depth below
- // it, ties them, and what it reaches says why they stay together; a path
- // to a design is not there any more [see design_converter]. The paths are
- // counted, not their group, which serialize() always writes
- if( has_first_stage_paths( tssb ) ) {
-  std::string why;
-  is_separable( tssb , & why );
-  return( whole( why ) );
   }
 
- const Index L = tssb->get_number_leaves();
- if( ! L )
-  return( whole( "it has no scenario" ) );
-
- // each leaf becomes a component, weighted by its probability, which the
- // TwoStageStochasticBlock writes into the costs of the leaf only when it
- // generates its Objective, which it never does here. A leaf goes to its
- // component only once the component is in place: until then it belongs to
- // the TwoStageStochasticBlock alone, since add_component() deletes a
- // rejected function, and with it its inner Block. Should a leaf be rejected,
- // the leaves handed out so far go back under their fathers, and the
- // TwoStageStochasticBlock deletes them all with itself
+ // a piece goes to its component only once the component is in place: until
+ // then it belongs to the root alone, since add_component() deletes a
+ // rejected function, and with it its inner Block. Should a piece be
+ // rejected, the pieces handed out so far go back under their fathers, and
+ // the root deletes them with itself
  const Index first = get_number_nested_Blocks();
- double weight = 1;
- std::vector< Block * > fathers( L );
+ std::vector< Block * > fathers( pieces.size() , nullptr );
  try {
-  for( Index l = 0 ; l < L ; ++l ) {
-   const auto leaf = tssb->get_leaf_block( l );
-   fathers[ l ] = leaf->get_f_Block();
+  for( Index l = 0 ; l < pieces.size() ; ++l ) {
+   fathers[ l ] = pieces[ l ]->get_f_Block();
+   // the piece leaves the Blocks above it, so it takes their weights: the
+   // weights of the Objective from it up to this InvestmentBlock [see
+   // Block::get_objective_weight()], which its component applies
+   const auto w_l = pieces[ l ]->get_objective_weight( this );
+   pieces[ l ]->set_objective_weight( w_l , eNoMod );
    auto f_l = std::make_unique< InvestmentFunction >();
-   f_l->deserialize( grp , leaf );
+   f_l->deserialize( grp , pieces[ l ] );
    f_l->set_inner_block( nullptr , false );
    wire_component_actives( f_l.get() , k );
-   weight = f_l->get_weight();
-   const auto w_l = weight * tssb->get_leaf_probability( l );
-   add_component( f_l.release() , w_l );
-   component_function( this , first + l )->set_inner_block( leaf , false );
+   add_component( f_l.release() );
+   component_function( this , first + l )->set_inner_block( pieces[ l ] ,
+                                                           false );
    if( w_l != 1.0 )
     all_unit_weights = false;
    ++num_components;
@@ -684,21 +492,82 @@ bool InvestmentBlock::expand_two_stage( const netCDF::NcGroup & grp , Index k ,
  catch( ... ) {
   for( Index c = first ; c < get_number_nested_Blocks() ; ++c )
    component_function( this , c )->set_inner_block( nullptr , false );
-  for( Index l = 0 ; l < L ; ++l )
+  for( Index l = 0 ; l < pieces.size() ; ++l )
    if( fathers[ l ] )
-    tssb->get_leaf_block( l )->set_f_Block( fathers[ l ] );
+    pieces[ l ]->set_f_Block( fathers[ l ] );
   throw;
   }
 
- v_parked_tssb.push_back( { tssb , first , weight , std::move( fathers ) } );
- block.release();
+ v_parked.push_back( { root.release() , first , k ,
+                       std::move( pieces ) , std::move( fathers ) } );
  return( true );
 
- }  // end( InvestmentBlock::expand_two_stage )
+ }  // end( InvestmentBlock::split_inner )
+
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
+void InvestmentBlock::check_parked( void )
+{
+ for( auto & parked : v_parked ) {
+  if( parked.checked )
+   continue;
+
+  // the pieces are generated by their own Solver, with their BlockConfig,
+  // when it is registered [see Solver::set_Block()]; Block has no way of
+  // telling whether it is generated, while a Solver registered on a Block
+  // has generated it. A piece with no Solver yet would be generated here,
+  // before its BlockConfig, by the root: refused
+  for( Index l = 0 ; l < parked.pieces.size() ; ++l )
+   if( parked.pieces[ l ]->get_registered_solvers().empty() )
+    throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
+           " the inner Block of the component " +
+           std::to_string( parked.first + l ) + " has no Solver yet: "
+           "configure the inner Blocks (register their Solver) before the "
+           "InvestmentBlock generates its Constraint, which checks that the "
+           "pieces of the split " + parked.root->classname() + " of "
+           "Component_" + std::to_string( parked.k ) + " share nothing" ) );
+
+  // the root and every Block between it and the pieces must have nothing of
+  // their own: what they have ties the pieces, which then are not separable
+  parked.root->generate_abstract_variables();
+  parked.root->generate_abstract_constraints();
+  if( const auto tie = first_with_own( parked.root , parked.pieces ) )
+   throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
+           " the components " + std::to_string( parked.first ) + " to " +
+           std::to_string( parked.first + parked.pieces.size() - 1 ) +
+           " are the pieces of the " + parked.root->classname() + " of "
+           "Component_" + std::to_string( parked.k ) + ", and the " +
+           tie->classname() + " that holds them has Variable or Constraint "
+           "of its own, which tie them: write a ScenarioDecomposition of 0 "
+           "to keep it whole" ) );
+  parked.checked = true;
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+
+const Block * InvestmentBlock::first_with_own( const Block * block ,
+                                         const std::vector< Block * > & pieces )
+{
+ if( std::find( pieces.begin() , pieces.end() , block ) != pieces.end() )
+  return( nullptr );
+ if( ( ! block->get_static_variable_groups().empty() ) ||
+     ( ! block->get_dynamic_variable_groups().empty() ) ||
+     ( ! block->get_static_constraint_groups().empty() ) ||
+     ( ! block->get_dynamic_constraint_groups().empty() ) )
+  return( block );
+ for( const auto sub : block->get_nested_Blocks() )
+  if( const auto tie = first_with_own( sub , pieces ) )
+   return( tie );
+ return( nullptr );
+ }
+
+
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentBlock::add_component( InvestmentFunction * f )
 {
  // f is adopted: on success an FRealObjective deletes it, so on failure it
  // must be freed here or it leaks
@@ -719,13 +588,6 @@ void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
  if( ! f )
   throw( std::invalid_argument( "InvestmentBlock::add_component: "
                                 "null component" ) );
-
- // weight must be > 0 (BundleSolver eMin)
- if( weight <= 0 ) {
-  delete f;
-  throw( std::invalid_argument( "InvestmentBlock::add_component: "
-                                "weight must be > 0" ) );
-  }
 
  // a component with no active Variable yet is bound to ALL the design
  // ColVariable, in their natural order (the common case); a component that
@@ -749,7 +611,6 @@ void InvestmentBlock::add_component( InvestmentFunction * f , double weight )
  // BundleSolver sees one component per sub-Block
  auto sub = new AbstractBlock( this );
  f->set_f_Block( sub );
- f->set_weight( weight );                     // component behaves as weight * f
  auto obj = new FRealObjective( sub , f );
  obj->set_sense( Objective::eMin );          // convex component => eMin only
  sub->set_objective( obj , eNoMod );
@@ -768,16 +629,16 @@ InvestmentBlock::get_investment_functions( void ) const
 
 InvestmentBlock::~InvestmentBlock()
 {
- // each leaf of a TwoStageStochasticBlock goes back under its father, out of
- // a component that must not delete it with itself, and the
- // TwoStageStochasticBlock deletes them all [see expand_two_stage()]
- for( const auto & parked : v_parked_tssb ) {
-  for( Index l = 0 ; l < parked.tssb->get_number_leaves() ; ++l ) {
+ // each piece of a split inner Block goes back under its father, out of
+ // a component that must not delete it with itself, and the root deletes
+ // them all [see split_inner()]
+ for( const auto & parked : v_parked ) {
+  for( Index l = 0 ; l < parked.pieces.size() ; ++l ) {
    component_function( this , parked.first + l )->set_inner_block( nullptr ,
                                                                    false );
-   parked.tssb->get_leaf_block( l )->set_f_Block( parked.fathers[ l ] );
+   parked.pieces[ l ]->set_f_Block( parked.fathers[ l ] );
    }
-  delete parked.tssb;
+  delete parked.root;
   }
 
  for( auto block : v_Block )
@@ -904,7 +765,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 
    // a TwoStageStochasticBlock whose scenarios share nothing is separated in
    // the same way, one component per scenario
-   if( expand_two_stage( grp_k , k , num_components , all_unit_weights ) )
+   if( split_inner( grp_k , k , num_components , all_unit_weights ) )
     continue;
 
    auto f_k = new InvestmentFunction();
@@ -919,8 +780,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     throw;
     }
 
-   add_component( f_k , f_k->get_weight() );  // wraps in a bare AbstractBlock
-   if( f_k->get_weight() != 1.0 )
+   add_component( f_k );   // wraps in a bare AbstractBlock
+   if( f_k->get_nested_Block( 0 )->get_objective_weight() != 1.0 )
     all_unit_weights = false;
    ++num_components;
    }
@@ -966,8 +827,9 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   if( ( num_components > 1 ) && all_unit_weights )
    std::cerr << "InvestmentBlock::deserialize: WARNING - " << num_components
              << " components all have weight 1.0; if these are "
-                "scenarios/periods of a weighted expectation, set a per-component"
-                " 'Weight' (probability x discount)." << std::endl;
+                "scenarios/periods of a weighted expectation, set the "
+                "'ObjectiveWeight' of each 'InnerBlock' (probability x "
+                "discount)." << std::endl;
 
   variation_limits( this );  // refuses the components that disagree on one
 
@@ -996,8 +858,9 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
    if( ( num_components > 1 ) && all_unit_weights )
     std::cerr << "InvestmentBlock::deserialize: WARNING - " << num_components
               << " components all have weight 1.0; if these are "
-                 "scenarios/periods of a weighted expectation, set a "
-                 "per-component 'Weight' (probability x discount)." << std::endl;
+                 "scenarios/periods of a weighted expectation, set the "
+                 "'ObjectiveWeight' of each 'InnerBlock' (probability x "
+                 "discount)." << std::endl;
    Block::deserialize( group );
    return;
    }
@@ -1011,7 +874,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 
   // a TwoStageStochasticBlock whose scenarios share nothing is separated as
   // a Component_0 one is
-  if( expand_two_stage( group , 0 , num_components , all_unit_weights ) ) {
+  if( split_inner( group , 0 , num_components , all_unit_weights ) ) {
    refuse_maximization();
    Block::deserialize( group );
    return;
@@ -1039,23 +902,6 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  Block::deserialize( group );
  }
 
-/*--------------------------------------------------------------------------*/
-
-bool InvestmentBlock::is_separable( Block * block , std::string * why )
-{
- std::string cause;
- if( const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( block ) ) {
-  tssb->generate_abstract_variables();
-  cause = first_stage_obstacle( tssb , tssb , tssb->classname() );
-  }
- else
-  cause = ( block ? "a " + block->classname() : std::string( "no Block" ) ) +
-          " is not a TwoStageStochasticBlock";
-
- if( why )
-  *why = cause;
- return( cause.empty() );
- }
 
 /*--------------------------------------------------------------------------*/
 /*-------------------------- OTHER INITIALIZATIONS -------------------------*/
@@ -1098,6 +944,8 @@ void InvestmentBlock::generate_objective( Configuration * objc )
 
 void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
 {
+ check_parked();  // [see split_inner()]
+
  if( constraints_generated() )
   return; // constraints have already been generated
 
@@ -1296,20 +1144,20 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
   }
  else {
   // disaggregated (1:K): one Component_<k> group per nested sub-Block, each the
-  // existing InvestmentFunction serialize (which writes its own Weight and
-  // AssetVarIndex when non-default); the count is implicit in the suffixes
-  auto parked = v_parked_tssb.begin();
+  // existing InvestmentFunction serialize (which writes its AssetVarIndex when
+  // non-default); the count is implicit in the suffixes
+  auto parked = v_parked.begin();
   for( Index k = 0 , j = 0 ; k < get_number_nested_Blocks() ; ++k , ++j ) {
    // reach the component's InvestmentFunction through the single navigation
    // helper (checked in debug), so serialize does not re-encode the component
    // structure sub-Block -> FRealObjective -> InvestmentFunction
    const auto f_k = component_function( this , k );
    auto grp_k = group.addGroup( "Component_" + std::to_string( j ) );
-   // the components made out of the leaves of a TwoStageStochasticBlock are
-   // written as one, the TwoStageStochasticBlock [see expand_two_stage()]
-   if( ( parked != v_parked_tssb.end() ) && ( parked->first == k ) ) {
-    f_k->serialize( grp_k , parked->tssb , parked->weight );
-    k += parked->tssb->get_number_leaves() - 1;
+   // the components made out of the pieces of a split inner Block are
+   // written as one, the inner Block [see split_inner()]
+   if( ( parked != v_parked.end() ) && ( parked->first == k ) ) {
+    f_k->serialize( grp_k , parked->root );
+    k += parked->pieces.size() - 1;
     ++parked;
     }
    else

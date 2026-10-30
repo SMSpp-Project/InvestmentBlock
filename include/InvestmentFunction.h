@@ -888,37 +888,6 @@ class InvestmentFunction : public C05Function , public Block {
  void set_variables( VarVector && x );
 
 /*--------------------------------------------------------------------------*/
- /// sets the multiplicative weight w ( > 0 ) of this component
- /** Makes the InvestmentFunction behave as w * F, with w > 0 (BundleSolver
-  * convex components require a strictly positive weight that lives inside the
-  * Function). The weight scales the value and the diagonal linearization; the
-  * feasibility (vertical) linearizations are weight-invariant and not scaled.
-  *
-  * A new weight is refused once the function has been computed, that is
-  * once it holds a value or a linearization in its global pool: it is a
-  * plain setter that issues no Modification and does not rescale what was
-  * computed with the previous weight.
-  *
-  * @param w the component weight ( > 0 ). */
-
- void set_weight( double w ) {
-  if( w <= 0 )
-   throw( std::invalid_argument( "InvestmentFunction::set_weight: "
-                                 "weight must be > 0" ) );
-  if( ( w != f_weight ) && ( f_has_value || ( ! global_pool.empty() ) ) )
-   throw( std::logic_error( "InvestmentFunction::set_weight: the weight "
-                            "cannot change once the function has been "
-                            "computed, its value and its linearizations "
-                            "being weighted by the previous one" ) );
-  f_weight = w;
-  }
-
-/*--------------------------------------------------------------------------*/
- /// returns the multiplicative weight w of this component
-
- double get_weight( void ) const { return( f_weight ); }
-
-/*--------------------------------------------------------------------------*/
  /// set the (only) sub-Block of the InvestmentFunction
  /** This method sets the only sub-Block of the InvestmentFunction
   * (a.k.a. Block B representing problem (B) in the definition of this
@@ -1947,19 +1916,17 @@ class InvestmentFunction : public C05Function , public Block {
  */
 
  void serialize( netCDF::NcGroup & group ) const override {
-  serialize( group , get_nested_Block( 0 ) , f_weight );
+  serialize( group , get_nested_Block( 0 ) );
   }
 
 /*--------------------------------------------------------------------------*/
- /// serialize this InvestmentFunction with the given inner Block and weight
+ /// serialize this InvestmentFunction with the given inner Block
  /** As serialize( group ), but writing \p inner, if not nullptr, in the
-  * group "InnerBlock" and \p weight as the attribute "Weight". This is how
-  * InvestmentBlock writes the components it has made out of the leaves of a
-  * TwoStageStochasticBlock: as the TwoStageStochasticBlock they were read
-  * from, with the Weight it had. */
+  * group "InnerBlock". This is how InvestmentBlock writes the components it
+  * has made out of the pieces of an inner Block: as the inner Block they
+  * were read from. */
 
- void serialize( netCDF::NcGroup & group , const Block * inner ,
-                 double weight ) const;
+ void serialize( netCDF::NcGroup & group , const Block * inner ) const;
 
 /**@} ----------------------------------------------------------------------*/
 /*------- METHODS DESCRIBING THE BEHAVIOR OF THE InvestmentFunction --------*/
@@ -2401,12 +2368,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  FunctionValue f_value;
  ///< the value of this InvestmentFunction after compute() is called
-
- double f_weight = 1.0;
- ///< multiplicative weight w ( > 0 ): the function behaves as w * F
- /**< Set once before solving via set_weight(). Applied to the value and the
-  * diagonal linearization at the end of compute() (scale_diagonal_by_weight);
-  * the vertical/feasibility linearizations from v_A are weight-invariant. */
 
  std::vector< Index > v_asset_indices;
  ///< indices of the assets that are subject to investment
@@ -2955,16 +2916,56 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// sets the pieces of the inner Block, and the names they need
- /** Sets v_pieces as the inner Block is: a path to each leaf of a
-  * TwoStageStochasticBlock (or MultiStageStochasticBlock), to the inner
-  * Block itself for any other one, none for an SDDPBlock, or more than one
-  * inner Block, whose sub-Blocks are reached by their class. Then it works
-  * out the names of the methods of the assets, if the instance gives none
-  * [see set_asset_names()]. It is where the class of the inner Block is
-  * known, when the inner Block is set, so that compute() does not have
-  * to. */
+ /** Sets v_pieces as the inner Block is: a path to each Block of the class
+  * of the methods of the assets the inner Block is made of [see
+  * find_pieces()], to the inner Block itself if it is not made of them, none
+  * for an SDDPBlock, or more than one inner Block, whose sub-Blocks are
+  * reached by their class. Then it works out the names of the methods of
+  * the assets, if the instance gives none [see set_asset_names()]. */
 
  void set_pieces( void );
+
+/*--------------------------------------------------------------------------*/
+ /// the class of the methods of the assets
+ /** The part before "::" of the name of the first setter, or "UCBlock",
+  * the class of the names set_asset_names() works out, if the instance
+  * gives none. */
+
+ std::string asset_class( void ) const {
+  return( class_of( v_asset_setter_name ) );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// the class of the methods named in \p setters [see asset_class()]
+
+ static std::string class_of( const std::vector< std::string > & setters );
+
+/*--------------------------------------------------------------------------*/
+
+ public:
+
+ /// the Blocks of class \p cls that \p root is made of
+ /** Appends to \p pieces \p root itself, if it is of class \p cls, or else
+  * the Blocks of that class that every sub-Block of \p root is made of in
+  * turn, in order: those a Block of a different class is made of only if
+  * every one of its sub-Blocks is of class \p cls or is made of them. This
+  * is how a stochastic Block holds its scenarios, each a copy of the same
+  * Block, whatever its class. Returns false, appending nothing, if \p root
+  * is not made of Blocks of class \p cls only. */
+
+ static bool find_pieces( Block * root , const std::string & cls ,
+                          std::vector< Block * > & pieces );
+
+/*--------------------------------------------------------------------------*/
+ /// the class of the methods of the assets of the function in \p group
+ /** As asset_class() would give it once \p group is deserialized. */
+
+ static std::string asset_class( const netCDF::NcGroup & group );
+
+/*--------------------------------------------------------------------------*/
+
+
+ private:
 
 /*--------------------------------------------------------------------------*/
  /// works out the names of the methods of the assets the instance does not
@@ -3202,20 +3203,24 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// scales the diagonal value and linearization by the component weight
- /** Applied at the end of each compute() path, where f_value and
+ /** The weight is that of the Objective of the inner Block [see
+  * Block::get_objective_weight()], which the Solver registered on the inner
+  * Block does not apply. Applied at the end of each compute() path, where
+  * f_value and
   * v_linearization (the diagonal value/subgradient) are finalized. The
   * vertical (feasibility) linearization built from v_A is weight-invariant
   * (the domain { x : l <= A x <= u } does not change under a positive scale)
-  * and is deliberately NOT touched here; see set_weight(). f_value and
+  * and is deliberately NOT touched here. f_value and
   * v_linearization must be scaled together to keep the diagonal constant
   * alpha = f_value - <v_linearization,x> equal to w * alpha. */
 
  void scale_diagonal_by_weight() {
-  if( f_weight == 1.0 )
+  const auto w = v_Block.front()->get_objective_weight();
+  if( w == 1.0 )
    return;
-  f_value *= f_weight;
+  f_value *= w;
   for( auto & c : v_linearization )
-   c *= f_weight;
+   c *= w;
   }
 
 /*--------------------------------------------------------------------------*/

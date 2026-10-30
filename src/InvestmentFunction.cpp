@@ -25,7 +25,6 @@
 #include "RBlockConfig.h"
 #include "InvestmentFunction.h"
 #include "SDDPBlock.h"
-#include "TwoStageStochasticBlock.h"
 // Solution-output utility lives under tools/sddp_solver/. It is purely
 // optional: when its header is on the include path (e.g. when the tool
 // makefile passes -I.../tools/sddp_solver) the f_output_solution path
@@ -199,7 +198,7 @@ InvestmentFunction::InvestmentFunction
  v_asset_type = std::move( asset_type );
  v_cost = std::move( cost );
  v_disinvestment_cost = std::move( disinvestment_cost );
- set_asset_names();   // the inner Block came before the assets
+ set_pieces();   // the inner Block came before the assets
 
  f_violated_constraint = { Inf< Index >() , eLHS };
 
@@ -261,17 +260,6 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
-
- // Deserialize the per-component weight (optional; default 1.0). Stored as a
- // netCDF attribute so legacy single-component files (weight == 1.0, attribute
- // absent) round-trip byte-identically.
- { auto w_att = group.getAtt( "Weight" );
-   if( ! w_att.isNull() ) {
-    w_att.getValues( & f_weight );
-    if( f_weight <= 0 )
-     throw( std::logic_error( "InvestmentFunction::deserialize: 'Weight' must "
-                              "be > 0." ) );
-    } }
 
  // Deserialize the asset -> active-variable mapping (optional; default identity,
  // i.e. asset i uses the i-th active variable). When set, asset i uses active
@@ -1166,15 +1154,9 @@ void InvestmentFunction::remove_variables( Subset && indices , bool ordered ,
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::serialize( netCDF::NcGroup & group ,
-                                    const Block * inner ,
-                                    double weight ) const {
+                                    const Block * inner ) const {
 
  Block::serialize( group );
-
- // per-component weight: written only if != 1.0, so legacy single-component
- // files stay byte-identical (the default is restored on deserialize)
- if( weight != 1.0 )
-  group.putAtt( "Weight" , netCDF::NcDouble() , weight );
 
  // in the single-component format the group is that of the InvestmentBlock,
  // which has already written the number of assets and their lower bounds
@@ -2250,9 +2232,10 @@ static RealObjective::OFValue get_recours_obj( const Block * blck ) {
 Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 {
  // w * F: the recourse-objective constant is part of the value and scales by
- // the component weight (it does not flow through f_value)
+ // the component weight, that of the Objective of the inner Block (it does
+ // not flow through f_value)
  if( auto bk = get_nested_Block( 0 ) )
-  return( f_weight * get_recours_obj( bk ) );
+  return( bk->get_objective_weight() * get_recours_obj( bk ) );
  return( 0 );
 }
 
@@ -2738,21 +2721,62 @@ CDASolver * InvestmentFunction::get_inner_solver( void ) const {
 void InvestmentFunction::set_pieces( void ) {
  v_pieces.clear();
 
- // the one place that looks at the class of the inner Block: every leaf of
- // a TwoStageStochasticBlock carries its own copy of the assets, and a
- // nested one has more leaves than scenarios; an SDDPBlock, or more than one
- // inner Block, is reached by its class [see get_piece()]
+ // an SDDPBlock, or more than one inner Block, is reached by its class
+ // [see get_piece()]; any other inner Block is made of the Blocks of the
+ // class of the methods of the assets, each with its own copy of the
+ // assets, and an inner Block that is not is its own piece, which
+ // resolve_asset_methods() refuses
  if( ( v_Block.size() == 1 ) && v_Block.front() &&
      ( ! dynamic_cast< SDDPBlock * >( v_Block.front() ) ) ) {
   const auto inner = v_Block.front();
-  if( const auto tssb = dynamic_cast< TwoStageStochasticBlock * >( inner ) )
-   for( Index l = 0 ; l < tssb->get_number_leaves() ; ++l )
-    v_pieces.emplace_back( tssb->get_leaf_block( l ) , inner );
-  else
-   v_pieces.emplace_back( inner , inner );
+  std::vector< Block * > pieces;
+  if( ! find_pieces( inner , asset_class() , pieces ) )
+   pieces.assign( 1 , inner );
+  for( const auto piece : pieces )
+   v_pieces.emplace_back( piece , inner );
   }
 
  set_asset_names();
+}
+
+/*--------------------------------------------------------------------------*/
+
+std::string InvestmentFunction::class_of(
+                               const std::vector< std::string > & setters ) {
+ if( setters.empty() || setters.front().empty() )
+  return( "UCBlock" );
+ return( setters.front().substr( 0 , setters.front().find( "::" ) ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
+std::string InvestmentFunction::asset_class( const netCDF::NcGroup & group ) {
+ Index num_assets = 0;
+ std::vector< std::string > setters;
+ if( deserialize_dim( group , "NumAssets" , num_assets ) )
+  ::deserialize( group , "AssetSetter" , num_assets , setters , true );
+ return( class_of( setters ) );
+}
+
+/*--------------------------------------------------------------------------*/
+
+bool InvestmentFunction::find_pieces( Block * root , const std::string & cls ,
+                                      std::vector< Block * > & pieces )
+{
+ if( root->classname() == cls ) {
+  pieces.push_back( root );
+  return( true );
+  }
+
+ const auto & sub = root->get_nested_Blocks();
+ const auto size = pieces.size();
+ for( const auto block : sub )
+  if( ! find_pieces( block , cls , pieces ) ) {
+   pieces.resize( size );
+   return( false );
+   }
+
+ return( ! sub.empty() );
 }
 
 /*--------------------------------------------------------------------------*/
