@@ -31,15 +31,10 @@ defined in `UCBlock`, like generating units and transmission lines.
 > master with no opt-in, and serialize re-translates back to global indices.
 > Components may all share the same design variables (multi-scenario), or
 > each own its period's block while reading the previous one as baseline
-> (multi-period). An inner Block that is a `StochasticBlock` is a template:
-> deserialize expands it into one component per scenario of its
-> `ScenarioGenerator` (looked up in the component first, then at the root),
-> each with its own inner materialized on that scenario and weighted by
-> probability times the `ObjectiveWeight` of the template's `InnerBlock` — so
-> a file of T such templates is a T periods x K scenarios problem. This works
-> both inside a `Component_<k>`
-> and as the InvestmentBlock's *direct* inner (no `Component_0`), which expands
-> identically. The implicit `Constraints_*` of a component are per-ASSET
+> (multi-period). An inner Block made of UCBlock, such as a
+> `TwoStageStochasticBlock`, is split by deserialize into one component per
+> scenario, weighted by its probability, so that a file of T components,
+> each over such a Block, is a T periods x K scenarios problem. The implicit `Constraints_*` of a component are per-ASSET
 > (column j applies to the variable of asset j through the mapping); the
 > root has none of its own, and a file that writes `Constraints_*`, or a
 > maximization, at the root of its components is refused, since they would

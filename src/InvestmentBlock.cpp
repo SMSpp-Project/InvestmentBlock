@@ -30,10 +30,6 @@
 
 #include "AbstractBlock.h"
 
-#include "StochasticBlock.h"
-
-#include "ScenarioGenerator.h"
-
 #include "AbstractPath.h"
 
 #include "Group.h"
@@ -242,6 +238,22 @@ SMSpp_insert_in_factory_cpp_0( InvestmentBlockSolution );
 /*-------------- CONSTRUCTING AND DESTRUCTING InvestmentBlock --------------*/
 /*--------------------------------------------------------------------------*/
 
+// a "ScenarioGenerator" group in \p grp asks for a StochasticBlock template
+// to be expanded, which is not done: the scenarios are written as a
+// TwoStageStochasticBlock, which is split [see split_inner()]
+
+static void refuse_generator( const netCDF::NcGroup & grp ,
+                              const std::string & where )
+{
+ if( ! grp.getGroup( "ScenarioGenerator" ).isNull() )
+  throw( std::logic_error( "InvestmentBlock::deserialize: " + where +
+         " has a 'ScenarioGenerator' group, but a StochasticBlock template "
+         "is not expanded: write its scenarios as a "
+         "TwoStageStochasticBlock" ) );
+ }
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentBlock::wire_component_actives( InvestmentFunction * f ,
                                               Index k )
 {
@@ -306,134 +318,6 @@ void InvestmentBlock::wire_component_actives( InvestmentFunction * f ,
  f->set_asset_baseline_variable_indices( std::move( lbvi ) );
 
  }  // end( InvestmentBlock::wire_component_actives )
-
-/*--------------------------------------------------------------------------*/
-
-bool InvestmentBlock::expand_stochastic_template(
-                       const netCDF::NcGroup & grp ,
-                       const netCDF::NcGroup & root , Index k ,
-                       Index & num_components , bool & all_unit_weights )
-{
- // a group whose "InnerBlock" is a StochasticBlock is a TEMPLATE: it expands
- // into one component per scenario of its ScenarioGenerator (looked up in grp
- // first, then at root), each carrying the inner materialized on that scenario
- // and weighted by (probability) x (its weight in the template). Shared by the
- // Component_k loop and the legacy path, so a direct StochasticBlock inner
- // expands like a Component_0.
- const auto inner_grp = grp.getGroup( "InnerBlock" );
- std::string inner_type;
- if( ! inner_grp.isNull() ) {
-  auto att = inner_grp.getAtt( "type" );
-  if( ! att.isNull() )
-   att.getValues( inner_type );
-  }
-
- if( inner_type != "StochasticBlock" )
-  return( false );   // not a template: let the caller handle grp its own way
-
- auto gen_grp = grp.getGroup( "ScenarioGenerator" );
- if( gen_grp.isNull() )
-  gen_grp = root.getGroup( "ScenarioGenerator" );
- if( gen_grp.isNull() )
-  throw( std::logic_error( "InvestmentBlock::deserialize: Component_" +
-	 std::to_string( k ) + " has a StochasticBlock inner Block but no "
-	 "'ScenarioGenerator' group was found, neither in the component "
-	 "nor at the root of the InvestmentBlock." ) );
-
- std::unique_ptr< ScenarioGenerator >
-  generator( ScenarioGenerator::new_ScenarioGenerator( gen_grp ) );
- if( ! generator )
-  throw( std::logic_error( "InvestmentBlock::deserialize: it was not "
-	 "possible to create the ScenarioGenerator of Component_" +
-	 std::to_string( k ) + "." ) );
-
- // the scenarios are walked along one axis only: seen as a plain generator, a
- // multi-stage one shows its first stage alone, and a file of T stages would
- // be read as one of a single stage
- if( auto ms =
-      dynamic_cast< MultiStageScenarioGenerator * >( generator.get() ) )
-  if( ms->get_stage_number() > 1 )
-   throw( std::logic_error( "InvestmentBlock::deserialize: the "
-	  "ScenarioGenerator of Component_" + std::to_string( k ) + " has " +
-	  std::to_string( ms->get_stage_number() ) + " stages, but a "
-     "StochasticBlock template is expanded along a single stage: write one "
-	  "Component_k per stage instead." ) );
-
- generator->init_representative_pool();
-
- // an empty pool would leave 0 components (a degenerate InvestmentBlock with a
- // null objective), and the walk below reads the current scenario before it
- // asks for the next one: fail loud before it
- if( ! generator->get_support_size() )
-  throw( std::logic_error( "InvestmentBlock::deserialize: the "
-	 "ScenarioGenerator"
-	 " of Component_" + std::to_string( k ) + " has no scenarios; the "
-	 "expansion requires a non-empty, finite scenario set." ) );
-
- // Walk the pool with next_scenario(), as every other ScenarioGenerator
- // consumer does (SDDPBlock, TwoStageStochasticBlock). NOT get_support_size():
- // that is INFScenario for a continuous generator (not enumerable)
- // -- an infinite-support generator must be reduced upstream to a finite pool.
- do {
-  // a fresh StochasticBlock per scenario (set_data() rewrites the inner IN
-  // PLACE, so a shared one would leave every scenario with the last one's
-  // data)
-  std::unique_ptr< Block > sb_block( Block::new_Block( inner_grp , this ) );
-  auto sb = dynamic_cast< StochasticBlock * >( sb_block.get() );
-  if( ! sb )
-   throw( std::logic_error( "InvestmentBlock::deserialize: it was not "
-	  "possible to create the StochasticBlock of Component_" +
-	  std::to_string( k ) + "." ) );
-
-  auto inner_raw = sb->get_inner_block();
-  if( ! inner_raw )
-   throw( std::logic_error( "InvestmentBlock::deserialize: the "
-	  "StochasticBlock of Component_" + std::to_string( k ) +
-	  " has no inner Block." ) );
-
-  // resolve the caller of every DataMapping against the inner Block before
-  // applying the scenario, as TwoStageStochasticBlock does: a DataMapping
-  // acting on the inner Block itself has an empty AbstractPath, which the
-  // deserialize of the StochasticBlock resolves to no caller at all
-  for( const auto & dm : sb->get_data_mappings() )
-   dm->set_caller_from_reference( inner_raw );
-
-  const auto scenario = generator->get_current_scenario();
-  const auto probability = generator->get_current_scenario_probability();
-  const std::vector< double > data( scenario.begin() , scenario.end() );
-  sb->set_data( data );
-
-  // the weight of the component: the weights of the Objective from the inner
-  // Block up to this InvestmentBlock [see Block::get_objective_weight()],
-  // taken before the inner Block leaves the template, times the probability
-  const auto weight = inner_raw->get_objective_weight( this ) * probability;
-  inner_raw->set_objective_weight( weight , eNoMod );
-
-  sb->set_inner_block( nullptr , false );   // detach, do not destroy
-
-  // once detached, inner is owned by nobody until f_s->deserialize() adopts it
-  // as its last act; hold it so a throw in between (bad AssetType/...)
-  // frees the subtree instead of leaking it. Release only after adoption.
-  std::unique_ptr< Block > inner( inner_raw );
-
-  auto f_s = std::make_unique< InvestmentFunction >();
-  f_s->deserialize( grp , inner.get() );  // the template's data + THIS inner
-  inner.release();                        // adopted by f_s
-  wire_component_actives( f_s.get() , k );
-
-  // add_component() adopts f_s on success and deletes it on failure, so
-  // release BEFORE the call or the unique_ptr would double-free on the throw
-  // path.
-  add_component( f_s.release() );
-  if( weight != 1.0 )
-   all_unit_weights = false;
-  ++num_components;
-  }
- while( generator->next_scenario() );
-
- return( true );
-
- }  // end( InvestmentBlock::expand_stochastic_template )
 
 /*--------------------------------------------------------------------------*/
 
@@ -751,8 +635,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   // access by numeric suffix => deterministic order; the count is implicit
   // (the loop stops at the first missing Component_<k> group)
   Index num_components = 0;
-  Index num_stochastic = 0;   // components expanded out of a StochasticBlock
   bool all_unit_weights = true;
+  refuse_generator( group , "the root" );
 
   Index k = 0;   // survives the loop: it is the count of consecutive
                  // Component_<k> groups read, checked against the total below
@@ -761,14 +645,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
    if( grp_k.isNull() )
     break;
 
-   // a component whose inner is a StochasticBlock is a TEMPLATE: it expands
-   // into one component per scenario (shared helper, see below). The template
-   // itself is not a component, so on success skip to the next Component_k.
-   if( expand_stochastic_template( grp_k , group , k ,
-                                   num_components , all_unit_weights ) ) {
-    ++num_stochastic;
-    continue;
-    }
+   refuse_generator( grp_k , "Component_" + std::to_string( k ) );
 
    // an inner Block made of Blocks of the class of the methods of the assets
    // is split, one component per such Block [see split_inner()]
@@ -821,14 +698,6 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 	  ". Number the components consecutively from 0." ) );
    }
 
-  // a ScenarioGenerator at the root with no StochasticBlock to feed is a
-  // misunderstanding of the format, not a harmless extra: fail loud
-  if( ( ! num_stochastic ) &&
-      ( ! group.getGroup( "ScenarioGenerator" ).isNull() ) )
-   throw( std::logic_error( "InvestmentBlock::deserialize: a "
-	  "'ScenarioGenerator' group is present, but no component has a "
-	  "StochasticBlock inner Block to expand with it." ) );
-
   // guardrail: K > 1 components all at the default weight 1.0 almost always
   // means the per-component weights were forgotten (a weighted expectation
   // needs w_k = probability x discount). Warn loudly; do not fail.
@@ -846,8 +715,6 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   }
 
  // ---- legacy single-inner path ----
- // a StochasticBlock as the direct inner is a template too: expand it exactly
- // as a Component_0 one, only without the wrapper.
  {
   // the components made by the inner Block at the root are minimized, as
   // those of Component_<k> groups are: a maximization asked at the root is
@@ -860,25 +727,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
    };
   Index num_components = 0;
   bool all_unit_weights = true;
-  if( expand_stochastic_template( group , group , 0 ,
-                                  num_components , all_unit_weights ) ) {
-   refuse_maximization();
-   if( ( num_components > 1 ) && all_unit_weights )
-    std::cerr << "InvestmentBlock::deserialize: WARNING - " << num_components
-              << " components all have weight 1.0; if these are "
-                 "scenarios/periods of a weighted expectation, set the "
-                 "'ObjectiveWeight' of each 'InnerBlock' (probability x "
-                 "discount)." << std::endl;
-   Block::deserialize( group );
-   return;
-   }
-
-  // nothing was expanded: a root 'ScenarioGenerator' has nothing to feed --
-  // reject it, symmetrically with the disaggregated branch above.
-  if( ! group.getGroup( "ScenarioGenerator" ).isNull() )
-   throw( std::logic_error( "InvestmentBlock::deserialize: a "
-	  "'ScenarioGenerator' group is present, but the inner Block is not a "
-	  "StochasticBlock to expand with it." ) );
+  refuse_generator( group , "the root" );
 
   // an inner Block at the root is split as that of a Component_0 is
   if( split_inner( group , 0 , num_components , all_unit_weights ) ) {

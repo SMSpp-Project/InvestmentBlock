@@ -692,10 +692,9 @@ class InvestmentFunction : public C05Function , public Block {
   * the file, unless this throws: \p inner is then handed back, still owned
   * by the caller.
   *
-  * This is what the StochasticBlock expansion of InvestmentBlock uses: the
-  * 'Block' sub-group there describes a StochasticBlock *template*, which the
-  * InvestmentBlock materializes one scenario at a time; each resulting inner
-  * Block is then handed to the component built out of this same group. */
+  * This is what InvestmentBlock uses when it splits an inner Block [see
+  * InvestmentBlock::split_inner()]: each piece is handed to the component
+  * built out of the group of the inner Block. */
 
  void deserialize( const netCDF::NcGroup & group , Block * inner ,
                    ModParam issueMod = eNoMod ) {

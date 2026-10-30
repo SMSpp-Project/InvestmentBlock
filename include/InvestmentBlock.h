@@ -272,8 +272,7 @@ public:
   *   Block [see split_inner()]. If it is zero, then it is left whole. If
   *   it is one, then it is separated. Any
   *   other value is an error. This dimension is optional. If it is not
-  *   provided, then it is assumed to be one. A StochasticBlock template is
-  *   expanded regardless.
+  *   provided, then it is assumed to be one.
   *
   * - A description of the InvestmentFunction.
   *
@@ -341,20 +340,17 @@ public:
   *   [see add_variation_constraints()].
   *
   * - At the root "NumAssets", "LowerBound", "UpperBound", "Integer" and
-  *   "ScenarioDecomposition", as above, and the group "ScenarioGenerator"
-  *   below. "NumConstraints", the variables "Constraints_*" and an
+  *   "ScenarioDecomposition", as above. "NumConstraints", the variables
+  *   "Constraints_*" and an
   *   "ObjectiveSense" of size 0 are refused: each component holds its own
   *   linear constraints and is a minimization.
   *
   * The inner Block of a component, or the one at the root, can make several
   * components:
   *
-  * - A StochasticBlock is a template, which makes one component for each
-  *   scenario of the group "ScenarioGenerator" of its own group or, if there
-  *   is none, of the root, weighted by the weight of the Objective of the
-  *   inner Block of the template times the probability of the scenario [see
-  *   expand_stochastic_template()]; a
-  *   "ScenarioGenerator" at the root with no template to feed is refused.
+  * - A group "ScenarioGenerator", at the root or in a component, is
+  *   refused: a StochasticBlock template is not expanded, and its scenarios
+  *   are written as a TwoStageStochasticBlock, split as follows.
   *
   * - A Block made of Blocks of the class of the methods of its assets,
   *   other than itself [see InvestmentFunction::find_pieces()], such as a
@@ -940,31 +936,6 @@ protected:
   * afterwards. */
 
  void add_variation_constraints( void );
-
-/*--------------------------------------------------------------------------*/
-
- /// expands a StochasticBlock template group into one component per scenario
- /** If the "InnerBlock" of \p grp is a StochasticBlock, treats \p grp as a
-  * TEMPLATE: builds its ScenarioGenerator (looked up in \p grp first, then at
-  * \p root), and for each scenario materializes the inner Block, wraps it in a
-  * fresh InvestmentFunction (deserialized from \p grp with that inner), wires
-  * its actives and adds it as a component weighted by (scenario
-  * probability) x (the weight of the Objective of the inner Block of the
-  * template). Returns true and
-  * increments \p num_components accordingly; returns false (adding nothing) if
-  * the inner is not a StochasticBlock, so the caller can fall through to the
-  * ordinary component / legacy handling.
-  *
-  * @param grp the component (or root) group that may hold the template;
-  * @param root the InvestmentBlock root group, for the generator fallback;
-  * @param k the template index, for the error messages and actives wiring;
-  * @param num_components incremented by the number of scenarios added;
-  * @param all_unit_weights cleared if any added weight differs from 1.0. */
-
- bool expand_stochastic_template( const netCDF::NcGroup & grp ,
-                                  const netCDF::NcGroup & root , Index k ,
-                                  Index & num_components ,
-                                  bool & all_unit_weights );
 
 /*--------------------------------------------------------------------------*/
 

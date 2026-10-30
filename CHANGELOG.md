@@ -58,8 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ScenarioDecomposition` (netCDF), an optional dimension of the root: 0
   keeps the inner Block whole, 1, the default, splits it into components
-  [see below]; a `StochasticBlock` template is expanded regardless, and
-  serialize writes the dimension only when it is 0
+  [see below], and serialize writes the dimension only when it is 0
 
 - `add_component()` to build an InvestmentBlock as a weighted sum of several
   InvestmentFunction components, each exposed separately to BundleSolver (the
@@ -106,24 +105,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix_design_variable()` on InvestmentBlock (fix/unfix one design variable,
   with Modification)
 
-- StochasticBlock components: an `InnerBlock` group that is a `StochasticBlock`
-  is a template that deserialize expands into one component per scenario of its
-  ScenarioGenerator (looked up in the component first, then at the root), each
-  carrying its own inner Block materialized on that scenario and weighted by
-  (scenario probability) x (the `ObjectiveWeight` of the `InnerBlock` of the
-  template). This works both inside a `Component_<k>`
-  and as the InvestmentBlock's direct inner (no `Component_0`) — the two speak
-  the same template format and expand identically. The caller of every
-  DataMapping is resolved against the inner Block before a scenario is
-  applied, as TwoStageStochasticBlock does. A StochasticBlock without a
-  ScenarioGenerator, a ScenarioGenerator with no StochasticBlock to expand
-  (in either the disaggregated or the legacy branch) or with no scenarios,
-  a MultiStageScenarioGenerator with more than one stage, and, for the
-  template at the root, a maximization asked at the root are all rejected
-
 - `InvestmentFunction::deserialize( group , inner )`, which takes the inner
   Block from outside instead of creating it out of the `InnerBlock` group
-  (this is what the expansion above hands each scenario component)
+  (this is how the split below hands each piece to its component)
 
 - an inner Block, the `InnerBlock` of a `Component_<k>` or the direct one,
   made of Blocks of the class of the methods of its assets other than
@@ -250,8 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back also when `Block::deserialize()` refuses the group (a weight of the
   Objective that is not positive), as when the methods of the assets
   cannot be called on it: the function deleted it, and the caller used it
-  after, when splitting an inner Block, or deleted it twice, when
-  expanding a template
+  after, when splitting an inner Block
 
 - `makefile-c` and `makefile-s` include the basic makefile of
   TwoStageStochasticBlock, whose StochasticBlock comes with SDDPBlock

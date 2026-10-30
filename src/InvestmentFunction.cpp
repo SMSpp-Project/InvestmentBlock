@@ -480,9 +480,9 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
 
  if( f_external_inner_block ) {
 
-  // The inner Block is provided from outside (StochasticBlock expansion, see
-  // deserialize( group , inner , issueMod )): the 'Block' sub-group, which
-  // there describes the scenario template, is NOT read.
+  // The inner Block is provided from outside (a piece of a split inner
+  // Block, see deserialize( group , inner , issueMod )): the 'Block'
+  // sub-group, which describes the whole inner Block, is NOT read.
 
   set_inner_block( f_external_inner_block );
   }
