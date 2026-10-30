@@ -261,11 +261,12 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
  if( ! deserialize_dim( group , "NumAssets" , num_assets ) )
   num_assets = 0;
 
- // Deserialize the asset -> active-variable mapping (optional; default identity,
- // i.e. asset i uses the i-th active variable). When set, asset i uses active
- // variable v_asset_var_index[ i ]; this lets several InvestmentFunction share
- // the same active variables while each invests only in some of them (the
- // multi-period (1:K) case). Absent ⇒ identity (legacy).
+ // Deserialize the asset -> active-variable mapping (optional; default
+ // identity, i.e. asset i uses the i-th active variable). When set, asset i
+ // uses active variable v_asset_var_index[ i ]; this lets several
+ // InvestmentFunction share the same active variables while each invests only
+ // in some of them (the multi-period (1:K) case). Absent ⇒ identity
+ // (legacy).
  deserialize_one_each( group , "AssetVarIndex" , num_assets ,
                        v_asset_var_index );
 
@@ -274,9 +275,10 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
    // mapping mode: one entry per asset, each pointing to an active variable
    for( auto vi : v_asset_var_index )
     if( vi >= v_x.size() )
-     throw( std::logic_error( "InvestmentFunction::deserialize: 'AssetVarIndex' "
-                              "entry " + std::to_string( vi ) + " is out of "
-                              "range (>= number of active variables " +
+     throw( std::logic_error( "InvestmentFunction::deserialize: "
+                              "'AssetVarIndex' entry " + std::to_string( vi ) +
+                              " is out of range (>= number of active "
+                              "variables " +
                               std::to_string( v_x.size() ) + ")." ) );
    }
   else if( num_assets != v_x.size() )
@@ -738,7 +740,8 @@ void InvestmentFunction::set_variables( VarVector && x )
   if( v_cost.size() != v_asset_indices.size() )
    throw( std::logic_error("InvestmentFunction::set_variables: the number of "
                            "linear coefficients is " +
-                           std::to_string( v_cost.size() ) + ", but there are " +
+                           std::to_string( v_cost.size() ) +
+                           ", but there are " +
                            std::to_string( v_asset_indices.size() ) +
                            " assets" ) );
 

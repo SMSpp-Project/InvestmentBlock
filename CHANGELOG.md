@@ -191,6 +191,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `test/BSPar_osimp.txt` and the notes on the master problem in `README.md`
+  speak the configuration dialect of BundleSolver 2.0, and the comments of
+  `test/BSPar_osimp.txt` are within 79 columns; `test/README.md` and
+  `test/.gitignore` describe the folder without the old local suite, which
+  `CMakeLists.txt` adds as the hook of the local one
+
 - the pipeline builds the module also with its makefiles, after CMake, and
   runs on a change of the makefiles too [see `ci/makefile` of the umbrella]
 

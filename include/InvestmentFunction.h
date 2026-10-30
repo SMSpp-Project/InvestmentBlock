@@ -1542,8 +1542,9 @@ class InvestmentFunction : public C05Function , public Block {
   * ones.
   *
   * This is needed when several InvestmentFunction share the same active
-  * variables (as the components of a disaggregated InvestmentBlock do) but each
-  * invests only in some of them, so there are more variables than assets and
+  * variables (as the components of a disaggregated InvestmentBlock do) but
+  * each invests only in some of them, so there are more variables than assets
+  * and
   * the position alone no longer says which variable an asset uses.
   *
   * If \p avi is empty (the default) the mapping is the identity: asset i uses
@@ -1556,21 +1557,23 @@ class InvestmentFunction : public C05Function , public Block {
   if( ! avi.empty() ) {
    if( avi.size() != v_asset_indices.size() )
     throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
-                             "the mapping has " + std::to_string( avi.size() ) +
+                             "the mapping has " +
+                             std::to_string( avi.size() ) +
                              " entries, but there are " +
                              std::to_string( v_asset_indices.size() ) +
                              " assets" ) );
    for( const auto j : avi )
     if( j >= v_x.size() )
-     throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
+     throw( std::logic_error( "InvestmentFunction::"
+                              "set_asset_variable_indices: "
                               "variable index " + std::to_string( j ) +
                               " is out of range (there are " +
                               std::to_string( v_x.size() ) +
                               " active variables)" ) );
    if( f_reformulated_bounds )
     throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
-                             "a non-identity mapping is not supported when the "
-                             "bounds have been reformulated" ) );
+                             "a non-identity mapping is not supported when "
+                             "the bounds have been reformulated" ) );
    }
   v_asset_var_index = std::move( avi );
   }
@@ -2378,8 +2381,9 @@ class InvestmentFunction : public C05Function , public Block {
  ///< maps each asset to its active variable
  /**< When empty (the default) the mapping is the identity: asset i uses the
   * i-th active variable. When set, v_asset_var_index[ i ] is the index of
-  * asset i's variable among the active ones, letting several InvestmentFunction
-  * share the same active variables while each invests only in some of them. */
+  * asset i's variable among the active ones, letting several
+  * InvestmentFunction share the same active variables while each invests
+  * only in some of them. */
 
  std::vector< Index > v_asset_baseline_var_index;
  ///< maps each asset to the active variable providing its baseline
@@ -2840,8 +2844,8 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
  /// returns the active variable that asset \p i invests in
  /** Index of asset \p i's variable among the active ones. With no mapping set
-  * (the common case) it is the identity: asset i uses the i-th active variable.
-  * See set_asset_variable_indices(). */
+  * (the common case) it is the identity: asset i uses the i-th active
+  * variable. See set_asset_variable_indices(). */
 
  Index asset_var( Index i ) const {
   return( v_asset_var_index.empty() ? i : v_asset_var_index[ i ] );
@@ -2859,8 +2863,9 @@ class InvestmentFunction : public C05Function , public Block {
   * Called at the end of deserialize(), when the inner Block has pieces, and
   * else, or after a new inner Block, the first time the Blocks are updated,
   * before the first solve: a name that the methods factory does not have
-  * makes it throw, naming the asset. The assets of type 0 and 2 on the same unit form a pair
-  * and go in a group of their own, written and read back with the two-span
+  * makes it throw, naming the asset. The assets of type 0 and 2 on the same
+  * unit form a pair and go in a group of their own, written and read back
+  * with the two-span
   * forms of their methods [see "AssetSetter" in serialize()]. */
 
  void resolve_asset_methods( void );

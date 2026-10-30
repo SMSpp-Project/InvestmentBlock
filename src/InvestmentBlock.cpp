@@ -65,9 +65,10 @@ using namespace SMSpp_di_unipi_it;
 
 // reach the InvestmentFunction of the k-th disaggregated component: each
 // component sub-Block is a bare AbstractBlock whose FRealObjective wraps one
-// InvestmentFunction (as add_component() builds it). The defensive dynamic_cast
-// + throw mirrors how the consumer of these blocks navigates them (see
-// BundleSolver: one FRealObjective / C05Function per component sub-Block).
+// InvestmentFunction (as add_component() builds it). The defensive
+// dynamic_cast + throw mirrors how the consumer of these blocks navigates
+// them (see BundleSolver: one FRealObjective / C05Function per component
+// sub-Block).
 
 static InvestmentFunction * component_function( const Block * IB ,
 						Block::Index k )
@@ -91,19 +92,21 @@ static InvestmentFunction * component_function( const Block * IB ,
 
 // collect the InvestmentFunction(s) to read from / write into: exactly one in
 // the legacy path (the one in the master objective) or K in the disaggregated
-// path (one per component sub-Block, since the master objective is then empty).
+// path (one per component sub-Block, since the master objective is then
+// empty).
 // This is the single load-bearing "legacy vs 1:K" dispatch; read() and write()
 // share it so the two paths cannot drift apart.
 
-static std::vector< InvestmentFunction * > component_functions( const Block * IB )
+static std::vector< InvestmentFunction * > component_functions(
+                                                         const Block * IB )
 {
  std::vector< InvestmentFunction * > funcs;
  if( auto IF = dynamic_cast< InvestmentFunction * >(
-		static_cast< const InvestmentBlock * >( IB )->get_function() ) )
+        static_cast< const InvestmentBlock * >( IB )->get_function() ) )
   funcs.push_back( IF );                                    // legacy: 1
  else
   for( Block::Index k = 0 ; k < IB->get_number_nested_Blocks() ; ++k )
-   funcs.push_back( component_function( IB , k ) );          // disaggregated: K
+   funcs.push_back( component_function( IB , k ) );   // disaggregated: K
  return( funcs );
  }
 
@@ -149,7 +152,7 @@ static std::map< std::tuple< Block::Index , Block::Index , double > ,
    const auto x = static_cast< ColVariable * >(
                        f->get_active_var( avi.empty() ? i : avi[ i ] ) );
    const auto b = bvi.empty() ? nullptr :
-                  static_cast< ColVariable * >( f->get_active_var( bvi[ i ] ) );
+                 static_cast< ColVariable * >( f->get_active_var( bvi[ i ] ) );
    const double q = b ? 0 : f->get_installed_quantity( i );
    const auto [ it , added ] = limits.try_emplace(
                   { Block::Index( x - x0 ) ,
@@ -239,7 +242,8 @@ SMSpp_insert_in_factory_cpp_0( InvestmentBlockSolution );
 /*-------------- CONSTRUCTING AND DESTRUCTING InvestmentBlock --------------*/
 /*--------------------------------------------------------------------------*/
 
-void InvestmentBlock::wire_component_actives( InvestmentFunction * f , Index k )
+void InvestmentBlock::wire_component_actives( InvestmentFunction * f ,
+                                              Index k )
 {
  // derive the component's active subset from the file's global mappings:
  // U = sorted union of the asset variables (identity 0..NumAssets-1 when
@@ -346,12 +350,13 @@ bool InvestmentBlock::expand_stochastic_template(
  // the scenarios are walked along one axis only: seen as a plain generator, a
  // multi-stage one shows its first stage alone, and a file of T stages would
  // be read as one of a single stage
- if( auto ms = dynamic_cast< MultiStageScenarioGenerator * >( generator.get() ) )
+ if( auto ms =
+      dynamic_cast< MultiStageScenarioGenerator * >( generator.get() ) )
   if( ms->get_stage_number() > 1 )
    throw( std::logic_error( "InvestmentBlock::deserialize: the "
 	  "ScenarioGenerator of Component_" + std::to_string( k ) + " has " +
 	  std::to_string( ms->get_stage_number() ) + " stages, but a "
-	  "StochasticBlock template is expanded along a single stage: write one "
+     "StochasticBlock template is expanded along a single stage: write one "
 	  "Component_k per stage instead." ) );
 
  generator->init_representative_pool();
@@ -360,7 +365,8 @@ bool InvestmentBlock::expand_stochastic_template(
  // null objective), and the walk below reads the current scenario before it
  // asks for the next one: fail loud before it
  if( ! generator->get_support_size() )
-  throw( std::logic_error( "InvestmentBlock::deserialize: the ScenarioGenerator"
+  throw( std::logic_error( "InvestmentBlock::deserialize: the "
+	 "ScenarioGenerator"
 	 " of Component_" + std::to_string( k ) + " has no scenarios; the "
 	 "expansion requires a non-empty, finite scenario set." ) );
 
@@ -370,7 +376,8 @@ bool InvestmentBlock::expand_stochastic_template(
  // -- an infinite-support generator must be reduced upstream to a finite pool.
  do {
   // a fresh StochasticBlock per scenario (set_data() rewrites the inner IN
-  // PLACE, so a shared one would leave every scenario with the last one's data)
+  // PLACE, so a shared one would leave every scenario with the last one's
+  // data)
   std::unique_ptr< Block > sb_block( Block::new_Block( inner_grp , this ) );
   auto sb = dynamic_cast< StochasticBlock * >( sb_block.get() );
   if( ! sb )
@@ -548,7 +555,7 @@ void InvestmentBlock::check_parked( void )
 /*--------------------------------------------------------------------------*/
 
 const Block * InvestmentBlock::first_with_own( const Block * block ,
-                                         const std::vector< Block * > & pieces )
+                                        const std::vector< Block * > & pieces )
 {
  if( std::find( pieces.begin() , pieces.end() , block ) != pieces.end() )
   return( nullptr );
@@ -726,7 +733,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
   if( ! group.getDim( "NumConstraints" , netCDF::NcGroup::Current ).isNull() )
    throw( std::logic_error( "InvestmentBlock::deserialize: the root of a "
 	  "file with Component_<k> groups carries 'NumConstraints', but its "
-	  "linear constraints would be ignored: write them in a component." ) );
+     "linear constraints would be ignored: write them in a component." ) );
   for( const char * name : { "Constraints_A" , "Constraints_LowerBound" ,
 			     "Constraints_UpperBound" } )
    if( ! group.getVar( name ).isNull() )
@@ -816,7 +823,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 
   // a ScenarioGenerator at the root with no StochasticBlock to feed is a
   // misunderstanding of the format, not a harmless extra: fail loud
-  if( ( ! num_stochastic ) && ( ! group.getGroup( "ScenarioGenerator" ).isNull() ) )
+  if( ( ! num_stochastic ) &&
+      ( ! group.getGroup( "ScenarioGenerator" ).isNull() ) )
    throw( std::logic_error( "InvestmentBlock::deserialize: a "
 	  "'ScenarioGenerator' group is present, but no component has a "
 	  "StochasticBlock inner Block to expand with it." ) );
@@ -888,7 +896,8 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  investment_function->set_num_sub_blocks_per_stage(
 					       f_num_sub_blocks_per_stage );
  investment_function->set_number_sub_blocks( f_num_sub_blocks );
- try {   // as for a Component_<k>: the function must not leak on a rejected file
+ // as for a Component_<k>: the function must not leak on a rejected file
+ try {
   investment_function->deserialize( group );
   }
  catch( ... ) {
@@ -982,7 +991,7 @@ void InvestmentBlock::add_bound_constraints( Configuration * stcc )
   if( f_reformulate_bounds && is_disaggregated() )
    for( Index i = 0 ; i < function->get_num_active_var() ; ++i ) {
     const auto g = Index( static_cast< const ColVariable * >(
-                         function->get_active_var( i ) ) - v_variables.data() );
+                        function->get_active_var( i ) ) - v_variables.data() );
     if( function->get_var_lower_bound( i ) !=
         ( v_lower_bound.empty() ? - Inf< double >() : v_lower_bound[ g ] ) )
      throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
@@ -1142,9 +1151,9 @@ void InvestmentBlock::serialize( netCDF::NcGroup & group ) const
    }
   }
  else {
-  // disaggregated (1:K): one Component_<k> group per nested sub-Block, each the
-  // existing InvestmentFunction serialize (which writes its AssetVarIndex when
-  // non-default); the count is implicit in the suffixes
+  // disaggregated (1:K): one Component_<k> group per nested sub-Block, each
+  // the existing InvestmentFunction serialize (which writes its AssetVarIndex
+  // when non-default); the count is implicit in the suffixes
   auto parked = v_parked.begin();
   for( Index k = 0 , j = 0 ; k < get_number_nested_Blocks() ; ++k , ++j ) {
    // reach the component's InvestmentFunction through the single navigation
