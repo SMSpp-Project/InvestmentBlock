@@ -79,10 +79,13 @@ the following:
 
 An inner Block in *design mode*, i.e., one whose units and lines carry the
 design Variable of their investment, as a `TwoStageStochasticBlock` written
-to be solved as a whole, is refused when the `InvestmentBlock` is read (see
-`InvestmentBlock::deserialize()`): the investment is decided once, by the
-`InvestmentBlock`, so such a file has to be converted first into one of
-`InvestmentBlock`, each design an asset.
+to be solved as a whole, is refused when the `InvestmentBlock` is read: the
+class of the Blocks the investment is written into tells it with a getter
+`<class>::has_design` in the methods factory (`UCBlock::has_design` for a
+`UCBlock`), and a class without it has no design mode. The investment is
+decided once, by the `InvestmentBlock`, so such a file has to be converted
+first into one of `InvestmentBlock`, each design an asset, by the tool
+`design_converter`.
 
 The netCDF format of an `InvestmentBlock` is described in the comments of
 `InvestmentBlock::deserialize()` and `InvestmentFunction::deserialize()`.

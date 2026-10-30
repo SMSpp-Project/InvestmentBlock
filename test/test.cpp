@@ -274,9 +274,11 @@ static netCDF::NcGroup reactive_bus( double c , double d )
 /// [ 0 , 10 u ], linear cost 10 and no fixed cost, and a SlackUnitBlock with
 /// cost 50. The asset is the thermal unit, represented by its scale, at the
 /// price c per copy: each copy saves 40 * 10 = 400, hence for c = 100 the
-/// value is 2500 - 300 x up to x = 5 and 500 + 100 x beyond
+/// value is 2500 - 300 x up to x = 5 and 500 + 100 x beyond; with a nonzero
+/// invest the unit has an investment cost of its own, i.e., it is in design
+/// mode
 
-static netCDF::NcGroup thermal_bus( double c )
+static netCDF::NcGroup thermal_bus( double c , double invest = 0 )
 {
  netCDF::NcGroup u;
  auto g = investment( 0 , 0 , c , 0 , u );
@@ -301,7 +303,9 @@ static netCDF::NcGroup thermal_bus( double c )
  put( t , "ConstTerm" , 0 );
  put( t , "StartUpCost" , 0 );
  put( t , "InitialPower" , 0 );
- put_int( t , "InitUpDownTime" , 1 );
+ put_int( t , "InitUpDownTime" , invest != 0 ? -1 : 1 );
+ if( invest != 0 )
+  put( t , "InvestmentCost" , invest );
  put_int( t , "MinUpTime" , 1 );
  put_int( t , "MinDownTime" , 1 );
 
@@ -706,11 +710,31 @@ static void test_battery_two_assets( void )
 /*--------------------------------------------------------------------------*/
 /*---------------------------------- MAIN ----------------------------------*/
 /*--------------------------------------------------------------------------*/
+/// an inner Block in design mode, here a UCBlock with a ThermalUnitBlock
+/// that has an investment cost of its own, is refused when it is read (and
+/// new_Block() gives nullptr, having said why), and the same UCBlock with no
+/// investment cost in the unit is not
+
+static void test_design_mode_refused( void )
+{
+ auto b = Block::new_Block( thermal_bus( 100 , 7 ) );
+ check( ! b , "design mode: an inner UCBlock with a unit having an "
+        "investment cost is not refused" );
+ delete b;
+
+ b = Block::new_Block( thermal_bus( 100 ) );
+ check( b , "design mode: the inner UCBlock with no investment cost is "
+        "refused" );
+ delete b;
+ }
+
+/*--------------------------------------------------------------------------*/
 
 int main( void )
 {
  try {
   test_curvature_empty();
+  test_design_mode_refused();
   #ifdef HAVE_MILPSOLVER
    test_curvature();
    test_meshed_line();

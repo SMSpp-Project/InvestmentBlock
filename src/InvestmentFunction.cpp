@@ -274,9 +274,10 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
   else if( num_assets != v_x.size() )
    // identity mode: one asset per active variable, same order
    throw( std::logic_error( "InvestmentFunction::deserialize: the number of "
-                            "assets to invest (" + std::to_string( num_assets ) +
-                            ") is different from the number of active variables "
-                            "(" + std::to_string( v_x.size() ) + ")." ) );
+                            "assets to invest (" +
+                            std::to_string( num_assets ) + ") is different "
+                            "from the number of active variables (" +
+                            std::to_string( v_x.size() ) + ")." ) );
  }
 
  // Deserialize the per-asset variable baseline (optional; absent => the
@@ -441,7 +442,8 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                             "provided." ) );
 
   auto dim_A = A.getDims();
-  if( ( A.getDimCount() != 2 ) || ( dim_A[ 0 ].getSize() != num_constraints ) ||
+  if( ( A.getDimCount() != 2 ) ||
+      ( dim_A[ 0 ].getSize() != num_constraints ) ||
       ( dim_A[ 1 ].getSize() != num_assets ) )
    throw( std::logic_error( "InvestmentFunction::deserialize: the netCDF "
                             "variable 'Constraints_A' must have dimensions "
@@ -916,16 +918,16 @@ void InvestmentFunction::map_active( c_Vec_p_Var & vars , Subset & map ,
    }
   }
   if( found < vars.size() )
-   throw( std::invalid_argument( "InvestmentFunction::map_active: some Variable "
-                                 "is not active." ) );
+   throw( std::invalid_argument( "InvestmentFunction::map_active: some "
+                                 "Variable is not active." ) );
  }
  else {
   auto it = map.begin();
   for( auto var : vars ) {
    auto i = this->is_active( var );
    if( i >= v_x.size() )
-    throw( std::invalid_argument( "InvestmentFunction::map_active: some Variable "
-                                  "is not active" ) );
+    throw( std::invalid_argument( "InvestmentFunction::map_active: "
+                                  "some Variable is not active" ) );
    *(it++) = i;
   }
  }
@@ -1239,7 +1241,8 @@ int InvestmentFunction::compute( bool changedvars ) {
  f_has_value = false;
 
  f_violated_constraint = { Inf< Index >() , eLHS };
- if( ! constraints_are_satisfied() ) { // the linear constraints are not satisfied
+ if( ! constraints_are_satisfied() ) {  // the linear constraints are
+                                       // not satisfied
   f_has_value = true;
   f_value = worst_value();
   output_function_value();
@@ -2315,7 +2318,8 @@ void InvestmentFunction::delete_linearization( const Index name ,
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::delete_linearizations( Subset && which , bool ordered ,
+void InvestmentFunction::delete_linearizations( Subset && which ,
+                                                bool ordered ,
                                                 ModParam issueMod ) {
  global_pool.delete_linearizations( which , ordered );
 
@@ -2972,8 +2976,9 @@ void InvestmentFunction::update_linearization
 
  const auto num_stages = sddp_block->get_time_horizon();
 
- auto solver = f_simulated_solver ? f_simulated_solver
-                                   : get_solver< CDASolver >( sub_block_index );
+ auto solver = f_simulated_solver
+               ? f_simulated_solver
+               : get_solver< CDASolver >( sub_block_index );
 
  if( solver && solver->has_dual_solution() )
   solver->get_dual_solution();
@@ -3173,6 +3178,28 @@ void InvestmentFunction::resolve_asset_methods( void ) {
                                "the Block of sub-Block " + std::to_string( i )
                                + " in stage " + std::to_string( stage ) +
                                " is a " + piece->classname() ) );
+   }
+
+ // a piece in design mode decides the investment itself, with design
+ // Variable of its own paid in its Objective, and it is refused: the class
+ // tells it with a getter "<class>::has_design" writing 1 or 0, and a class
+ // that has no such name has no design mode
+ for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
+  for( Index stage = 0 ; stage < get_number_stages() ; ++stage ) {
+   const auto piece = get_piece( stage , i );
+   if( ! piece )
+    continue;
+   const auto has_design = Block::get_query_fs< double & >(
+                                       piece->classname() + "::has_design" );
+   double design = 0;
+   if( has_design )
+    std::invoke( * has_design , piece , design );
+   if( design )
+    throw( std::logic_error( "InvestmentFunction::resolve_asset_methods: "
+                             "the Block of sub-Block " + std::to_string( i )
+                             + " in stage " + std::to_string( stage ) +
+                             " is in design mode: convert the file with "
+                             "design_converter first" ) );
    }
 
  f_methods_resolved = true;
@@ -3479,7 +3506,8 @@ void InvestmentFunction::GlobalPool::store_combination_of_linearizations
   if( coeff < - AAccMlt ) {
    throw( std::invalid_argument
           ( "InvestmentFunction::GlobalPool::store_combination_of_"
-            "linearizations: invalid coefficient for linearization with name " +
+            "linearizations: invalid coefficient for linearization "
+            "with name " +
             std::to_string( linearization_name ) + ": " +
             std::to_string( coeff ) ) );
   }
@@ -3623,12 +3651,14 @@ void InvestmentFunction::GlobalPool::deserialize
   auto ncCI = group.getVar( "InvestmentFunction_ImpCoeffInd" );
   if( ncCI.isNull() )
    throw( std::logic_error( "InvestmentFunction::GlobalPool::deserialize: "
-                            "InvestmentFunction_ImpCoeffInd was not found." ) );
+                            "InvestmentFunction_ImpCoeffInd was not "
+                            "found." ) );
 
   auto ncCV = group.getVar( "InvestmentFunction_ImpCoeffVal" );
   if( ncCV.isNull() )
    throw( std::logic_error( "InvestmentFunction::GlobalPool::deserialize: "
-                            "InvestmentFunction_ImpCoeffVal was not found." ) );
+                            "InvestmentFunction_ImpCoeffVal was not "
+                            "found." ) );
 
   for( Index i = 0 ; i < important_linearization_lin_comb.size() ; ++i ) {
    ncCI.getVar( { i } , &( important_linearization_lin_comb[ i ].first ) );
@@ -3642,16 +3672,18 @@ void InvestmentFunction::GlobalPool::deserialize
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentFunction::GlobalPool::serialize( netCDF::NcGroup & group ) const {
+void InvestmentFunction::GlobalPool::serialize( netCDF::NcGroup & group )
+ const {
 
  const auto global_pool_size = size();
 
  if( global_pool_size ) {
 
-  auto size_dim = group.addDim( "InvestmentFunction_MaxGlob" , global_pool_size );
+  auto size_dim = group.addDim( "InvestmentFunction_MaxGlob" ,
+                                global_pool_size );
 
-  group.addVar( "InvestmentFunction_Constants" , netCDF::NcDouble() , size_dim ).
-   putVar( linearization_constants.data() );
+  group.addVar( "InvestmentFunction_Constants" , netCDF::NcDouble() ,
+                size_dim ).putVar( linearization_constants.data() );
 
   Index num_var = 0;
   Index coeff_dim_size = 0;
@@ -3687,13 +3719,15 @@ void InvestmentFunction::GlobalPool::serialize( netCDF::NcGroup & group ) const 
 
  if( ! important_linearization_lin_comb.empty() ) {
   auto linearization_dim = group.addDim
-   ( "InvestmentFunction_ImpCoeffNum" , important_linearization_lin_comb.size() );
+   ( "InvestmentFunction_ImpCoeffNum" ,
+     important_linearization_lin_comb.size() );
 
   auto linearization_coeff_index = group.addVar
    ( "InvestmentFunction_ImpCoeffInd" , netCDF::NcInt() , linearization_dim );
 
   auto linearization_coeff_value = group.addVar
-   ( "InvestmentFunction_ImpCoeffVal" , netCDF::NcDouble() , linearization_dim );
+   ( "InvestmentFunction_ImpCoeffVal" , netCDF::NcDouble() ,
+     linearization_dim );
 
   for( Index i = 0 ; i < important_linearization_lin_comb.size() ; ++i ) {
    linearization_coeff_index.putVar
@@ -3725,7 +3759,8 @@ void InvestmentFunction::GlobalPool::clone( const GlobalPool & global_pool ) {
   global_pool.important_linearization_lin_comb;
 
  for( Index i = 0 ; i < size() ; ++i )
-  linearization_coefficients[ i ] = global_pool.linearization_coefficients[ i ];
+  linearization_coefficients[ i ] =
+                               global_pool.linearization_coefficients[ i ];
 }  // end( InvestmentFunction::GlobalPool::clone )
 
 /*--------------------------------------------------------------------------*/

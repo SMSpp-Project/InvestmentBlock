@@ -312,10 +312,12 @@ public:
   * When the inner Block at the root makes the components, an
   * "ObjectiveSense" of size 0 is refused as well.
   *
-  * An inner Block in design mode, i.e., whose units and lines carry the
-  * design Variable of their investment, is refused: design_converter [see
-  * tools/design_converter.cpp] converts such a file into one of
-  * InvestmentBlock, each design an asset.
+  * An inner Block in design mode, i.e., one whose Blocks the investment is
+  * written into carry the design Variable of their investment, is refused:
+  * the class of those Blocks tells it by a getter "<class>::has_design" in
+  * the methods factory [see InvestmentFunction::resolve_asset_methods()],
+  * and design_converter [see tools/design_converter.cpp] converts such a
+  * file into one of InvestmentBlock, each design an asset.
   *
   * @param group A netCDF::NcGroup holding the required data. */
 

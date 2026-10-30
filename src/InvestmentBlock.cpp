@@ -134,27 +134,6 @@ variation_limits( const InvestmentBlock * IB )
  }
 
 /*--------------------------------------------------------------------------*/
-/*------------------- FILE-LOCAL: THE DESIGN MODE --------------------------*/
-/*--------------------------------------------------------------------------*/
-
-// An inner Block in design mode decides the investment itself, with the
-// design Variable of its units and lines, and pays it in its own Objective,
-// whereas under an InvestmentBlock the investment is the ColVariable of the
-// InvestmentBlock. Such an instance is refused: design_converter [see
-// tools/design_converter.cpp] converts its file into one of InvestmentBlock,
-// each design an asset. Telling the design mode is the only thing here that
-// knows the format of the classes of the assets.
-
-// the scalar variable name of g, def if g does not have it
-
-static double scalar( const netCDF::NcGroup & g , const std::string & name ,
-                      double def )
-{
- ::deserialize( g , def , name );
- return( def );
- }
-
-/*--------------------------------------------------------------------------*/
 
 // the "type" attribute of g, the empty string if it has none
 
@@ -164,29 +143,6 @@ static std::string type_of( const netCDF::NcGroup & g )
  if( auto att = g.getAtt( "type" ) ; ! att.isNull() )
   att.getValues( type );
  return( type );
- }
-
-/*--------------------------------------------------------------------------*/
-
-// whether the group g describes, or holds, a unit or a network in design
-// mode: a unit with an investment cost, a DesignNetworkBlock
-
-static bool has_design( const netCDF::NcGroup & g )
-{
- const auto type = type_of( g );
- if( type == "DesignNetworkBlock" )
-  return( true );
- if( ( type == "IntermittentUnitBlock" ) || ( type == "ThermalUnitBlock" ) ||
-     ( type == "NuclearUnitBlock" ) || ( type == "ConversionUnitBlock" ) )
-  return( scalar( g , "InvestmentCost" , 0 ) != 0 );
- if( type == "BatteryUnitBlock" )
-  return( ( scalar( g , "BatteryInvestmentCost" , 0 ) != 0 ) ||
-          ( scalar( g , "ConverterInvestmentCost" , 0 ) != 0 ) );
-
- for( const auto & sub : g.getGroups() )
-  if( has_design( sub.second ) )
-   return( true );
- return( false );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -562,12 +518,6 @@ InvestmentBlock::~InvestmentBlock()
 
 void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 {
- // an inner Block in design mode is refused [see has_design()]
- if( has_design( group ) )
-  throw( std::logic_error( "InvestmentBlock::deserialize: the inner Block "
-         "is in design mode, which is not read: convert the file with "
-         "design_converter first" ) );
-
  Index num_assets = 0;
 
  if( ! deserialize_dim( group , "NumAssets" , num_assets ) )

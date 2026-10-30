@@ -94,15 +94,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   component, written as `InnerSolution_<k>` groups with their number in
   `NumInnerSolutions`, or as `InnerSolution` with a single component
 
-- `InvestmentBlock::deserialize()` refuses an inner Block in design mode,
-  i.e., one whose units and lines carry the design Variable of their own
-  investment: a unit with an investment cost, a `BatteryUnitBlock` with
-  that of its battery or of its converter, a `DesignNetworkBlock`
+- an inner Block in design mode, i.e., one whose units and lines carry the
+  design Variable of their own investment, is refused when it is set: each
+  Block the investment is written into is asked by the getter
+  `<class>::has_design` of the methods factory (`UCBlock::has_design` for a
+  `UCBlock`), a class without it having no design mode; the error names
+  `design_converter`, the tool of tools/ that converts such files
 
-- `test/BSPar_osimp.txt`, the parameters of BundleSolver that a suite kept
-  outside the repository reads, `test/README.md`, which describes the
-  folder, and `test/.gitignore`; `test/CMakeLists.txt` includes
-  `test/local.cmake` where present
+- `test/README.md`, which describes the folder
 
 ### Changed
 
