@@ -598,7 +598,7 @@ class InvestmentFunction : public C05Function , public Block {
   *        (given by get_active_var( i )).
   *
   * @param asset_type a vector containing the type of each asset.
-
+  *
   * @param cost a vector containing the coefficients of the linear term of
   *        this function associated with investments. The correspondence
   *        between \p cost and \p x is positional, i.e., the coefficient of
@@ -614,10 +614,10 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param observer a pointer to the Observer of this InvestmentFunction.
   *
-  * As the && implies, \p x, \p block_indices, \p line_indices, \p cost, and
+  * As the && implies, \p x, \p asset_indices, \p asset_type, \p cost, and
   * \p disinvestment_cost become property of the InvestmentFunction object.
   *
-  * All inputs have a default (nullptr, {}, {}, {}, {}, and nullptr,
+  * All inputs have a default (nullptr, {}, {}, {}, {}, {}, and nullptr,
   * respectively) so that this can be used as the void constructor. */
 
  InvestmentFunction( Block * inner_block = nullptr , VarVector && x = {} ,
@@ -687,10 +687,10 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
  /// de-serialize taking the inner Block from outside
  /** As deserialize( group , issueMod ), except that the inner Block is NOT
-  * created out of the 'Block' sub-group: the given \p inner is used instead.
-  * Ownership of \p inner is taken, exactly as for an inner Block read from
-  * the file, unless this throws: \p inner is then handed back, still owned
-  * by the caller.
+  * created out of the "InnerBlock" sub-group: the given \p inner is used
+  * instead. Ownership of \p inner is taken, exactly as for an inner Block
+  * read from the file, unless this throws: \p inner is then handed back,
+  * still owned by the caller.
   *
   * This is what InvestmentBlock uses when it splits an inner Block [see
   * InvestmentBlock::split_inner()]: each piece is handed to the component
@@ -780,10 +780,10 @@ class InvestmentFunction : public C05Function , public Block {
   * keys, and their corresponding Configuration, are considered:
   *
   * - "BlockConfig": a pointer to a BlockConfig to be applied to the inner
-  *    Block of this BendersBFunction.
+  *    Block of this InvestmentFunction.
   *
   * - "BlockSolverConfig": a pointer to a BlockSolverConfig to be applied to
-  *    the inner Block of this BendersBFunction.
+  *    the inner Block of this InvestmentFunction.
   *
   * - "UnitBlockSolverConfig": a pointer to the BlockSolverConfig of the
   *    copy of a unit with no copies, which the derivative with respect to the
@@ -861,24 +861,12 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param x a n-vector of pointers to ColVariable representing the x variable
   *        vector in the definition of the function. Note that the order of
-  *        the variables in x is crucial, since the correspondence with the
-  *        indices of the assets and the linear coefficients (whether already
-  *        provided, or to be provided later, cf. discussion above) is
-  *        positional. The i-th linear coefficient of this InvestmentFunction
-  *        is the coefficient of the i-th active variable in the linear term
-  *        of this function. Moreover, by letting "NumUnitBlocks" and
-  *        "NumLines" the number of UnitBlocks and transmission lines to
-  *        invest:
-  *
-  *          - For each i in {0, ..., NumUnitBlocks-1}, the i-th active
-  *            Variable of this InvestmentFunction represents the investment
-  *            to be made on the i-th UnitBlock (among the UnitBlock that are
-  *            subject to investment).
-  *
-  *          - For each i in {0, ..., NumLines-1}, the (NumUnitBlocks + i)-th
-  *            active Variable of this InvestmentFunction represents the
-  *            investment to be made on the i-th line (among the lines that
-  *            are subject to investment).
+  *        the variables in x is crucial, since the i-th asset (whether
+  *        already provided, or to be provided later, cf. discussion above)
+  *        invests in the i-th active Variable, unless a mapping says
+  *        otherwise [see set_asset_variable_indices()], and its linear
+  *        coefficients are those of that Variable in the linear term of this
+  *        function.
   *
   *        After the call to this method, <tt>x[ 0 ] == get_active_var( 0 ),
   *        x[ 1 ] = get_active_var( 1 )</tt>, ...
@@ -1541,10 +1529,9 @@ class InvestmentFunction : public C05Function , public Block {
   * ones.
   *
   * This is needed when several InvestmentFunction share the same active
-  * variables (as the components of a disaggregated InvestmentBlock do) but
-  * each invests only in some of them, so there are more variables than assets
-  * and
-  * the position alone no longer says which variable an asset uses.
+  * variables (as the components of an InvestmentBlock may do) but each
+  * invests only in some of them, so there are more variables than assets and
+  * the position alone does not say which variable an asset uses.
   *
   * If \p avi is empty (the default) the mapping is the identity: asset i uses
   * the i-th active variable.
@@ -1561,14 +1548,8 @@ class InvestmentFunction : public C05Function , public Block {
                              " entries, but there are " +
                              std::to_string( v_asset_indices.size() ) +
                              " assets" ) );
-   for( const auto j : avi )
-    if( j >= v_x.size() )
-     throw( std::logic_error( "InvestmentFunction::"
-                              "set_asset_variable_indices: "
-                              "variable index " + std::to_string( j ) +
-                              " is out of range (there are " +
-                              std::to_string( v_x.size() ) +
-                              " active variables)" ) );
+   check_indices( avi , v_x.size() , "InvestmentFunction::"
+                  "set_asset_variable_indices: variable index" );
    if( f_reformulated_bounds )
     throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
                              "a non-identity mapping is not supported when "
@@ -1587,7 +1568,7 @@ class InvestmentFunction : public C05Function , public Block {
   * period t declares the design variable of period t-1 as its baseline.
   *
   * If \p bvi is empty (the default) the baseline of each asset is the
-  * InstalledQuantity datum, as in the single-period (legacy) case.
+  * InstalledQuantity datum, as in the single-period case.
   *
   * A variable baseline cannot be combined with the InstalledQuantity datum in
   * the same InvestmentFunction (ambiguous: which "before"?), nor with
@@ -1604,12 +1585,8 @@ class InvestmentFunction : public C05Function , public Block {
      "InvestmentFunction::set_asset_baseline_variable_indices: the baseline "
      "mapping has " + std::to_string( bvi.size() ) + " entries, but there are "
      + std::to_string( v_asset_indices.size() ) + " assets" ) );
-   for( const auto j : bvi )
-    if( j >= v_x.size() )
-     throw( std::logic_error(
-      "InvestmentFunction::set_asset_baseline_variable_indices: variable "
-      "index " + std::to_string( j ) + " is out of range (there are " +
-      std::to_string( v_x.size() ) + " active variables)" ) );
+   check_indices( bvi , v_x.size() , "InvestmentFunction::"
+                  "set_asset_baseline_variable_indices: variable index" );
    if( ! v_installed_quantity.empty() )
     throw( std::logic_error(
      "InvestmentFunction::set_asset_baseline_variable_indices: a variable "
@@ -1623,7 +1600,7 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
- /// returns the per-asset variable-baseline mapping (empty => legacy baseline)
+ /// returns the per-asset variable-baseline mapping (empty: InstalledQuantity)
 
  const std::vector< Index > & get_asset_baseline_variable_indices() const {
   return( v_asset_baseline_var_index );
@@ -1774,11 +1751,8 @@ class InvestmentFunction : public C05Function , public Block {
   * all the assets (or constraints). Any other size is refused.
   *
   * - The attributes "ReplicateBatteryUnits" and "ReplicateIntermittentUnits"
-  *   of earlier versions, which sized by replication every battery or every
-  *   intermittent unit, are no longer part of the format, nor is the
-  *   variable "AssetMethod", which said for each asset whether it was
-  *   replicated or resized: deserialize() refuses a group that carries any
-  *   of them, and how each asset is sized is said by "AssetSetter".
+  *   and the variable "AssetMethod" are refused: how each asset is sized is
+  *   said by "AssetSetter".
   *
   * - The dimension "NumAssets" containing the number of assets that are
   *   subject to investment. This dimension is optional. If it is not
@@ -1853,9 +1827,9 @@ class InvestmentFunction : public C05Function , public Block {
   *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
   *   that LowerBound[i] = LowerBound[0] for all i in {0, ..., NumAssets -
   *   1}. The i-th element of this vector provides the lower bound on the i-th
-  *   ColVariable of this InvestmentBlock. This variable is optional. If it is
-  *   not provided, then we assume that LowerBound[i] = 0 for all i in {0,
-  *   ..., NumAssets - 1}.
+  *   active Variable of this InvestmentFunction. This variable is optional.
+  *   If it is not provided, then LowerBound[i] = \f$ -\infty \f$ for all i
+  *   in {0, ..., NumAssets - 1} [see get_var_lower_bound()].
   *
   * - The variable "InstalledQuantity", of type netCDF::NcDouble(), which is
   *   either a scalar or indexed over "NumAssets". If it is a scalar, then we
@@ -2285,6 +2259,7 @@ class InvestmentFunction : public C05Function , public Block {
  ///< true if a "UnitBlockSolverConfig" was given to the UCBlock
 
  bool f_blocks_are_updated = false;
+ ///< indicates whether the sub-Blocks are updated
 
  SDDPBlock * f_simulated_sddp_block = nullptr;
  ///< the copy of the SDDPBlock a scenario has just been simulated on
@@ -2296,7 +2271,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  CDASolver * f_simulated_solver = nullptr;
  ///< the Solver that has simulated f_simulated_sddp_block
- ///< indicates whether the sub-Blocks are updated
 
  int f_solver_status = 0;
  ///< the most recent status returned by the Solver of the sub-Block
@@ -2387,7 +2361,7 @@ class InvestmentFunction : public C05Function , public Block {
  std::vector< Index > v_asset_baseline_var_index;
  ///< maps each asset to the active variable providing its baseline
  /**< When empty (the default) the baseline of each asset is the
-  * InstalledQuantity datum (single-period, legacy). When set,
+  * InstalledQuantity datum (single-period). When set,
   * v_asset_baseline_var_index[ i ] is the index (among the active variables)
   * of the variable whose value is asset i's baseline -- the multi-period
   * transition: the component of period t reads the design of period t-1.
@@ -2396,7 +2370,7 @@ class InvestmentFunction : public C05Function , public Block {
  /// inner Block provided from outside for the next deserialize(), if any
  /** Set (and reset) by deserialize( group , inner , issueMod ) only: while
   * it is non-null, deserialize() takes this as the inner Block instead of
-  * creating one out of the 'Block' sub-group. */
+  * creating one out of the "InnerBlock" sub-group. */
 
  Block * f_external_inner_block = nullptr;
 
@@ -2851,6 +2825,15 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
+ /// throws if an index in \p indices is not that of an active Variable
+ /** Throws std::logic_error if an index in \p indices is not smaller than
+  * the number \p n of active Variable; the message is \p what followed by
+  * the index and by why it is out of range. */
+
+ static void check_indices( const std::vector< Index > & indices , Index n ,
+                            const std::string & what );
+
+/*--------------------------------------------------------------------------*/
  /// resolves, for each asset, the methods that write and read it
  /** Resolves out of the methods factory the two methods that each asset
   * names [see "AssetSetter" in serialize()], and puts together the assets
@@ -2876,8 +2859,9 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// writes the current values of the x variables into the inner Block
- /** Calls the setter of each group of assets [see AssetGroup] on each UCBlock
-  * of the inner Block, with the values of the x variables of its assets. */
+ /** Calls the setter of each group of assets [see AssetGroup] on each piece
+  * of the inner Block [see get_piece()], with the values of the x variables
+  * of its assets. */
 
  void update_blocks( void );
 
@@ -3190,12 +3174,28 @@ class InvestmentFunction : public C05Function , public Block {
  void build_solver_map( void );
 
 /*--------------------------------------------------------------------------*/
+ /// compute the InvestmentFunction with an inner Block made of pieces
+ /** The path of every inner Block with pieces [see set_pieces()], whatever
+  * its class: the investment is written into each piece, the inner Block is
+  * solved by its Solver, and value and linearization are read off it. */
 
- int compute_UCBlock( bool changedvars , bool owned );
+ int compute_pieces( bool changedvars );
+
+/*--------------------------------------------------------------------------*/
+ /// reads the certificate of infeasibility of the inner Block, if any
+ /** With the inner Block proved infeasible by \p solver, reads the vertical
+  * linearization out of its unbounded dual direction, if it has one and a
+  * linearization is asked for, and sets f_has_farkas_linearization if the
+  * certificate is positive at the current point [see
+  * compute_farkas_value()]. An error while reading is printed, and leaves
+  * no linearization; a direction with the Objective in it, out of which no
+  * certificate can be read, makes this throw. */
+
+ void read_farkas_linearization( CDASolver * solver );
 
 /*--------------------------------------------------------------------------*/
 
- int compute_SDDPBlock( bool changedvars , bool owned );
+ int compute_SDDPBlock( bool changedvars );
 
 /*--------------------------------------------------------------------------*/
  /// compute the InvestmentFunction in the multi-replica SDDPBlock path
@@ -3237,16 +3237,15 @@ class InvestmentFunction : public C05Function , public Block {
   * max( c+ d , -c- d )  and writes its subgradient into \p linearization.
   * The baseline is the value of the baseline variable when one is declared
   * (multi-period, see set_asset_baseline_variable_indices()), the
-  * InstalledQuantity datum otherwise (single-period, legacy).
+  * InstalledQuantity datum otherwise (single-period).
   *
   * With a variable baseline the cost is a function of BOTH variables, so the
   * subgradient has TWO entries: ( +c+ , -c+ ) for d > 0 and ( -c- , +c- )
-  * for d < 0, on (asset variable, baseline variable) respectively. Omitting
-  * the mirrored entry would be a SILENT bug: the cut looks valid but is not
-  * a subgradient. At the kink d == 0 the else branch yields ( -c- , +c- ),
-  * inside the subdifferential [ -c- , c+ ], which is not empty when
-  * c+ + c- >= 0, the condition for the cost to be convex [see
-  * is_convex()]. */
+  * for d < 0, on (asset variable, baseline variable) respectively; without
+  * the mirrored entry the cut would look valid without being a subgradient.
+  * At the kink d == 0 the else branch yields ( -c- , +c- ), inside the
+  * subdifferential [ -c- , c+ ], which is not empty when c+ + c- >= 0, the
+  * condition for the cost to be convex [see is_convex()]. */
 
  void add_linear_term( double & value ,
                        std::vector< double > & linearization ) const
@@ -3283,14 +3282,10 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
  /// dense vertical linearization (gradient of the violated constraint)
  /** The single home of the vertical (feasibility) cut, shared by
-  * has_linearization() and the four get_linearization_coefficients()
-  * flavours. Per-asset semantics of the implicit constraints: column j of
-  * v_A belongs to ASSET j (as the netCDF format declares,
-  * NumConstraints x NumAssets) and lands on that asset's variable
-  * asset_var( j ); every other entry is zero. Under the legacy identity
-  * mapping this is bit-identical to the historical per-variable reading --
-  * which additionally read out of the row's bounds when the actives
-  * outnumbered the assets. */
+  * has_linearization() and current_linearization(). Per-asset semantics of
+  * the implicit constraints: column j of v_A belongs to ASSET j (as the
+  * netCDF format declares, NumConstraints x NumAssets) and lands on that
+  * asset's variable asset_var( j ); every other entry is zero. */
 
  void vertical_linearization( std::vector< double > & vec ) const {
   assert( f_violated_constraint.first < v_A.size() );
@@ -3299,6 +3294,22 @@ class InvestmentFunction : public C05Function , public Block {
   vec.assign( v_x.size() , 0.0 );
   for( Index j = 0 ; j < row.size() ; ++j )
    vec[ asset_var( j ) ] += sign * row[ j ];
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// the coefficients of the linearization just computed
+ /** v_linearization for a diagonal linearization, or for the vertical one
+  * out of the certificate of infeasibility; otherwise the vertical one of
+  * the violated linear constraint, written into \p scratch [see
+  * vertical_linearization()]. Shared by the four
+  * get_linearization_coefficients() flavours. */
+
+ const std::vector< double > & current_linearization(
+                                    std::vector< double > & scratch ) const {
+  if( f_diagonal_linearization_required || f_has_farkas_linearization )
+   return( v_linearization );
+  vertical_linearization( scratch );
+  return( scratch );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -3317,10 +3328,11 @@ class InvestmentFunction : public C05Function , public Block {
                             std::vector< double > & linearization );
 
 /*--------------------------------------------------------------------------*/
- /// adds the derivatives read on one UCBlock to \p linearization
- /** Calls the getter of each group of assets [see AssetGroup] on the UCBlock
-  * of the given \p stage in the given sub-Block, and adds what it answers to
-  * the coefficients of the x variables of the assets of the group.
+ /// adds the derivatives read on one piece to \p linearization
+ /** Calls the getter of each group of assets [see AssetGroup] on the piece
+  * of the given \p stage in the given sub-Block [see get_piece()], and adds
+  * what it answers to the coefficients of the x variables of the assets of
+  * the group.
   *
   * @param direction Whether the duals are those of an unbounded dual
   *        direction [see update_linearization()]: then a group whose getter
@@ -3329,6 +3341,22 @@ class InvestmentFunction : public C05Function , public Block {
  void add_asset_linearization( Index stage , Index sub_block_index ,
                                std::vector< double > & linearization ,
                                bool direction = false );
+
+/*--------------------------------------------------------------------------*/
+ /// issues a C05FunctionMod about linearizations of the global pool
+ /** Issues, if and how \p issueMod says [see Observer::make_par()], a
+  * C05FunctionMod of the given \p type about the linearizations of the
+  * global pool whose names are in \p which. */
+
+ void issue_pool_mod( int type , Subset && which , ModParam issueMod );
+
+/*--------------------------------------------------------------------------*/
+ /// issues the C05FunctionMod of a global pool replaced by put_State()
+ /** Tells the Observer, if any, that the linearizations of the global pool
+  * have all been removed, unless \p was_empty, and that those now in it
+  * have been added. */
+
+ void issue_State_mods( bool was_empty );
 
 /*--------------------------------------------------------------------------*/
 
@@ -3347,7 +3375,7 @@ class InvestmentFunction : public C05Function , public Block {
  /// global pool of linearizations
  GlobalPool global_pool;
 
- /// mame of the netCDF sub-group containing the inner Block
+ /// name of the netCDF sub-group containing the inner Block
  inline static const std::string BLOCK_NAME = "InnerBlock";
 
 /*--------------------------------------------------------------------------*/

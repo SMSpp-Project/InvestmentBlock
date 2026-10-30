@@ -3,27 +3,9 @@
 /*--------------------------------------------------------------------------*/
 /** @file
  * Header file for the InvestmentBlock class, which derives from Block and has
- * the following characteristics. It has a vector of ColVariable, each of
- * which represents the investment in a particular asset. The number of
- * ColVariable is thus the number of assets that are subject to
- * investment. The Objective of the InvestmentBlock is an FRealObjective whose
- * Function is a InvestmentFunction. The active Variable of this
- * InvestmentFunction are the ones defined in this InvestmentBlock.
- *
- * The InvestmentBlock can have explicit box constraints and "implicit" linear
- * constraints on its set of ColVariable. The box constraints, if present, are
- * in the form of a vector of BoxConstraint, whose size is the number of
- * assets subject to investment and its i-th element is the box constraint
- * associated with the i-th (asset and) ColVariable of this InvestmentBlock.
- *
- * We refer to the linear constraints as "implicit" because they are not
- * represented by Constraint. These linear constraints are handled by the
- * InvestmentFunction (which is part of the Objective of the
- * InvestmentBlock). They help define the domain of the InvestmentFunction. An
- * investment that does not satisfy all of these linear constraints has an
- * InvestmentFunction value which is +infinity (if the sense of the Objective
- * of the InvestmentBlock is minimization) or -infinity (if the sense of the
- * Objective of the InvestmentBlock is maximization).
+ * a vector of ColVariable, the investment in each of a set of assets, whose
+ * cost is given by InvestmentFunction [see the comments to the class], and
+ * for the InvestmentBlockSolution class, the Solution of an InvestmentBlock.
  *
  * \author Rafael Durbano Lobato \n
  *         Dipartimento di Informatica \n
@@ -74,19 +56,26 @@ namespace SMSpp_di_unipi_it
 /*--------------------------------------------------------------------------*/
 /*--------------------------- GENERAL NOTES --------------------------------*/
 /*--------------------------------------------------------------------------*/
-/// a Block whose FRealObjective has a InvestmentFunction
+/// a Block whose investment is priced by InvestmentFunction
 /** An InvestmentBlock is a Block with a vector of ColVariable, each of which
  * represents the investment in a particular asset, and therefore the number
- * of ColVariable is the number of assets that are subject to investment. Its
- * Objective is an FRealObjective whose Function is an InvestmentFunction, and
- * the active Variable of this InvestmentFunction are the ones defined in this
- * InvestmentBlock.
+ * of ColVariable is the number of assets that are subject to investment. The
+ * cost of the investment is given by InvestmentFunction whose active
+ * Variable are ColVariable of this InvestmentBlock: either a single one, the
+ * Function of the FRealObjective of this InvestmentBlock, active in all the
+ * ColVariable, or one for each component [see add_component()], the Function
+ * of the FRealObjective of a sub-Block of its own, weighted by the weight of
+ * the Objective of its inner Block and active in all the ColVariable or in
+ * those of its assets and of their baselines.
  *
- * An InvestmentBlock can have explicit box constraints and "implicit" linear
- * constraints on its set of ColVariable. If present, the box constraints are
- * in the form of a vector of BoxConstraint, whose size is the number of
- * assets subject to investment and whose i-th element is the box constraint
- * associated with the i-th (asset and) ColVariable of this InvestmentBlock.
+ * An InvestmentBlock can have explicit constraints and "implicit" linear
+ * constraints on its set of ColVariable. The explicit ones are the box
+ * constraints, if present, in the form of a vector of BoxConstraint, whose
+ * size is the number of assets subject to investment and whose i-th element
+ * is the box constraint associated with the i-th (asset and) ColVariable of
+ * this InvestmentBlock, and the limits that the components give on the
+ * change of a ColVariable over its baseline, one FRowConstraint for each
+ * pair of ColVariable and baseline [see generate_abstract_constraints()].
  *
  * We refer to the linear constraints as "implicit" since they are not
  * represented by Constraint; indeed, they are handled by the
@@ -125,12 +114,11 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
- /// adds one component to the disaggregated (1:K) structure
+ /// adds one component to this InvestmentBlock
  /** Wraps \p f in a bare AbstractBlock sub-Block holding an FRealObjective
   * over it (one BundleSolver component per sub-Block). Call it once per
-  * component to assemble the disaggregated (1:K) structure, be it
-  * programmatically or from deserialize() (one call per Component_<k>
-  * group).
+  * component, be it programmatically or from deserialize() (one call per
+  * Component_<k> group, or per piece of a split inner Block).
   *
   * If \p f has no active Variable yet, it is bound to ALL the design
   * ColVariable of this InvestmentBlock, in their natural order (the common
@@ -153,9 +141,9 @@ public:
  /** As add_component( f ), but wires the active Variable of \p f to
   * the given \p actives subset (by index, in the given order) of the design
   * ColVariable of this InvestmentBlock. This is the per-period binding of
-  * the multi-period (1:K) scheme: the component of period t declares only
-  * its own design block plus the baseline variables of period t-1, and the
-  * bundle master goes from dense to block-banded.
+  * the multi-period scheme: the component of period t declares only its own
+  * design block plus the baseline variables of period t-1, and the bundle
+  * master goes from dense to block-banded.
   *
   * The component's AssetVarIndex / AssetBaselineVarIndex mappings must then
   * use LOCAL positions, i.e., indices into \p actives. NOTE, BundleSolver rule
@@ -163,54 +151,14 @@ public:
   * increasing union order — with the per-period chain layout, passing
   * \p actives sorted by increasing design index is sufficient.
   *
-  * @param f       the InvestmentFunction of the component (ownership taken);
-  *                it must not have active Variable yet.
+  * @param f       the InvestmentFunction of the component; ownership is
+  *                taken, as by add_component( f ); it must not have active
+  *                Variable yet.
   *
   * @param actives the indices of the design Variable this component sees. */
 
  void add_component( InvestmentFunction * f ,
-                     const std::vector< Index > & actives ) {
-  if( ! f )
-   throw( std::invalid_argument( "InvestmentBlock::add_component: "
-                                 "null component" ) );
-  if( f->get_num_active_var() ) {
-   delete f;
-   throw( std::logic_error( "InvestmentBlock::add_component: the component "
-                            "already has active Variable" ) );
-   }
-  if( actives.empty() ) {
-   delete f;
-   throw( std::invalid_argument( "InvestmentBlock::add_component: empty "
-                                 "active subset (use the one-parameter "
-                                 "overload for the dense wiring)" ) );
-   }
-  std::vector< ColVariable * > p;
-  p.reserve( actives.size() );
-  for( Index i = 0 ; i < actives.size() ; ++i ) {
-   if( actives[ i ] >= v_variables.size() ) {
-    delete f;
-    throw( std::invalid_argument( "InvestmentBlock::add_component: active "
-                                  "index " + std::to_string( actives[ i ] ) +
-                                  " out of range" ) );
-    }
-   if( i && ( actives[ i ] <= actives[ i - 1 ] ) ) {
-    delete f;
-    throw( std::invalid_argument( "InvestmentBlock::add_component: the "
-                                  "active subset must be strictly "
-                                  "increasing (BundleSolver union-order "
-                                  "rule, and no duplicates)" ) );
-    }
-   p.push_back( & v_variables[ actives[ i ] ] );
-   }
-  try {
-   f->set_variables( std::move( p ) );
-   }
-  catch( ... ) {
-   delete f;
-   throw;
-   }
-  add_component( f );
-  }
+                     const std::vector< Index > & actives );
 
 /*--------------------------------------------------------------------------*/
  /// destructor
@@ -269,10 +217,10 @@ public:
   * - The dimension "ScenarioDecomposition", which indicates whether an
   *   inner Block made of Blocks of the class of the methods of its assets,
   *   of the root or of a component, is split into one component per such
-  *   Block [see split_inner()]. If it is zero, then it is left whole. If
-  *   it is one, then it is separated. Any
-  *   other value is an error. This dimension is optional. If it is not
-  *   provided, then it is assumed to be one.
+  *   Block [see split_inner()]. If it is zero, then it is left whole. If it
+  *   is one, then it is separated. Any other value is an error. This
+  *   dimension is optional. If it is not provided, then it is assumed to be
+  *   one.
   *
   * - A description of the InvestmentFunction.
   *
@@ -326,10 +274,10 @@ public:
   *   the weight of the Objective of its inner Block, the attribute
   *   "ObjectiveWeight" of its group "InnerBlock" [see Block::deserialize()].
   *   In each of them the optional variables "AssetVarIndex" and
-  *   "AssetBaselineVarIndex",
-  *   scalar or indexed over its "NumAssets", give for each asset the index,
-  *   among the ColVariable of this InvestmentBlock, of the one that sizes
-  *   the asset and of the one that is its baseline [see
+  *   "AssetBaselineVarIndex", scalar or indexed over its "NumAssets", give
+  *   for each asset the index, among the ColVariable of this
+  *   InvestmentBlock, of the one that sizes the asset and of the one that is
+  *   its baseline [see
   *   InvestmentFunction::set_asset_variable_indices() and
   *   InvestmentFunction::set_asset_baseline_variable_indices()]; with no
   *   "AssetVarIndex" the i-th asset is sized by the i-th ColVariable. The
@@ -341,9 +289,8 @@ public:
   *
   * - At the root "NumAssets", "LowerBound", "UpperBound", "Integer" and
   *   "ScenarioDecomposition", as above. "NumConstraints", the variables
-  *   "Constraints_*" and an
-  *   "ObjectiveSense" of size 0 are refused: each component holds its own
-  *   linear constraints and is a minimization.
+  *   "Constraints_*" and an "ObjectiveSense" of size 0 are refused: each
+  *   component holds its own linear constraints and is a minimization.
   *
   * The inner Block of a component, or the one at the root, can make several
   * components:
@@ -408,16 +355,31 @@ public:
 /*--------------------------------------------------------------------------*/
  /// generate the static constraint of the InvestmentBlock
  /** This function generates the abstract constraints of the InvestmentBlock,
-  * which consists in lower and upper bounds on the values of the variables.
+  * which consist in lower and upper bounds on the values of the variables
+  * and in the limits that the components give on the change of a variable
+  * over its baseline.
   *
   * If no lower bound has been provided, then \f$ -\infty \f$ is the lower
   * bound for each variable. If no upper bound has been provided, then
   * \f$ +\infty \f$ is the upper bound for each variable.
   *
   * If lower and upper bounds have not been provided, then the variables are
-  * free and no constraint is generated. Otherwise, for each variable
+  * free and no BoxConstraint is generated. Otherwise, for each variable
   * \f$ x_i \f$, with lower and upper bounds \f$ l_i \f$ and \f$ u_i \f$, the
   * BoxConstraint \f$ l_i \le x_i \le u_i \f$ is generated.
+  *
+  * Then, for each pair of a variable and its baseline that a component
+  * limits [see InvestmentFunction::set_variation_limits()], one
+  * FRowConstraint -MaxDisinvestment <= x - b <= MaxInvestment is generated,
+  * the baseline b being another variable or the InstalledQuantity of the
+  * asset [see add_variation_constraints()].
+  *
+  * The constraints are generated once, and the InvestmentBlock is marked as
+  * having generated them only if there is at least one of them: until then
+  * the bounds can still be set and the components added [see
+  * set_variable_bounds() and add_component()]. Every call, first of all,
+  * refuses a split inner Block whose pieces something ties [see
+  * check_parked()].
   *
   * The given Configuration \p stcc or the Configuration for the static
   * constraints present in the BlockConfig of this InvestmentBlock can be used
@@ -545,15 +507,9 @@ public:
 
 /*--------------------------------------------------------------------------*/
  /// returns the sense of the Objective of this InvestmentBlock
- /** With the inner Block at the root the Objective is this InvestmentBlock's
-  * own, and the sense is the one of that Objective, or the one the file says
-  * [see deserialize()] before the Objective is generated. With components
-  * [see add_component()], even one, each of them holds its own Objective, a
-  * minimization, and this InvestmentBlock holds none: the default of Block
-  * [see Block::get_objective_sense()] would answer Objective::eUndef, and a
-  * Solver reporting the value of this InvestmentBlock by its sense [see
-  * Solver::get_var_value()] would report the lower bound of the minimization
-  * in place of the value of the solution it writes. */
+ /** The sense of its Objective, or the one the file says before it is
+  * generated [see deserialize()]; with components [see add_component()],
+  * which are minimized, Objective::eMin, though it holds no Objective. */
 
  int get_objective_sense( void ) const override {
   if( is_disaggregated() )
@@ -619,11 +575,6 @@ public:
   }
 
 /*--------------------------------------------------------------------------*/
- /// returns, for each Variable, nonzero if it is integer; empty if none is
-
- const std::vector< int > & get_integer() const { return v_integer; }
-
-/*--------------------------------------------------------------------------*/
  /// returns the box constraints on the Variable
 
  const std::vector< BoxConstraint > & get_constraints() const {
@@ -652,29 +603,9 @@ public:
 
  template< class T >
  void set_variable_values( const std::vector< T > & values ) {
-  assert( ( values.size() >= 0 ) &&
-          ( static_cast<decltype( v_variables.size() )>( values.size() ) ==
-            v_variables.size() ) );
+  assert( values.size() == v_variables.size() );
   for( Index i = 0 ; i < v_variables.size() ; ++i )
    v_variables[ i ].set_value( values[ i ] );
-  }
-
-/*--------------------------------------------------------------------------*/
- /// sets the values of the Variable of this InvestmentBlock
- /** This function sets the values of the Variable defined in this
-  * InvestmentBlock according to the given \p values. The size of the \p
-  * values array parameter must be at least the number of Variable defined in
-  * this InvestmentBlock, so that the value of the i-th Variable will be
-  * values( i ), for each i in {0, ..., get_number_variables() - 1}.
-  *
-  * @param values The Eigen::ArrayXd containing the values of the Variable. */
-
- void set_variable_values( const Eigen::ArrayXd & values ) {
-  assert( ( values.size() >= 0 ) &&
-          ( static_cast<decltype( v_variables.size() )>( values.size() ) ==
-            v_variables.size() ) );
-  for( Index i = 0 ; i < v_variables.size() ; ++i )
-   v_variables[ i ].set_value( values( i ) );
   }
 
 /*--------------------------------------------------------------------------*/
@@ -730,23 +661,6 @@ public:
   v_variables[ i ].is_fixed( fix , issueMod );
   }
 
-/*--------------------------------------------------------------------------*/
- /// sets the values of the Variable of this InvestmentBlock
- /** This function sets the values of the Variable defined in this
-  * InvestmentBlock according to the values given by the iterator \p it. The
-  * number of successors (before the past-the-end iterator) of the given
-  * iterator must be at least get_number_variables() - 1, so that the value of
-  * the i-th Variable will be given by std::next( it , i ), for each i in {0,
-  * ..., get_number_variables() - 1}.
-  *
-  * @param it The iterator to the value of the first Variable. */
-
- template< class Iterator >
- void set_variable_values( Iterator it ) {
-  for( Index i = 0 ; i < v_variables.size() ; ++i , std::advance( it , 1 ) )
-   v_variables[ i ].set_value( * it );
-  }
-
 /** @} ---------------------------------------------------------------------*/
 /*---------------- Methods for checking the InvestmentBlock ----------------*/
 /*--------------------------------------------------------------------------*/
@@ -771,32 +685,36 @@ public:
   *
   *   - Otherwise, the tolerance is considered to be 1e-8 by default.
   *
-  * The only constraints in an InvestmentBlock are lower and upper bounds on
-  * the variables of the InvestmentBlock. In the abstract representation,
-  * these constraints are represented by a set of BoxConstraint (one
-  * BoxConstraint for each ColVariable).
+  * The constraints of an InvestmentBlock are the lower and upper bounds on
+  * its variables and the limits that the components give on the change of
+  * a variable over its baseline. In the abstract representation, they are
+  * represented by a set of BoxConstraint (one BoxConstraint for each
+  * ColVariable) and by one FRowConstraint for each limited pair of a
+  * variable and its baseline [see generate_abstract_constraints()].
   *
   * The feasibility of the current solution can be determined in two ways: by
-  * checking whether each BoxConstraint is feasible or directly checking
-  * whether the values of the ColVariable satisfy the bound constraints.
+  * checking whether each of these Constraint is feasible or directly
+  * checking whether the values of the ColVariable satisfy the bounds and the
+  * limits.
   *
   * If \p useabstract is \c true and the abstract constraints of this
   * InvestmentBlock have been generated, the feasibility is determined by
-  * checking the set of BoxConstraint. In this case, the solution is
-  * considered feasible if and only if the absolute violation of every
-  * non-relaxed BoxConstraint is not greater than the given tolerance. See
-  * BoxConstraint::abs_viol() for details about the absolute violation of a
-  * BoxConstraint.
+  * checking these Constraint. In this case, the solution is considered
+  * feasible if and only if the absolute violation of every non-relaxed one
+  * is not greater than the given tolerance. See RowConstraint::abs_viol()
+  * for details about the absolute violation of a RowConstraint.
   *
   * Otherwise, the solution is considered to be feasible if and only if, for
   * each ColVariable i, \f$ l_i - \epsilon \le x_i \le u_i + \epsilon \f$,
   * where \f$ x_i \f$ is the value of the i-th ColVariable, \f$ l_i \f$ and
   * \f$ u_i \f$ are the lower and upper bounds on that variable, and
-  * \f$ \epsilon \f$ is the tolerance.
+  * \f$ \epsilon \f$ is the tolerance, and if each limited change
+  * \f$ x_i - b_i \f$ over the baseline \f$ b_i \f$ is within its limits
+  * widened by \f$ \epsilon \f$.
   *
-  * Notice that, if none of the BoxConstraint is relaxed, these two checks are
+  * Notice that, if none of these Constraint is relaxed, these two checks are
   * identical. However, if some bounds are violated and the corresponding
-  * BoxConstraint (if generated) are relaxed, then this function will return
+  * Constraint (if generated) are relaxed, then this function will return
   * \c true if \p useabstract is \c true, and \c false if \p useabstract is
   * \c false.
   *
@@ -827,29 +745,29 @@ protected:
 	 );
   }
 
- /// states that the Variable of the UnitBlock have been generated
+ /// states that the Variable of the InvestmentBlock have been generated
  void set_variables_generated() { AR |= HasVar; }
 
- /// states that the Constraint of the UnitBlock have been generated
+ /// states that the Constraint of the InvestmentBlock have been generated
  void set_constraints_generated() { AR |= HasCst; }
 
- /// states that the Objective of the UnitBlock has been generated
+ /// states that the Objective of the InvestmentBlock has been generated
  void set_objective_generated() { AR |= HasObj; }
 
- /// indicates whether the Variable of the UnitBlock have been generated
+ /// indicates whether the Variable of the InvestmentBlock have been generated
  bool variables_generated() const { return( AR & HasVar ); }
 
- /// indicates whether the Constraint of the UnitBlock have been generated
+ /// indicates whether the Constraint of the InvestmentBlock have been
+ /// generated
  bool constraints_generated() const { return( AR & HasCst ); }
 
- /// indicates whether the Objective of the UnitBlock has been generated
+ /// indicates whether the Objective of the InvestmentBlock has been generated
  bool objective_generated() const { return( AR & HasObj ); }
 
- /// indicates whether this is the disaggregated (1:K) path
- /** True iff the Block was built as a disaggregated sum of K component
-  * sub-Blocks (each holding an InvestmentFunction with its own weight);
-  * false on the legacy single-component path (where the InvestmentFunction
-  * lives in this Block's own objective and there are no sub-Blocks). The
+ /// indicates whether this InvestmentBlock is made of components
+ /** True iff the Block was built as a sum of K component sub-Blocks (each
+  * holding an InvestmentFunction); false with a single component, whose
+  * InvestmentFunction lives in this Block's own Objective. The
   * structure itself is the discriminator: components exist iff nested
   * Blocks exist (sub-Blocks are only ever created by add_component()). */
  bool is_disaggregated() const { return( get_number_nested_Blocks() > 0 ); }
@@ -902,17 +820,26 @@ protected:
 /*-------------------------- PRIVATE METHODS -------------------------------*/
 /*--------------------------------------------------------------------------*/
 
+ /// the pointers to the design Variable of the given \p indices
+ /** Returns the pointers to v_variables[ i ] for each i in \p indices, in
+  * their order, or to all the design Variable if \p indices is empty. */
+
+ std::vector< ColVariable * > design_vars(
+                                   const std::vector< Index > & indices = {} );
+
+/*--------------------------------------------------------------------------*/
  /// wires a just-deserialized component to its subset of design Variable
  /** Derives the active set of \p f from its (still GLOBAL, as the file
   * speaks) mappings -- U = sorted union of the asset variables and of the
   * baseline variables -- wires the actives to v_variables[ U ] and
   * translates the mappings to LOCAL positions in that subset. A component
   * whose union is the whole design array keeps the dense wiring, and one
-  * with no assets is left alone (add_component() then wires all of them),
-  * both byte-identically to the historical behaviour.
+  * with no assets is left alone (add_component() then wires all of them).
   *
   * @param f the component, already deserialized;
-  * @param k its index, for the error messages. */
+  *
+  * @param k the index of its group, Inf< Index >() for the root, for the
+  *        error messages. */
 
  void wire_component_actives( InvestmentFunction * f , Index k );
 
@@ -920,8 +847,7 @@ protected:
  /// adds the bounds of the design Variable to the static Constraint
  /** Makes v_constraints out of LowerBound and UpperBound, reformulated as
   * the BlockConfig, or \p stcc, asks [see generate_abstract_constraints()],
-  * and adds them to the static Constraint; does nothing if there is no
-  * bound. */
+  * and adds them to the static Constraint; does nothing without bounds. */
 
  void add_bound_constraints( Configuration * stcc );
 
@@ -939,7 +865,7 @@ protected:
 
 /*--------------------------------------------------------------------------*/
 
- /// splits an inner Block into components, one per unit
+ /// splits an inner Block into components, one per piece
  /** If the "InnerBlock" of \p grp is made of Blocks of the class of the
   * methods of its assets [see InvestmentFunction::find_pieces()], other than
   * itself, builds it and makes each of those pieces the inner Block of an
@@ -948,22 +874,20 @@ protected:
   * up to this InvestmentBlock [see Block::get_objective_weight()], which
   * becomes the weight of the piece. Nothing is generated here, and what ties
   * the pieces is seen only once they are: a split inner Block whose pieces
-  * something ties
-  * is refused then [see check_parked()]. The inner Block is kept,
-  * believing it still has its pieces, until ~InvestmentBlock() gives them
-  * back to it to delete them, and serialize() writes it in place of its
+  * something ties is refused then [see check_parked()]. The inner Block is
+  * kept, believing it still has its pieces, until ~InvestmentBlock() gives
+  * them back to it to delete them, and serialize() writes it in place of its
   * components. An inner Block of that class, an SDDPBlock, or one that is
   * not made of such Blocks is not split, and false is returned, adding
   * nothing; so it is if the file asks so, with a ScenarioDecomposition of
   * zero [see deserialize()].
   *
   * @param grp the component (or root) group that may hold it;
-  * @param k its index, for the messages and the wiring of the actives;
-  * @param num_components incremented by the number of pieces added;
-  * @param all_unit_weights cleared if any added weight differs from 1.0. */
+  *
+  * @param k the index of the component group, Inf< Index >() for the root,
+  *        for the messages. */
 
- bool split_inner( const netCDF::NcGroup & grp , Index k ,
-                   Index & num_components , bool & all_unit_weights );
+ bool split_inner( const netCDF::NcGroup & grp , Index k );
 
 /*--------------------------------------------------------------------------*/
  /// refuses a split inner Block whose pieces something ties
@@ -1001,7 +925,7 @@ protected:
  struct Parked {
   Block * root;                    ///< deleted, with its pieces, at the end
   Index first;                     ///< the component of its first piece
-  Index k;                         ///< its group, for the messages
+  Index k;                         ///< its group [see split_inner()]
   std::vector< Block * > pieces;   ///< its pieces, one per component
   std::vector< Block * > fathers;  ///< the father of each piece, to go back to
   bool checked = false;            ///< whether check_parked() found it free
@@ -1046,7 +970,7 @@ class InvestmentBlockSolution : public Solution
 
  public:
 
-/*------------------------------- FRIENDS ----------------------------------*/
+/*-------------------------------- TYPES -----------------------------------*/
 
  using Index = Block::Index;  // "import" Index
  
@@ -1123,7 +1047,7 @@ class InvestmentBlockSolution : public Solution
  std::vector< double > v_design;  ///< the design variables
 
  std::vector< Solution * > v_inner_Solutions;
- ///< the :Solution(s) of the inner Block(s): 1 (legacy) or K (disaggregated)
+ ///< the :Solution(s) of the inner Block(s), one per component
 
  bool f_inner_wanted = false;  ///< whether the inner :Solution(s) must be read
 
