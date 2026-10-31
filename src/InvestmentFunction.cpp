@@ -1240,7 +1240,11 @@ int InvestmentFunction::compute_pieces( bool changedvars ) {
   return( f_solver_status );
   }
 
- if( ! solver->has_var_solution() ) {
+ // a Solver may leave a point behind along with its proof of infeasibility,
+ // as HiGHS does after its interior point method: the status says which of
+ // the two answers it is
+ if( ( f_solver_status == Solver::kInfeasible ) ||
+     ( ! solver->has_var_solution() ) ) {
   f_value = worst_value();
   output_function_value();
 

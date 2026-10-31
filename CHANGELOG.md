@@ -223,6 +223,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `InvestmentFunction::compute()` reports an inner Block proved infeasible
+  as infeasible also when its Solver leaves a point behind, as HiGHS does
+  after its interior point method: the point was read as a solution, its
+  value was infinite and the linearization stopped the evaluation for want
+  of a dual solution
+
 - `InvestmentFunction::set_par()` that shrinks the global pool
   (`intGPMaxSz`) tells removed the linearizations past its new size: the
   `GlobalPoolRemoved` Modification had an empty set of names, which says
