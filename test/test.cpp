@@ -41,6 +41,11 @@
  *   two binds and where all the fences meet at ( 0 , 0 ), and the single
  *   kappa of the battery, which resizes both and does worse.
  *
+ * Also, an inner AbstractBlock made of two UCBlock is split into two
+ * components, and the InvestmentBlockSolution writes the :Solution of the
+ * AbstractBlock as the one "InnerSolution" group, as for an inner Block that
+ * is not split, which it then writes back.
+ *
  * The test needs nothing but the module, its dependencies and, for the
  * second part, a :MILPSolver; the netCDF groups are written in a dataset in
  * memory, and the Configuration files are read from the working directory.
@@ -62,6 +67,7 @@
 
 #include <netcdf>
 
+#include "AbstractBlock.h"
 #include "BlockSolverConfig.h"
 #include "FRealObjective.h"
 #include "InvestmentBlock.h"
@@ -278,11 +284,21 @@ static netCDF::NcGroup reactive_bus( double c , double d )
 /// invest the unit has an investment cost of its own, i.e., it is in design
 /// mode
 
+static void thermal_uc( netCDF::NcGroup & u , double invest );
+
 static netCDF::NcGroup thermal_bus( double c , double invest = 0 )
 {
  netCDF::NcGroup u;
  auto g = investment( 0 , 0 , c , 0 , u );
+ thermal_uc( u , invest );
+ return( g );
+ }
 
+/*--------------------------------------------------------------------------*/
+/// the UCBlock of thermal_bus() in the group u
+
+static void thermal_uc( netCDF::NcGroup & u , double invest )
+{
  u.addDim( "TimeHorizon" , 1 );
  u.addDim( "NumberUnits" , 2 );
  auto ng = u.addDim( "NumberElectricalGenerators" , 2 );
@@ -310,7 +326,6 @@ static netCDF::NcGroup thermal_bus( double c , double invest = 0 )
  put_int( t , "MinDownTime" , 1 );
 
  slack( u.addGroup( "UnitBlock_1" ) , 100 , 50 );
- return( g );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -729,6 +744,58 @@ static void test_design_mode_refused( void )
  }
 
 /*--------------------------------------------------------------------------*/
+/// an inner AbstractBlock of two UCBlock is split, and its :Solution is
+/// written and read as that of one inner Block
+
+static void test_split_solution( void )
+{
+ netCDF::NcGroup inner;
+ auto g = investment( 0 , 0 , 100 , 0 , inner );
+ inner.putAtt( "type" , "AbstractBlock" );
+ inner.addDim( "NumberInnerBlock" , 2 );
+ for( int i = 0 ; i < 2 ; ++i ) {
+  auto u = inner.addGroup( "Block_" + std::to_string( i ) );
+  u.putAtt( "type" , "UCBlock" );
+  thermal_uc( u , 0 );
+  }
+
+ auto ib = dynamic_cast< InvestmentBlock * >( Block::new_Block( g ) );
+ check( ib && ( ib->get_number_nested_Blocks() == 2 ) ,
+        "split Solution: the inner AbstractBlock is not split into two "
+        "components" );
+ if( ! ib )
+  return;
+
+ const auto blocks = ib->get_whole_inner_blocks();
+ check( ( blocks.size() == 1 ) &&
+        dynamic_cast< AbstractBlock * >( blocks.front() ) ,
+        "split Solution: the whole inner Blocks are not the AbstractBlock" );
+
+ auto sol = ib->get_Solution( nullptr , false );
+ auto sg = new_group( "IBSolution" );
+ sol->serialize( sg );
+ check( ( ! sg.getGroup( "InnerSolution" ).isNull() ) &&
+        sg.getDim( "NumInnerSolutions" ).isNull() ,
+        "split Solution: not written as one InnerSolution group" );
+
+ auto back = Solution::new_Solution( sg );
+ check( back , "split Solution: not read back" );
+ if( back ) {
+  try {
+   back->write( ib );
+   }
+  catch( const std::exception & e ) {
+   check( false , std::string( "split Solution: not written back, " ) +
+          e.what() );
+   }
+  }
+
+ delete back;
+ delete sol;
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
 
 int main( void )
 {
@@ -736,6 +803,7 @@ int main( void )
   test_curvature_empty();
   #ifdef HAVE_UCBLOCK
    test_design_mode_refused();
+   test_split_solution();
    #ifdef HAVE_MILPSOLVER
     test_curvature();
     test_meshed_line();

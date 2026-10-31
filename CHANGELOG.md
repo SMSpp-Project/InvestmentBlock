@@ -232,6 +232,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- an InvestmentBlockSolution holds the :Solution of a split inner Block as
+  one, that of the inner Block, and writes it as the one `InnerSolution`
+  group, as for an inner Block that is not split
+  (`InvestmentBlock::get_whole_inner_blocks()`): it held one per component,
+  in groups `InnerSolution_<k>`, which a consumer of the :Solution of an
+  InvestmentBlock over a TwoStageStochasticBlock did not find
+
 - `InvestmentFunction::compute()` throws when the inner Block has no Solver
   that is a `CDASolver`, or there is no inner Block, where a Release build
   went on with a null pointer

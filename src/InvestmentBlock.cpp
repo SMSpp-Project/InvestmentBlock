@@ -491,6 +491,26 @@ InvestmentBlock::get_investment_functions( void ) const
 
 /*--------------------------------------------------------------------------*/
 
+std::vector< Block * > InvestmentBlock::get_whole_inner_blocks( void ) const
+{
+ const auto funcs = get_investment_functions();
+ std::vector< Block * > blocks;
+ auto parked = v_parked.begin();
+ for( Index k = 0 ; k < funcs.size() ; ++k )
+  if( ( parked != v_parked.end() ) && ( parked->first == k ) ) {
+   blocks.push_back( parked->root );
+   k += parked->pieces.size() - 1;
+   ++parked;
+   }
+  else {
+   const auto & nested = funcs[ k ]->get_nested_Blocks();
+   blocks.push_back( nested.empty() ? nullptr : nested.front() );
+   }
+ return( blocks );
+ }
+
+/*--------------------------------------------------------------------------*/
+
 InvestmentBlock::~InvestmentBlock()
 {
  // each piece of a split inner Block goes back under its father, out of
@@ -1004,12 +1024,12 @@ void InvestmentBlockSolution::deserialize( const netCDF::NcGroup & group )
   delete s;
  v_inner_Solutions.clear();
 
- // a single component: a single "InnerSolution" group
+ // a single inner Block: a single "InnerSolution" group
  auto sub_group = group.getGroup( "InnerSolution" );
  if( ! sub_group.isNull() )
   v_inner_Solutions.push_back( Solution::new_Solution( sub_group ) );
  else {
-  // components: "InnerSolution_<k>" groups, in numeric order;
+  // several inner Blocks: "InnerSolution_<k>" groups, in numeric order;
   // "NumInnerSolutions", if present, is a round-trip guardrail
   Index num_inner = 0;
   const bool have_count =
@@ -1036,15 +1056,22 @@ void InvestmentBlockSolution::deserialize( const netCDF::NcGroup & group )
 
 /*--------------------------------------------------------------------------*/
 
-// the inner Block of the InvestmentFunction f, whose :Solution an
-// InvestmentBlockSolution holds; who names the method asking for it
+// the inner Blocks of IB whose :Solution an InvestmentBlockSolution holds
+// [see InvestmentBlock::get_whole_inner_blocks()]; who names the method
+// asking for them
 
-static Block * inner_block( const InvestmentFunction * f , const char * who )
+static std::vector< Block * > inner_blocks( const InvestmentBlock * IB ,
+                                            const char * who )
 {
- if( f->get_nested_Blocks().empty() )
+ auto blocks = IB->get_whole_inner_blocks();
+ if( blocks.empty() )
   throw( std::invalid_argument( std::string( "InvestmentBlockSolution::" ) +
-                                who + ": empty inner Block" ) );
- return( f->get_nested_Blocks().front() );
+                                who + ": empty InvestmentFunction" ) );
+ for( auto b : blocks )
+  if( ! b )
+   throw( std::invalid_argument( std::string( "InvestmentBlockSolution::" )
+                                 + who + ": empty inner Block" ) );
+ return( blocks );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -1058,8 +1085,9 @@ void InvestmentBlockSolution::read( const Block * block )
 
  v_design = IB->get_variable_values();
 
- // collect the inner Block :Solution(s) if requested, one per component
- // [see InvestmentBlock::get_investment_functions()]
+ // collect the inner Block :Solution(s) if requested, one per inner Block
+ // as the InvestmentBlock writes them, a split one being one [see
+ // InvestmentBlock::get_whole_inner_blocks()]
  for( auto s : v_inner_Solutions )
   delete s;
  v_inner_Solutions.clear();
@@ -1067,16 +1095,10 @@ void InvestmentBlockSolution::read( const Block * block )
  if( ! f_inner_wanted )
   return;
 
- auto funcs = IB->get_investment_functions();
-
- if( funcs.empty() )
-  throw( std::invalid_argument(
-	    "InvestmentBlockSolution::read: empty InvestmentFunction" ) );
-
- v_inner_Solutions.reserve( funcs.size() );
- for( auto fk : funcs ) {
-  auto s = inner_block( fk , "read" )->get_Solution( f_inner_Configuration ,
-                                                     false );
+ const auto blocks = inner_blocks( IB , "read" );
+ v_inner_Solutions.reserve( blocks.size() );
+ for( auto b : blocks ) {
+  auto s = b->get_Solution( f_inner_Configuration , false );
   if( ! s )
    throw( std::invalid_argument(
      "InvestmentBlockSolution::read: cannot read desired inner Solution" ) );
@@ -1102,24 +1124,16 @@ void InvestmentBlockSolution::write( Block * block )
  if( v_inner_Solutions.empty() )
   return;
 
- // the InvestmentFunction to write into, one per component [see
- // InvestmentBlock::get_investment_functions()]; the inner :Solution count
- // must match.
- auto funcs = IB->get_investment_functions();
-
- if( funcs.empty() )
-  throw( std::invalid_argument(
-	   "InvestmentBlockSolution::write: empty InvestmentFunction" ) );
-
- if( v_inner_Solutions.size() != funcs.size() )
+ // the inner Blocks to write into, as read() takes them; the inner
+ // :Solution count must match
+ const auto blocks = inner_blocks( IB , "write" );
+ if( v_inner_Solutions.size() != blocks.size() )
   throw( std::invalid_argument(
     "InvestmentBlockSolution::write: inconsistent inner Solution count" ) );
 
- for( Index k = 0 ; k < funcs.size() ; ++k ) {
-  const auto inner = inner_block( funcs[ k ] , "write" );
+ for( Index k = 0 ; k < blocks.size() ; ++k )
   if( v_inner_Solutions[ k ] )
-   v_inner_Solutions[ k ]->write( inner );
-  }
+   v_inner_Solutions[ k ]->write( blocks[ k ] );
  }  // end( InvestmentBlockSolution::write )
 
 /*--------------------------------------------------------------------------*/
@@ -1134,14 +1148,14 @@ void InvestmentBlockSolution::serialize( netCDF::NcGroup & group ) const
 			ndv , v_design );
 
  if( v_inner_Solutions.size() == 1 ) {
-  // a single component: a single "InnerSolution" group
+  // a single inner Block: a single "InnerSolution" group
   if( v_inner_Solutions.front() ) {
    auto sub_group = group.addGroup( "InnerSolution" );
    v_inner_Solutions.front()->serialize( sub_group );
    }
   }
  else if( ! v_inner_Solutions.empty() ) {
-  // components: one "InnerSolution_<k>" group per component
+  // several inner Blocks: one "InnerSolution_<k>" group each
   group.addDim( "NumInnerSolutions" , v_inner_Solutions.size() );
   for( Index k = 0 ; k < v_inner_Solutions.size() ; ++k )
    if( v_inner_Solutions[ k ] ) {

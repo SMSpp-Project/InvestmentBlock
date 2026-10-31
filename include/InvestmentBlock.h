@@ -521,6 +521,18 @@ public:
  std::vector< InvestmentFunction * > get_investment_functions( void ) const;
 
 /*--------------------------------------------------------------------------*/
+ /// returns the inner Blocks of this InvestmentBlock, as it writes them
+ /** Returns the inner Block of each InvestmentFunction [see
+  * get_investment_functions()], in the same order, except that the
+  * components made out of the pieces of a split inner Block give that inner
+  * Block once, in the place of its first piece [see split_inner()]: these
+  * are the inner Blocks that serialize() writes, and those whose :Solution
+  * an InvestmentBlockSolution holds. An InvestmentFunction with no inner
+  * Block gives nullptr. */
+
+ std::vector< Block * > get_whole_inner_blocks( void ) const;
+
+/*--------------------------------------------------------------------------*/
  /// returns the lower bound on each Variable
 
  const std::vector< double > & get_variable_lower_bound() const {
@@ -963,7 +975,11 @@ class InvestmentBlockSolution : public Solution
   *
   * - The group "InnerSolution" containing the [:Solution] of the inner
   *   Block of the InvestmentBlock corresponding to the value of the design
-  *   variables. The group is optional. */
+  *   variables, when the InvestmentBlock has one inner Block as it writes
+  *   them, a split one included [see
+  *   InvestmentBlock::get_whole_inner_blocks()]; when it has more than one,
+  *   the dimension "NumInnerSolutions" and one group "InnerSolution_<k>"
+  *   per inner Block instead. The groups are optional. */
 
  void serialize( netCDF::NcGroup & group ) const override final;
 
