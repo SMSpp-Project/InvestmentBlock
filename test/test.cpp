@@ -2,13 +2,37 @@
 /*---------------------------- File test.cpp -------------------------------*/
 /*--------------------------------------------------------------------------*/
 /** @file
- * Unit test of InvestmentFunction on instances built in memory.
+ * Unit test of InvestmentBlock and InvestmentFunction on instances built in
+ * memory.
  *
  * The curvature an InvestmentFunction declares is checked first: without an
  * inner Block it is neither convex nor concave, and (if a :MILPSolver is in
  * the build, which the inner Block needs) with a minimizing inner Block it
  * is convex only if the cost of investing plus the cost of disinvesting is
  * nonnegative for every asset.
+ *
+ * With UCBlock in the build, what an InvestmentBlock reads is checked
+ * without solving anything. A file is refused when an asset names methods
+ * that the methods factory does not have, or of another class than its
+ * piece of the inner Block, or a setter without its getter, or a type that
+ * does not exist; when a field has left the format, is longer than the
+ * assets or is out of range; when the components have a gap in their
+ * numbering, or the root carries linear constraints or a maximization;
+ * when a unit has a second size and no first, or sizes naming different
+ * methods; when components limit the change of one design Variable
+ * differently; and when the inner Block is in design mode. A baseline
+ * mapping of the wrong size or past the design Variable is refused too. A
+ * file with components, written and read again, keeps its components and
+ * their baselines; each component gets as active Variable the design
+ * Variable its assets and their baselines name, with its mappings pointing
+ * into them; and the feasibility of a design, against its bounds and the
+ * limits on its change, is the same read off the ColVariable as off the
+ * Constraint.
+ *
+ * Also, an inner AbstractBlock made of two UCBlock is split into two
+ * components, and the InvestmentBlockSolution writes the :Solution of the
+ * AbstractBlock as the one "InnerSolution" group, as for an inner Block that
+ * is not split, which it then writes back.
  *
  * Then, again if a :MILPSolver is in the build, the linearization computed
  * by the InvestmentFunction is compared with the finite differences of its
@@ -41,14 +65,23 @@
  *   two binds and where all the fences meet at ( 0 , 0 ), and the single
  *   kappa of the battery, which resizes both and does worse.
  *
- * Also, an inner AbstractBlock made of two UCBlock is split into two
- * components, and the InvestmentBlockSolution writes the :Solution of the
- * AbstractBlock as the one "InnerSolution" group, as for an inner Block that
- * is not split, which it then writes back.
+ * With the :MILPSolver, what compute() does besides the value is checked
+ * too. A file written and read again gives the same value, and writes back
+ * the names of the methods it was given. An inner Block that is infeasible
+ * is said so, with a feasibility cut where the asset can give one, and an
+ * unbounded one gives kUnbounded and -Inf. compute() fails rather than give
+ * a wrong answer where a unit does not register the setter it is sized by,
+ * and throws where the certificate would carry the Objective, leaving the
+ * inner Block unlocked, and where the inner Block has no Solver. Removing an
+ * active Variable takes its asset and the data of the asset with it; a
+ * weight of the inner Block changed after a compute() weights the next; and
+ * the global pool, shrunk, says removed only the names past its new size,
+ * while a State of a smaller pool leaves those names empty.
  *
  * The test needs nothing but the module, its dependencies and, for the
- * second part, a :MILPSolver; the netCDF groups are written in a dataset in
- * memory, and the Configuration files are read from the working directory.
+ * parts with an inner Block, UCBlock and, for those that solve it, a
+ * :MILPSolver; the netCDF groups are written in a dataset in memory, and the
+ * Configuration files are read from the working directory.
  *
  * \author Donato Meoli \n
  *         Dipartimento di Informatica \n
@@ -60,9 +93,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <netcdf>
@@ -156,6 +192,36 @@ static void put_uint( netCDF::NcGroup & g , const std::string & n ,
 		      const std::vector< unsigned int > & v )
 {
  g.addVar( n , netCDF::NcUint() , d ).putVar( v.data() );
+ }
+
+/// the names v of the methods of the assets of g, one per asset
+
+static void put_names( netCDF::NcGroup & g , const std::string & n ,
+		       const std::vector< std::string > & v )
+{
+ auto var = g.addVar( n , netCDF::ncString , g.getDim( "NumAssets" ) );
+ for( std::size_t i = 0 ; i < v.size() ; ++i )
+  var.putVar( { i } , v[ i ] );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// that reading the InvestmentBlock of g is refused with an exception whose
+/// message holds message
+
+static void check_refused( const netCDF::NcGroup & g ,
+			   const std::string & message ,
+			   const std::string & what )
+{
+ try {
+  InvestmentBlock ib;
+  ib.deserialize( g );
+  }
+ catch( const std::exception & e ) {
+  check( std::string( e.what() ).find( message ) != std::string::npos ,
+	 what + ": refused, but saying \"" + e.what() + "\"" );
+  return;
+  }
+ check( false , what + ": not refused" );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -284,7 +350,8 @@ static netCDF::NcGroup reactive_bus( double c , double d )
 /// invest the unit has an investment cost of its own, i.e., it is in design
 /// mode
 
-static void thermal_uc( netCDF::NcGroup & u , double invest );
+static void thermal_uc( netCDF::NcGroup & u , double invest = 0 ,
+			bool line = false );
 
 static netCDF::NcGroup thermal_bus( double c , double invest = 0 )
 {
@@ -295,18 +362,29 @@ static netCDF::NcGroup thermal_bus( double c , double invest = 0 )
  }
 
 /*--------------------------------------------------------------------------*/
-/// the UCBlock of thermal_bus() in the group u
+/// the UCBlock of thermal_bus() in the group u; with line, also a node 1
+/// with no demand and no unit behind a line from node 0, which changes
+/// nothing
 
-static void thermal_uc( netCDF::NcGroup & u , double invest )
+static void thermal_uc( netCDF::NcGroup & u , double invest , bool line )
 {
  u.addDim( "TimeHorizon" , 1 );
  u.addDim( "NumberUnits" , 2 );
  auto ng = u.addDim( "NumberElectricalGenerators" , 2 );
- auto nn = u.addDim( "NumberNodes" , 1 );
+ auto nn = u.addDim( "NumberNodes" , line ? 2 : 1 );
  auto th = u.getDim( "TimeHorizon" );
 
  put_uint( u , "GeneratorNode" , ng , { 0 , 0 } );
- put( u , "ActivePowerDemand" , { nn , th } , { 50 } );
+ if( line ) {
+  auto nl = u.addDim( "NumberLines" , 1 );
+  put( u , "ActivePowerDemand" , { nn , th } , { 50 , 0 } );
+  put_uint( u , "StartLine" , nl , { 0 } );
+  put_uint( u , "EndLine" , nl , { 1 } );
+  put( u , "MinPowerFlow" , nl , { -10 } );
+  put( u , "MaxPowerFlow" , nl , { 10 } );
+  }
+ else
+  put( u , "ActivePowerDemand" , { nn , th } , { 50 } );
 
  auto t = u.addGroup( "UnitBlock_0" );
  t.putAtt( "type" , "ThermalUnitBlock" );
@@ -326,6 +404,113 @@ static void thermal_uc( netCDF::NcGroup & u , double invest )
  put_int( t , "MinDownTime" , 1 );
 
  slack( u.addGroup( "UnitBlock_1" ) , 100 , 50 );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the UCBlock of thermal_bus() with its line, whose assets are the line, at
+/// the price 100 with 0.3 of it installed, and the thermal unit, at the
+/// price 251 with 0.7 installed
+
+static netCDF::NcGroup line_and_unit( void )
+{
+ auto g = new_group( "InvestmentBlock" );
+ g.putAtt( "type" , "InvestmentBlock" );
+ auto na = g.addDim( "NumAssets" , 2 );
+ put_uint( g , "Assets" , na , { 0 , 0 } );
+ put_uint( g , "AssetType" , na , { 1 , 0 } );
+ put( g , "Cost" , na , { 100 , 251 } );
+ put( g , "DisinvestmentCost" , na , { 0 , 0 } );
+ put( g , "InstalledQuantity" , na , { 0.3 , 0.7 } );
+ put( g , "LowerBound" , 0 );
+ put( g , "UpperBound" , 10 );
+ auto u = g.addGroup( "InnerBlock" );
+ u.putAtt( "type" , "UCBlock" );
+ thermal_uc( u , 0 , true );
+ return( g );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// an InvestmentBlock with n design Variable in [ 0 , 10 ] and the
+/// components Component_k, for k in which, each investing at the price c in
+/// the thermal unit of the UCBlock of thermal_bus() on the design Variable k
+
+static netCDF::NcGroup components( unsigned int n ,
+				   const std::vector< unsigned int > & which ,
+				   double c = 100 )
+{
+ auto g = new_group( "InvestmentBlock" );
+ g.putAtt( "type" , "InvestmentBlock" );
+ g.addDim( "NumAssets" , n );
+ put( g , "LowerBound" , 0 );
+ put( g , "UpperBound" , 10 );
+ for( auto k : which ) {
+  auto ck = g.addGroup( "Component_" + std::to_string( k ) );
+  auto na = ck.addDim( "NumAssets" , 1 );
+  put_uint( ck , "Assets" , na , { 0 } );
+  put_uint( ck , "AssetType" , na , { 0 } );
+  put( ck , "Cost" , na , { c } );
+  put( ck , "DisinvestmentCost" , na , { 0 } );
+  put_uint( ck , "AssetVarIndex" , na , { k } );
+  auto u = ck.addGroup( "InnerBlock" );
+  u.putAtt( "type" , "UCBlock" );
+  thermal_uc( u );
+  }
+ return( g );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// a demand of 50 that one asset alone cannot cover at its size 1: for "line"
+/// a SlackUnitBlock on node 0 behind a line to node 1, where the demand is,
+/// with flow within 10 per unit of its kappa (line 0, type 1); for
+/// "intermittent" an IntermittentUnitBlock of power 10 per unit of its kappa
+/// and for "thermal" a ThermalUnitBlock of power 10 per copy (unit 0, type
+/// 0), alone on a single bus
+
+static netCDF::NcGroup short_supply( const std::string & what )
+{
+ netCDF::NcGroup u;
+ const bool line = ( what == "line" );
+ auto g = investment( line ? 1 : 0 , 0 , 100 , 0 , u );
+
+ auto th = u.addDim( "TimeHorizon" , 1 );
+ u.addDim( "NumberUnits" , 1 );
+ auto ng = u.addDim( "NumberElectricalGenerators" , 1 );
+ auto nn = u.addDim( "NumberNodes" , line ? 2 : 1 );
+ put_uint( u , "GeneratorNode" , ng , { 0 } );
+
+ if( line ) {
+  auto nl = u.addDim( "NumberLines" , 1 );
+  put( u , "ActivePowerDemand" , { nn , th } , { 0 , 50 } );
+  put_uint( u , "StartLine" , nl , { 0 } );
+  put_uint( u , "EndLine" , nl , { 1 } );
+  put( u , "MinPowerFlow" , nl , { -10 } );
+  put( u , "MaxPowerFlow" , nl , { 10 } );
+  slack( u.addGroup( "UnitBlock_0" ) , 100 , 10 );
+  return( g );
+  }
+
+ put( u , "ActivePowerDemand" , { nn , th } , { 50 } );
+ auto t = u.addGroup( "UnitBlock_0" );
+ if( what == "intermittent" ) {
+  t.putAtt( "type" , "IntermittentUnitBlock" );
+  put( t , "MaxPower" , 10 );
+  return( g );
+  }
+
+ t.putAtt( "type" , "ThermalUnitBlock" );
+ put( t , "MinPower" , 0 );
+ put( t , "MaxPower" , 10 );
+ put( t , "DeltaRampUp" , 100 );
+ put( t , "DeltaRampDown" , 100 );
+ put( t , "QuadTerm" , 0 );
+ put( t , "LinearTerm" , 10 );
+ put( t , "ConstTerm" , 0 );
+ put( t , "StartUpCost" , 0 );
+ put( t , "InitialPower" , 0 );
+ put_int( t , "InitUpDownTime" , 1 );
+ put_int( t , "MinUpTime" , 1 );
+ put_int( t , "MinDownTime" , 1 );
+ return( g );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -592,6 +777,11 @@ static void test_curvature( void )
  check( ( ! f->is_convex() ) && ( ! f->is_concave() ) ,
 	"c + d < 0: the InvestmentFunction says it is convex or concave" );
  delete ib;
+
+ // c + d = 0, the edge: the investment term is linear, hence still convex
+ ib = load( meshed_network( 100 , -100 ) , f );
+ check( f->is_convex() , "c + d = 0: the InvestmentFunction is not convex" );
+ delete ib;
  }
 
 /*--------------------------------------------------------------------------*/
@@ -723,6 +913,613 @@ static void test_battery_two_assets( void )
  }
 
 /*--------------------------------------------------------------------------*/
+/// the methods an asset names are refused when the methods factory does not
+/// have them, when they are of another class than the piece of the inner
+/// Block, and when the setter comes without its getter; so is a type of
+/// asset that does not exist
+
+static void test_names_refused( void )
+{
+ auto g = meshed_network( 100 , 0 );
+ put_names( g , "AssetSetter" , { "UCBlock::resize_nothing" } );
+ put_names( g , "AssetLinearization" ,
+	    { "UCBlock::get_resize_line_linearization" } );
+ check_refused( g , "which the methods factory does not have as a setter" ,
+		"an unknown setter" );
+
+ g = meshed_network( 100 , 0 );
+ put_names( g , "AssetSetter" , { "UCBlock::resize_line" } );
+ put_names( g , "AssetLinearization" , { "UCBlock::read_nothing" } );
+ check_refused( g , "which the methods factory does not have as a getter" ,
+		"an unknown getter" );
+
+ g = meshed_network( 100 , 0 );
+ put_names( g , "AssetSetter" , { "DCNetworkBlock::resize" } );
+ put_names( g , "AssetLinearization" ,
+	    { "DCNetworkBlock::get_resize_linearization" } );
+ check_refused( g , "is a method of DCNetworkBlock" ,
+		"the methods of another class" );
+
+ g = meshed_network( 100 , 0 );
+ put_names( g , "AssetSetter" , { "UCBlock::resize_line" } );
+ check_refused( g , "'AssetSetter' and 'AssetLinearization' go together" ,
+		"a setter without its getter" );
+
+ g = meshed_network( 100 , 0 );
+ const unsigned int type = 3;
+ g.getVar( "AssetType" ).putVar( { 0 } , type );
+ check_refused( g , "invalid type of asset 0" ,
+		"a type of asset that does not exist" );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the fields of an asset are refused when they have left the format, when
+/// they are longer than the assets, and when their values are out of range
+
+static void test_fields_refused( void )
+{
+ auto g = meshed_network( 100 , 0 );
+ put_uint( g , "AssetMethod" , g.getDim( "NumAssets" ) , { 0 } );
+ check_refused( g , "'AssetMethod' is no longer supported" ,
+		"AssetMethod, which has left the format" );
+
+ g = meshed_network( 100 , 0 );
+ g.putAtt( "ReplicateBatteryUnits" , netCDF::NcInt() , 1 );
+ check_refused( g , "'ReplicateBatteryUnits' is no longer supported" ,
+		"ReplicateBatteryUnits, which has left the format" );
+
+ g = meshed_network( 100 , 0 );
+ put( g , "MaxInvestment" , g.addDim( "Two" , 2 ) , { 1 , 2 } );
+ check_refused( g , "'MaxInvestment' netCDF variable" ,
+		"a MaxInvestment longer than the assets" );
+
+ g = meshed_network( 100 , 0 );
+ put( g , "Integer" , g.addDim( "Two" , 2 ) , { 1 , 1 } );
+ check_refused( g , "'Integer' netCDF variable" ,
+		"an Integer longer than the assets" );
+
+ g = meshed_network( 100 , 0 );
+ put_uint( g , "AssetFeasibilityCut" , g.getDim( "NumAssets" ) , { 2 } );
+ check_refused( g , "invalid AssetFeasibilityCut: 2" ,
+		"an AssetFeasibilityCut neither 0 nor 1" );
+
+ g = meshed_network( 100 , 0 );
+ put( g , "MaxDisinvestment" , -1 );
+ check_refused( g , "'MaxDisinvestment' netCDF variable" ,
+		"a negative MaxDisinvestment" );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the structure of a file with components is refused when the numbering of
+/// the components has a gap, and when the root carries what only a component
+/// can hold, linear constraints or a maximization; a baseline mapping of the
+/// wrong size or past the design Variable is refused too
+
+static void test_structure_refused( void )
+{
+ check_refused( components( 3 , { 0 , 2 } ) ,
+		"are numbered consecutively from 0" ,
+		"Component_0 and Component_2 with no Component_1" );
+
+ auto g = components( 2 , { 0 , 1 } );
+ g.addDim( "NumConstraints" , 1 );
+ check_refused( g , "carries 'NumConstraints'" ,
+		"linear constraints at the root of the components" );
+
+ g = components( 2 , { 0 , 1 } );
+ g.addDim( "ObjectiveSense" , 0 );
+ check_refused( g , "asks for a maximization" ,
+		"a maximization at the root of the components" );
+
+ auto b = dynamic_cast< InvestmentBlock * >(
+		    Block::new_Block( components( 2 , { 0 , 1 } ) ) );
+ check( b && ( b->get_investment_functions().size() == 2 ) ,
+	"two components: not read as two" );
+ if( b ) {
+  auto f = b->get_investment_functions()[ 1 ];
+  for( const auto & [ bvi , message ] :
+	 std::vector< std::pair< std::vector< Index > , std::string > >
+	 { { { 0 , 1 } , "the baseline mapping has 2 entries" } ,
+	   { { 5 } , "variable index" } } )
+   try {
+    f->set_asset_baseline_variable_indices( bvi );
+    check( false , "a wrong baseline mapping: not refused" );
+    }
+   catch( const std::exception & e ) {
+    check( std::string( e.what() ).find( message ) != std::string::npos ,
+	   "a wrong baseline mapping: refused, but saying \"" +
+	   std::string( e.what() ) + "\"" );
+    }
+  delete b;
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the second size of a unit is refused without the first, and so are the
+/// two sizes of a unit naming different methods
+
+static void test_second_size_refused( void )
+{
+ // the first asset becomes the second size of unit 0, which has no first
+ auto g = battery_bus( true );
+ const unsigned int unit = 0 , second = 2;
+ g.getVar( "Assets" ).putVar( { 0 } , unit );
+ g.getVar( "AssetType" ).putVar( { 0 } , second );
+ check_refused( g , "is the second size of" , "a second size with no first" );
+
+ g = battery_bus( true );
+ put_names( g , "AssetSetter" ,
+	    { "UCBlock::resize_unit" , "UCBlock::replicate" } );
+ put_names( g , "AssetLinearization" ,
+	    { "UCBlock::get_resize_unit_linearization" ,
+	      "UCBlock::get_replicate_linearization" } );
+ check_refused( g , "and name different methods" ,
+		"the two sizes of a unit naming different methods" );
+ }
+
+/*--------------------------------------------------------------------------*/
+/// an InvestmentBlock written by serialize() and read again gives the same
+/// value, and the names of the methods written in its file are written back
+
+static void test_round_trip( void )
+{
+ auto g = meshed_network( 100 , 0 );
+ put_names( g , "AssetSetter" , { "UCBlock::resize_line" } );
+ put_names( g , "AssetLinearization" ,
+	    { "UCBlock::get_resize_line_linearization" } );
+ InvestmentFunction * f;
+ auto ib = load( g , f );
+ double d;
+ const auto v = value( f , 1.5 , d );
+
+ auto w = new_group( "InvestmentBlock" );
+ ib->serialize( w );
+ delete ib;
+
+ std::string setter;
+ if( ! w.getVar( "AssetSetter" ).isNull() ) {
+  char * name = nullptr;
+  w.getVar( "AssetSetter" ).getVar( { 0 } , & name );
+  setter = name;
+  nc_free_string( 1 , & name );
+  }
+ check( setter == "UCBlock::resize_line" , "written and read: the setter "
+	"written back is \"" + setter + "\" instead of UCBlock::resize_line" );
+
+ ib = load( w , f );
+ const auto vw = value( f , 1.5 , d );
+ check( close( vw , v ) , "written and read: value " + std::to_string( vw ) +
+	" instead of " + std::to_string( v ) );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// an InvestmentBlock with two components, the second reading the design
+/// Variable of the first as its baseline, written by serialize() and read
+/// again has two components, and the same baseline mapping
+
+static void test_round_trip_components( void )
+{
+ auto g = components( 2 , { 0 , 1 } );
+ auto c1 = g.getGroup( "Component_1" );
+ put_uint( c1 , "AssetBaselineVarIndex" , c1.getDim( "NumAssets" ) , { 0 } );
+
+ auto b = dynamic_cast< InvestmentBlock * >( Block::new_Block( g ) );
+ check( b , "two components with a baseline: not read" );
+ if( ! b )
+  return;
+ auto w = new_group( "InvestmentBlock" );
+ b->serialize( w );
+ delete b;
+
+ b = dynamic_cast< InvestmentBlock * >( Block::new_Block( w ) );
+ check( b && ( b->get_investment_functions().size() == 2 ) ,
+	"two components written and read: not read as two" );
+ if( b && ( b->get_investment_functions().size() == 2 ) ) {
+  const auto & bvi =
+   b->get_investment_functions()[ 1 ]->get_asset_baseline_variable_indices();
+  check( ( bvi.size() == 1 ) && ( bvi[ 0 ] == 0 ) ,
+	 "two components written and read: the baseline of the second is "
+	 "no longer the design Variable of the first" );
+  }
+ delete b;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// where the inner Block is infeasible, at the size 1 of short_supply(), the
+/// InvestmentFunction says so, with a cut for a line and a unit that are
+/// resized, with no cut for a unit replicated, whose copies give none, nor
+/// for a resized asset with AssetFeasibilityCut 0
+
+static void test_feasibility_cut( void )
+{
+ for( const auto & [ what , zero , cut ] :
+	std::vector< std::tuple< std::string , bool , bool > >
+	{ { "line" , false , true } , { "intermittent" , false , true } ,
+	  { "thermal" , false , false } , { "line" , true , false } } ) {
+  auto g = short_supply( what );
+  if( zero )
+   put_uint( g , "AssetFeasibilityCut" , g.getDim( "NumAssets" ) , { 0 } );
+  const auto name = what + ( zero ? " with AssetFeasibilityCut 0" : "" );
+  InvestmentFunction * f;
+  auto ib = load( g , f );
+  static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
+  const auto status = f->compute( true );
+  check( status == Solver::kInfeasible , name + ": compute() returns " +
+	 std::to_string( status ) + " instead of kInfeasible" );
+  check( f->has_linearization( false ) == cut , name + ( cut ?
+	 ": no cut where the inner Block is infeasible" :
+	 ": a cut it cannot give" ) );
+  delete ib;
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+/// compute() fails, rather than giving a wrong answer, where an asset is a
+/// unit whose class does not register the setter it is sized by; it throws
+/// where the certificate of an infeasible inner Block would carry the
+/// Objective, leaving the inner Block unlocked and the Solver with its own
+/// identity, and where the inner Block has no Solver
+
+static void test_compute_errors( void )
+{
+ // the slack unit 1 of thermal_bus(), sized by UCBlock::resize_unit, which
+ // hands the value on to SlackUnitBlock::resize, a name nobody registers
+ auto g = thermal_bus( 100 );
+ const unsigned int unit = 1;
+ g.getVar( "Assets" ).putVar( { 0 } , unit );
+ put_names( g , "AssetSetter" , { "UCBlock::resize_unit" } );
+ put_names( g , "AssetLinearization" ,
+	    { "UCBlock::get_resize_unit_linearization" } );
+ InvestmentFunction * f;
+ auto ib = load( g , f );
+ static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
+ auto status = f->compute( true );
+ check( status == Solver::kError , "a unit whose class has no resize: "
+	"compute() returns " + std::to_string( status ) );
+ delete ib;
+
+ ib = load( short_supply( "line" ) , f );
+ auto inner = f->get_nested_Block( 0 );
+ auto solver = inner->get_registered_solvers().front();
+ solver->set_par( solver->int_par_str2idx( "intHomogeneousDirection" ) , 0 );
+ void * const id = solver->id();
+ static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
+ bool threw = false;
+ try {
+  f->compute( true );
+  }
+ catch( const std::logic_error & ) {
+  threw = true;
+  }
+ const bool unlocked = inner->is_owned_by( nullptr );
+ check( threw && unlocked && ( solver->id() == id ) ,
+	std::string( "intHomogeneousDirection 0: compute() " ) +
+	( threw ? "throws" : "does not throw" ) +
+	( unlocked ? "" : ", the inner Block left locked" ) +
+	( solver->id() == id ? "" : ", the Solver left with the identity of "
+	  "the function" ) );
+ if( unlocked )  // a Block left locked is not destroyed
+  delete ib;
+
+ // no IBOCfg.txt, hence no Solver on the inner Block
+ ib = dynamic_cast< InvestmentBlock * >(
+		   Block::new_Block( meshed_network( 100 , 0 ) ) );
+ ib->generate_abstract_variables();
+ ib->generate_objective();
+ f = static_cast< InvestmentFunction * >( ib->get_function() );
+ static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
+ threw = false;
+ try {
+  f->compute( true );
+  }
+ catch( const std::logic_error & e ) {
+  threw = ( std::string( e.what() ).find( "has no Solver" ) !=
+	    std::string::npos );
+  }
+ check( threw , "an inner Block with no Solver: compute() does not throw "
+	"saying so" );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// an inner Block that its Solver proves unbounded is an answer: on a
+/// single bus an IntermittentUnitBlock can absorb any power and a
+/// SlackUnitBlock gives any power at a negative cost, and compute() returns
+/// kUnbounded with the value -Inf
+
+static void test_unbounded( void )
+{
+ netCDF::NcGroup u;
+ auto g = investment( 0 , 0 , 100 , 0 , u );
+ auto th = u.addDim( "TimeHorizon" , 1 );
+ u.addDim( "NumberUnits" , 2 );
+ auto ng = u.addDim( "NumberElectricalGenerators" , 2 );
+ auto nn = u.addDim( "NumberNodes" , 1 );
+ put_uint( u , "GeneratorNode" , ng , { 0 , 0 } );
+ put( u , "ActivePowerDemand" , { nn , th } , { 0 } );
+ auto t = u.addGroup( "UnitBlock_0" );
+ t.putAtt( "type" , "IntermittentUnitBlock" );
+ put( t , "MaxPower" , 10 );
+ put( t , "MinPower" , - INFINITY );
+ slack( u.addGroup( "UnitBlock_1" ) , INFINITY , -1 );
+
+ InvestmentFunction * f;
+ auto ib = load( g , f );
+ static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
+ const auto status = f->compute( true );
+ check( ( status == Solver::kUnbounded ) && ( f->get_value() == - INFINITY ) ,
+	"an unbounded inner Block: compute() returns " +
+	std::to_string( status ) + " with the value " +
+	std::to_string( f->get_value() ) );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// removing the active Variable of the line of line_and_unit(), by each of
+/// the methods, takes away the line and its data, and leaves the unit
+/// with its own: at 2 copies the operational cost 1700 of thermal_bus() plus
+/// 251 ( 2 - 0.7 ), which the data of the line left at the position of the
+/// unit would make 100 ( 2 - 0.3 ); and so does removing the line where the
+/// mapping puts it on the second Variable
+
+static void test_remove_variables( void )
+{
+ const double expected = 1700 + 251 * ( 2 - 0.7 );
+ for( const auto & [ what , remove ] :
+	std::vector< std::pair< std::string ,
+	 std::function< void( InvestmentFunction * ) > > >
+	{ { "remove_variable( 0 )" , []( InvestmentFunction * f ) {
+	     f->remove_variable( 0 , eNoMod ); } } ,
+	  { "remove_variables( Range )" , []( InvestmentFunction * f ) {
+	     f->remove_variables( Block::Range( 0 , 1 ) , eNoMod ); } } ,
+	  { "remove_variables( Subset )" , []( InvestmentFunction * f ) {
+	     f->remove_variables( Block::Subset{ 0 } , true , eNoMod ); } } ,
+	  { "the line on the second Variable, remove_variable( 1 )" ,
+	    []( InvestmentFunction * f ) {
+	     f->set_asset_variable_indices( { 1 , 0 } );
+	     f->remove_variable( 1 , eNoMod ); } } } ) {
+  InvestmentFunction * f;
+  auto ib = load( line_and_unit() , f );
+  remove( f );
+  double g;
+  const auto v = value( f , 2 , g );
+  check( close( v , expected ) , what + ": value " + std::to_string( v ) +
+	 " instead of " + std::to_string( expected ) );
+  delete ib;
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the weight of the Objective of the inner Block, changed after a
+/// compute(), weights the next one: at 1 copy of thermal_bus() the value
+/// 2200 and the linearization -300 become 4400 and -600 with the weight 2
+
+static void test_weight_changed( void )
+{
+ InvestmentFunction * f;
+ auto ib = load( thermal_bus( 100 ) , f );
+ double g;
+ auto v = value( f , 1 , g );
+ check( close( v , 2200 ) && close( g , -300 ) , "weight 1: value " +
+	std::to_string( v ) + " and linearization " + std::to_string( g ) +
+	" instead of 2200 and -300" );
+ f->get_nested_Block( 0 )->set_objective_weight( 2 );
+ v = value( f , 1 , g );
+ check( close( v , 4400 ) && close( g , -600 ) , "weight changed to 2: "
+	"value " + std::to_string( v ) + " and linearization " +
+	std::to_string( g ) + " instead of 4400 and -600" );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// a Solver that keeps the names that the last GlobalPoolRemoved
+/// Modification of an InvestmentFunction says removed
+
+class PoolSolver : public Solver {
+ public:
+  Block::Subset removed;
+  void add_Modification( sp_Mod & mod ) override {
+   if( auto m = std::dynamic_pointer_cast< const C05FunctionMod >( mod ) )
+    if( m->type() == C05FunctionMod::GlobalPoolRemoved )
+     removed = m->which();
+   Solver::add_Modification( mod );
+   }
+  int compute( bool changedvars = true ) override { return( kOK ); }
+  void get_var_solution( Configuration * solc = nullptr ) override {}
+ private:
+  const std::string & private_name( void ) const override {
+   static const std::string name = "PoolSolver";
+   return( name );
+   }
+ };
+
+/// the global pool of the linearizations: shrunk from 5 to 2 it says removed
+/// the names 2 to 4, not all of them; a State of the pool of 2 put into the
+/// pool of 5 leaves empty the names 3 and 4 stored there
+
+static void test_global_pool( void )
+{
+ InvestmentFunction * f;
+ auto ib = load( thermal_bus( 100 ) , f );
+ PoolSolver solver;
+ ib->register_Solver( & solver );
+ f->set_par( C05Function::intGPMaxSz , 5 );
+ f->set_par( C05Function::intGPMaxSz , 2 );
+ ib->unregister_Solver( & solver );
+ check( solver.removed == Block::Subset{ 2 , 3 , 4 } , "a pool of 5 shrunk "
+	"to 2: " + std::to_string( solver.removed.size() ) + " names removed "
+	"instead of 2 to 4" );
+
+ const std::unique_ptr< State > small( f->get_State() );
+ f->set_par( C05Function::intGPMaxSz , 5 );
+ double g;
+ value( f , 1 , g );
+ f->store_linearization( 3 );
+ f->store_linearization( 4 );
+ check( f->is_linearization_there( 3 ) && f->is_linearization_there( 4 ) ,
+	"the names 3 and 4 not stored" );
+ f->put_State( * small );
+ check( ! ( f->is_linearization_there( 3 ) ||
+	    f->is_linearization_there( 4 ) ) , "a State of a pool of 2 put "
+	"into one of 5: the names 3 and 4 still there" );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the design within the bounds [ 5 , 10 ] is feasible at 6 and not at 0
+/// and 11, read off the ColVariable as off the Constraint; three assets of a
+/// component with no AssetVarIndex over two design Variable are refused
+/// when the Constraint are generated
+
+static void test_design_feasibility( void )
+{
+ auto ib = dynamic_cast< InvestmentBlock * >(
+			   Block::new_Block( thermal_bus( 100 ) ) );
+ ib->set_variable_bounds( { 5 } , { 10 } );
+ ib->generate_abstract_variables();
+ ib->generate_abstract_constraints();
+ for( const auto & [ y , feasible ] :
+	std::vector< std::pair< double , bool > >
+	{ { 0 , false } , { 6 , true } , { 11 , false } } ) {
+  ib->set_variable_values( std::vector< double >{ y } );
+  for( const bool abstract : { false , true } )
+   check( ib->is_feasible( abstract ) == feasible , "bounds [ 5 , 10 ] at "
+	  + std::to_string( y ) +
+	  ( feasible ? ": not feasible" : ": feasible" ) +
+	  ( abstract ? " by the Constraint" : " by the ColVariable" ) );
+  }
+ delete ib;
+
+ InvestmentBlock two( nullptr , 2 );
+ two.add_component( new InvestmentFunction( nullptr , {} , { 0 , 1 , 2 } ,
+		     { InvestmentFunction::eUnitBlock ,
+		       InvestmentFunction::eUnitBlock ,
+		       InvestmentFunction::eUnitBlock } , { 1 , 1 , 1 } ) );
+ two.generate_abstract_variables();
+ try {
+  two.generate_abstract_constraints();
+  check( false , "three assets over two design Variable: not refused" );
+  }
+ catch( const std::logic_error & e ) {
+  check( std::string( e.what() ).find( "and no AssetVarIndex" ) !=
+	 std::string::npos , "three assets over two design Variable: "
+	 "refused, but saying \"" + std::string( e.what() ) + "\"" );
+  }
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the active Variable of a component are the design Variable its assets
+/// and their baselines name, in increasing order, and its mappings point
+/// into them: over 3 design Variable, the unit of a component on the third
+/// with the first as baseline has the actives ( x0 , x2 ) and the mappings
+/// ( 1 ) and ( 0 ); the line and the unit of line_and_unit() on the
+/// second have ( x1 ) and the mapping ( 0 , 0 ); a component with no asset
+/// has all of them
+
+static void test_component_mappings( void )
+{
+ auto g = components( 3 , { 0 } );
+ auto c0 = g.getGroup( "Component_0" );
+ const unsigned int third = 2;
+ c0.getVar( "AssetVarIndex" ).putVar( { 0 } , third );
+ put_uint( c0 , "AssetBaselineVarIndex" , c0.getDim( "NumAssets" ) , { 0 } );
+
+ auto c1 = g.addGroup( "Component_1" );
+ auto na = c1.addDim( "NumAssets" , 2 );
+ put_uint( c1 , "Assets" , na , { 0 , 0 } );
+ put_uint( c1 , "AssetType" , na , { 1 , 0 } );
+ put( c1 , "Cost" , na , { 100 , 100 } );
+ put_uint( c1 , "AssetVarIndex" , na , { 1 , 1 } );
+ auto u = c1.addGroup( "InnerBlock" );
+ u.putAtt( "type" , "UCBlock" );
+ thermal_uc( u , 0 , true );
+
+ u = g.addGroup( "Component_2" ).addGroup( "InnerBlock" );
+ u.putAtt( "type" , "UCBlock" );
+ thermal_uc( u );
+
+ auto ib = dynamic_cast< InvestmentBlock * >( Block::new_Block( g ) );
+ check( ib && ( ib->get_investment_functions().size() == 3 ) ,
+	"three components with mappings: not read as three" );
+ if( ( ! ib ) || ( ib->get_investment_functions().size() != 3 ) ) {
+  delete ib;
+  return;
+  }
+
+ const auto & x = ib->get_variables();
+ const auto & f = ib->get_investment_functions();
+ const auto actives = [ & x ]( InvestmentFunction * fk ,
+			       const std::vector< Index > & which ) {
+  if( fk->get_num_active_var() != which.size() )
+   return( false );
+  for( Index j = 0 ; j < which.size() ; ++j )
+   if( fk->get_active_var( j ) != & x[ which[ j ] ] )
+    return( false );
+  return( true );
+  };
+ check( actives( f[ 0 ] , { 0 , 2 } ) &&
+	( f[ 0 ]->get_asset_variable_indices() ==
+	  std::vector< Index >{ 1 } ) &&
+	( f[ 0 ]->get_asset_baseline_variable_indices() ==
+	  std::vector< Index >{ 0 } ) , "a unit on the third design Variable "
+	"with the first as baseline: not the actives ( x0 , x2 ) with the "
+	"mappings ( 1 ) and ( 0 )" );
+ check( actives( f[ 1 ] , { 1 } ) &&
+	( f[ 1 ]->get_asset_variable_indices() ==
+	  std::vector< Index >{ 0 , 0 } ) , "two assets on the second design "
+	"Variable: not the actives ( x1 ) with the mapping ( 0 , 0 )" );
+ check( actives( f[ 2 ] , { 0 , 1 , 2 } ) , "a component with no asset: not "
+	"all the design Variable as actives" );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
+/// the limits on the change of a design Variable over its baseline: with 1
+/// installed and MaxInvestment 2 the first is at most 3, and over the first
+/// with MaxInvestment 3 the second is at most 3 above it, read off the
+/// ColVariable as off the Constraint, where a third component gives the
+/// second the same limit over the same baseline; one giving it another
+/// limit is refused
+
+static void test_variation_limits( void )
+{
+ const auto limited = []( double third ) {
+  auto g = components( 2 , { 0 , 1 , 2 } );
+  auto c = g.getGroup( "Component_0" );
+  put( c , "InstalledQuantity" , 1 );
+  put( c , "MaxInvestment" , 2 );
+  for( const std::string name : { "Component_1" , "Component_2" } ) {
+   c = g.getGroup( name );
+   const unsigned int second = 1;
+   c.getVar( "AssetVarIndex" ).putVar( { 0 } , second );
+   put_uint( c , "AssetBaselineVarIndex" , c.getDim( "NumAssets" ) , { 0 } );
+   put( c , "MaxInvestment" , name == "Component_1" ? 3 : third );
+   }
+  return( g );
+  };
+
+ auto ib = dynamic_cast< InvestmentBlock * >(
+			   Block::new_Block( limited( 3 ) ) );
+ ib->generate_abstract_variables();
+ ib->generate_abstract_constraints();
+ for( const auto & [ x0 , x1 , feasible ] :
+	std::vector< std::tuple< double , double , bool > >
+	{ { 2 , 4 , true } , { 4 , 5 , false } , { 2 , 6 , false } } ) {
+  ib->set_variable_values( std::vector< double >{ x0 , x1 } );
+  for( const bool abstract : { false , true } )
+   check( ib->is_feasible( abstract ) == feasible , "variation limits at ( "
+	  + std::to_string( x0 ) + " , " + std::to_string( x1 ) +
+	  ( feasible ? " ): not feasible" : " ): feasible" ) +
+	  ( abstract ? " by the Constraint" : " by the ColVariable" ) );
+  }
+ delete ib;
+
+ check_refused( limited( 5 ) , "different MaxInvestment" , "two components "
+		"limiting the change of one design Variable differently" );
+ }
+
+/*--------------------------------------------------------------------------*/
 /*---------------------------------- MAIN ----------------------------------*/
 /*--------------------------------------------------------------------------*/
 /// an inner Block in design mode, here a UCBlock with a ThermalUnitBlock
@@ -804,6 +1601,14 @@ int main( void )
   #ifdef HAVE_UCBLOCK
    test_design_mode_refused();
    test_split_solution();
+   test_names_refused();
+   test_fields_refused();
+   test_structure_refused();
+   test_second_size_refused();
+   test_round_trip_components();
+   test_design_feasibility();
+   test_component_mappings();
+   test_variation_limits();
    #ifdef HAVE_MILPSOLVER
     test_curvature();
     test_meshed_line();
@@ -811,6 +1616,13 @@ int main( void )
     test_scaled_zero_copies();
     test_battery_two_assets();
     test_scaled_conversion();
+    test_round_trip();
+    test_feasibility_cut();
+    test_compute_errors();
+    test_unbounded();
+    test_remove_variables();
+    test_weight_changed();
+    test_global_pool();
    #else
     std::cout << "no :MILPSolver in the build: the linearizations are not "
               << "checked" << std::endl;

@@ -101,6 +101,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `test/README.md`, which describes the folder
 
+- the unit test checks also what an InvestmentBlock reads, solving
+  nothing: the files it refuses, a file with components written and read
+  again, the active Variable and the mappings of each component, and the
+  feasibility of a design against its bounds and the limits on its
+  change; and, with a :MILPSolver, a file written and read again, the
+  feasibility cut of an infeasible inner Block, the errors of `compute()`,
+  an unbounded inner Block, the removal of active Variable, a weight of
+  the inner Block changed after a `compute()`, and the global pool shrunk
+  and put back from a State; its `BSCfg.txt` asks for the homogeneous dual
+  direction (`intHomogeneousDirection` 1), which the feasibility cut needs
+
 ### Changed
 
 - the README leaves the channels that distribute SMS++ to the
