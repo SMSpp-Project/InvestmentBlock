@@ -664,7 +664,9 @@ void InvestmentFunction::reset_event_handler( int type , EventID id ) {
                                 std::to_string( id ) + " for type " +
                                 std::to_string( type ) ) );
 
- static auto do_nothing = []() -> int {
+ // a pointer to function, which target() finds in an EventHandler, while any
+ // other handler gives it nullptr
+ static int ( * const do_nothing )( void ) = []() -> int {
   return( ThinComputeInterface::eContinue ); };
 
  if( id == v_events[ type ].size() - 1 ) {
@@ -673,8 +675,9 @@ void InvestmentFunction::reset_event_handler( int type , EventID id ) {
   do
    v_events[ type ].pop_back();
   while( ( ! v_events[ type ].empty() ) &&
-         ( *( v_events[ type ].back().target < int( * )() > ( ) ) ==
-           do_nothing ) );
+         [ & ]() {
+          const auto f = v_events[ type ].back().target< int( * )( void ) >();
+          return( f && ( *f == do_nothing ) ); }() );
  }
  else
   // the event is not the last of its type: replace it with a do_nothing to
@@ -762,43 +765,6 @@ void InvestmentFunction::serialize_State
  global_pool.serialize( group );
 
 }  // end( InvestmentFunction::serialize_State )
-
-/*--------------------------------------------------------------------------*/
-/*---- METHODS FOR HANDLING "ACTIVE" Variable IN THE InvestmentFunction ----*/
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::map_active( c_Vec_p_Var & vars , Subset & map ,
-                                     const bool ordered ) const {
- if( v_x.empty() )
-  return;
-
- if( map.size() < vars.size() )
-  map.resize( vars.size() );
-
- if( ordered ) {
-  Index found = 0;
-  for( Index i = 0 ; i < v_x.size() ; ++i ) {
-   auto itvi = std::lower_bound( vars.begin() , vars.end() , v_x[ i ] );
-   if( itvi != vars.end() ) {
-    map[ std::distance( vars.begin() , itvi ) ] = i;
-    ++found;
-   }
-  }
-  if( found < vars.size() )
-   throw( std::invalid_argument( "InvestmentFunction::map_active: some "
-                                 "Variable is not active." ) );
- }
- else {
-  auto it = map.begin();
-  for( auto var : vars ) {
-   auto i = this->is_active( var );
-   if( i >= v_x.size() )
-    throw( std::invalid_argument( "InvestmentFunction::map_active: "
-                                  "some Variable is not active" ) );
-   *(it++) = i;
-  }
- }
-}  // end( InvestmentFunction::map_active )
 
 /*--------------------------------------------------------------------------*/
 /*-------------- METHODS FOR MODIFYING THE InvestmentFunction --------------*/
@@ -1116,7 +1082,7 @@ int InvestmentFunction::compute( bool changedvars ) {
   return( kOK );
  }
 
- if( v_Block.empty() )
+ if( v_Block.empty() || ( ! v_Block.front() ) )
   throw( std::logic_error( "InvestmentFunction::compute: there must be at "
                            "least one sub-Block, but there is none." ) );
 
@@ -1155,7 +1121,11 @@ int InvestmentFunction::compute_pieces( bool changedvars ) {
  // InvestmentFunction lends its identity to the inner Solver.
 
  auto solver = get_inner_solver();
- assert( solver );
+ if( ! solver )
+  throw( std::logic_error( "InvestmentFunction::compute: the inner Block "
+                           "has no Solver, or its first Solver is not a "
+                           "CDASolver: the ComputeConfig of the "
+                           "InvestmentFunction gives it one" ) );
 
  void * solver_id = solver->id();
  solver->set_id( f_id );
@@ -1594,27 +1564,6 @@ void InvestmentFunction::get_linearization_coefficients
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::get_linearization_coefficients
-( SparseVector & g , Range range , Index name ) {
-
- range.second = std::min( range.second , Index( v_x.size() ) );
- if( range.second <= range.first )
-  return;
-
- if( name != Inf< Index >() ) {
-  // Linearization from the global pool
-  global_pool.get_linearization_coefficients( g , range , name );
-  return;
- }
-
- std::vector< double > scratch;
- const auto & linearization = current_linearization( scratch );
- for( Index i = range.first ; i < range.second ; ++i )
-  g.coeffRef( i ) = linearization[ i ];
-}  // end( InvestmentFunction::get_linearization_coefficients( sv , range ) )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::get_linearization_coefficients
 ( FunctionValue * g , c_Subset & subset , const bool ordered , Index name ) {
 
  if( name != Inf< Index >() ) {
@@ -1629,23 +1578,6 @@ void InvestmentFunction::get_linearization_coefficients
  for( auto i : subset )
   g[ k++ ] = linearization[ i ];
 }  // end( InvestmentFunction::get_linearization_coefficients( * , subset ) )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::get_linearization_coefficients
-( SparseVector & g , c_Subset & subset , const bool ordered , Index name ) {
-
- if( name != Inf< Index >() ) {
-  // Linearization from the global pool
-  global_pool.get_linearization_coefficients( g , subset , ordered , name );
-  return;
- }
-
- std::vector< double > scratch;
- const auto & linearization = current_linearization( scratch );
- for( auto i : subset )
-  g.coeffRef( i ) = linearization[ i ];
-}  // end( InvestmentFunction::get_linearization_coefficients( sv, subset ) )
 
 /*--------------------------------------------------------------------------*/
 
@@ -2791,28 +2723,11 @@ void InvestmentFunction::GlobalPool::get_linearization_coefficients
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::GlobalPool::get_linearization_coefficients
-( SparseVector & g , Range range , Index name ) const {
- for( Index i = range.first ; i < range.second ; ++i )
-  g.coeffRef( i ) = linearization_coefficients[ name ][ i ];
-}  // end( InvestmentFunction::GlobalPool::get_linearization_coefficients )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::GlobalPool::get_linearization_coefficients
 ( FunctionValue * g , c_Subset & subset , const bool ordered , Index name )
  const {
  Index k = 0;
  for( auto i : subset )
   g[ k++ ] = linearization_coefficients[ name ][ i ];
-}  // end( InvestmentFunction::GlobalPool::get_linearization_coefficients )
-
-/*--------------------------------------------------------------------------*/
-
-void InvestmentFunction::GlobalPool::get_linearization_coefficients
-( SparseVector & g , c_Subset & subset , const bool ordered , Index name )
- const {
- for( auto i : subset )
-  g.coeffRef( i ) = linearization_coefficients[ name ][ i ];
 }  // end( InvestmentFunction::GlobalPool::get_linearization_coefficients )
 
 /*--------------------------------------------------------------------------*/

@@ -187,6 +187,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `InvestmentFunction::map_active()`, whose ordered form mapped a Variable
+  that is not active to the next one, and the `SparseVector` forms of
+  `InvestmentFunction::get_linearization_coefficients()`, which wrote into
+  an empty vector: those of the core are used
+
 - what the InvestmentFunction did by itself with an SDDPBlock (the training
   by its SDDPSolver and the simulation of each scenario on a copy by its
   SDDPGreedySolver, with OpenMP and MPI), now the `SDDPSimulationSolver` of
@@ -226,6 +231,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the investment minus its lower bound with the bounds
 
 ### Fixed
+
+- `InvestmentFunction::compute()` throws when the inner Block has no Solver
+  that is a `CDASolver`, or there is no inner Block, where a Release build
+  went on with a null pointer
+
+- `InvestmentFunction::reset_event_handler()` no longer reads through a
+  null pointer when it removes the last handler of a type while another
+  remains
 
 - with the compilers of MinGW (MSYS2) the target asks whoever links it
   for the symbol that forces the module in, as with MSVC and on macOS:

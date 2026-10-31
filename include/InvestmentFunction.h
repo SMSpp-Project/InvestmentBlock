@@ -1282,11 +1282,6 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
- void map_active( c_Vec_p_Var & vars , Subset & map , bool ordered = false )
-  const override final;
-
-/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
-
  Variable * get_active_var( Index i ) const override final {
   return( v_x[ i ] );
   }
@@ -1911,19 +1906,7 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 
- void get_linearization_coefficients( SparseVector & g ,
-		         Range range = std::make_pair( 0 , Inf< Index >() ) ,
-				      Index name = Inf< Index >() ) override;
-
-/*--------------------------------------------------------------------------*/
-
  void get_linearization_coefficients( FunctionValue * g , c_Subset & subset ,
-				      bool ordered = false ,
-				      Index name = Inf< Index >() ) override;
-
-/*--------------------------------------------------------------------------*/
-
- void get_linearization_coefficients( SparseVector & g , c_Subset & subset ,
 				      bool ordered = false ,
 				      Index name = Inf< Index >() ) override;
 
@@ -2530,18 +2513,7 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 
-  void get_linearization_coefficients( SparseVector & g , Range range ,
-                                       Index name ) const;
-
-/*--------------------------------------------------------------------------*/
-
   void get_linearization_coefficients( FunctionValue * g , c_Subset & subset ,
-                                       const bool ordered , Index name )
-   const;
-
-/*--------------------------------------------------------------------------*/
-
-  void get_linearization_coefficients( SparseVector & g , c_Subset & subset ,
                                        const bool ordered , Index name )
    const;
 
@@ -2975,7 +2947,7 @@ class InvestmentFunction : public C05Function , public Block {
  /** v_linearization for a diagonal linearization, or for the vertical one
   * out of the certificate of infeasibility; otherwise the vertical one of
   * the violated linear constraint, written into \p scratch [see
-  * vertical_linearization()]. Shared by the four
+  * vertical_linearization()]. Shared by the
   * get_linearization_coefficients() flavours. */
 
  const std::vector< double > & current_linearization(
