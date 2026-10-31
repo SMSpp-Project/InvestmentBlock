@@ -32,14 +32,17 @@ target_link_libraries(${modName}_unit_test PRIVATE SMS++::InvestmentBlock)
 
 # The inner Blocks of the instances are UCBlock, read through the factory,
 # and solved by a :MILPSolver: without either in the build only the rest is
-# tested. The umbrella may add them after this module, hence whether they
-# are there is asked when the build is generated, not now.
-target_link_libraries(${modName}_unit_test PRIVATE
-        $<TARGET_NAME_IF_EXISTS:SMS++::UCBlock>
-        $<TARGET_NAME_IF_EXISTS:SMS++::MILPSolver>)
-target_compile_definitions(${modName}_unit_test PRIVATE
-        $<$<TARGET_EXISTS:SMS++::UCBlock>:HAVE_UCBLOCK>
-        $<$<TARGET_EXISTS:SMS++::MILPSolver>:HAVE_MILPSOLVER>)
+# tested. The umbrella adds them after this module, hence they are asked for
+# by their option too; they are linked as targets, so that their link options
+# keep their libraries in the program where the linker would drop them
+if (TARGET SMS++::UCBlock OR BUILD_UCBlock)
+    target_link_libraries(${modName}_unit_test PRIVATE SMS++::UCBlock)
+    target_compile_definitions(${modName}_unit_test PRIVATE HAVE_UCBLOCK)
+endif ()
+if (TARGET SMS++::MILPSolver OR BUILD_MILPSolver)
+    target_link_libraries(${modName}_unit_test PRIVATE SMS++::MILPSolver)
+    target_compile_definitions(${modName}_unit_test PRIVATE HAVE_MILPSOLVER)
+endif ()
 
 if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
     # On Windows with shared libraries enabled copies all runtime DLL

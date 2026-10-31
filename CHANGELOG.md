@@ -232,6 +232,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- the unit test links UCBlock and MILPSolver as targets, when the build
+  has them, instead of by a generator expression, which left out their link
+  options: with the compilers of MinGW the DLL of MILPSolver was not loaded,
+  and no :MILPSolver was in the factory
+
 - an InvestmentBlockSolution holds the :Solution of a split inner Block as
   one, that of the inner Block, and writes it as the one `InnerSolution`
   group, as for an inner Block that is not split
