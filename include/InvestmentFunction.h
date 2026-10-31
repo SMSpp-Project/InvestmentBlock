@@ -104,13 +104,14 @@ namespace SMSpp_di_unipi_it
  * value on to the unit or to the lines [see UCBlock::resize_unit()]. The
  * methods that UCBlock registers write \f$ x_i \f$ in one of two ways:
  *
- * - as the scale factor of the UnitBlock [see UnitBlock::scale()], i.e.,
- *   \f$ x_i \f$ is the number of identical copies of the unit, which share
- *   its Variable. The contributions of the unit to the linking constraints
- *   of the UCBlock and to the Objective are then those of one copy times
- *   \f$ x_i \f$. This is UCBlock::replicate, which an instance that does
- *   not name the methods gets for a unit whose class does not register
- *   "<class>::resize", as a ThermalUnitBlock or a NuclearUnitBlock;
+ * - as the number of copies of the UnitBlock [see UnitBlock::replicate()],
+ *   i.e., \f$ x_i \f$ is the number of identical copies of the unit, which
+ *   share its Variable, the weights of its Block. The contributions of the
+ *   unit to the linking constraints of the UCBlock and to the Objective are
+ *   then those of one copy times \f$ x_i \f$. This is UCBlock::replicate,
+ *   which an instance that does not name the methods gets for a unit whose
+ *   class does not register "<class>::resize", as a ThermalUnitBlock or a
+ *   NuclearUnitBlock;
  *
  * - as the kappa constant of the asset, i.e., \f$ x_i \f$ multiplies its
  *   capacity data. This is UCBlock::resize_unit for a unit and

@@ -2001,8 +2001,9 @@ void InvestmentFunction::add_asset_linearization
  /* A kappa enters the constraints it appears in through their right-hand
   * side alone, so the set of designs that a certificate of infeasibility
   * proves infeasible is a half-space, and the certificate is a cut as it
-  * stands. A scale factor instead multiplies the Variable of its UnitBlock
-  * wherever the UCBlock uses them [see UnitBlock::scale()], hence it
+  * stands. A number of copies instead multiplies the Variable of its
+  * UnitBlock wherever the UCBlock uses them, as their weight [see
+  * UnitBlock::replicate()], hence it
   * multiplies the COLUMNS of that unit: a certificate then holds only over
   * the scales on which it stays dual feasible, and that interval ends at the
   * current scale. On a replicated intermittent unit the one column the ray

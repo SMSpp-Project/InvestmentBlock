@@ -44,7 +44,7 @@ the following:
   an amount x in
 
   * a unit that stands for x identical copies of itself (see
-    `UCBlock::replicate()` and `UnitBlock::scale()`), such as a
+    `UCBlock::replicate()` and `UnitBlock::replicate()`), such as a
     `ThermalUnitBlock` or a `ConversionUnitBlock`;
 
   * a unit resized to x in the way of its class (see
