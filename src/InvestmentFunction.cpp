@@ -636,7 +636,7 @@ void InvestmentFunction::set_par( const idx_type par , const int value ) {
    if( f_Observer && ( decltype( old_size )( value ) < old_size ) ) {
     // The size of the global pool is being reduced. We store in "which" the
     // indices of the deleted linearizations.
-    Subset which( global_pool.size() - value );
+    Subset which( old_size - value );
     std::iota( which.begin() , which.end() , value );
     f_Observer->add_Modification
      ( std::make_shared< C05FunctionMod >
@@ -2751,10 +2751,14 @@ void InvestmentFunction::GlobalPool::clone( const GlobalPool & global_pool ) {
             global_pool.linearization_constants.cend() ,
             linearization_constants.begin() );
 
+ // the places past those of the given GlobalPool hold no linearization
+ std::fill( linearization_constants.begin() + global_pool.size() ,
+            linearization_constants.end() , NaN );
+
  important_linearization_lin_comb =
   global_pool.important_linearization_lin_comb;
 
- for( Index i = 0 ; i < size() ; ++i )
+ for( Index i = 0 ; i < global_pool.size() ; ++i )
   linearization_coefficients[ i ] =
                                global_pool.linearization_coefficients[ i ];
 }  // end( InvestmentFunction::GlobalPool::clone )

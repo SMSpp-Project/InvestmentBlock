@@ -213,6 +213,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `InvestmentFunction::set_par()` that shrinks the global pool
+  (`intGPMaxSz`) tells removed the linearizations past its new size: the
+  `GlobalPoolRemoved` Modification had an empty set of names, which says
+  that all of them were removed
+
+- a `State` of a smaller global pool put into an `InvestmentFunction`
+  leaves no linearization in the names past it: the copy read the given
+  pool past its end, and kept the constants of the names past it, so that
+  they still looked stored
+
 - `makefile-c` and `makefile-s` include the basic makefile of
   TwoStageStochasticBlock, whose StochasticBlock comes with SDDPBlock
   already: with both makefile-s it was compiled twice, from two paths, and
