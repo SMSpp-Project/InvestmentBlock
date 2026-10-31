@@ -10,7 +10,7 @@
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-ComputeConfig  # exact type of the Configuration object
+ComputeConfig # exact type of the Configuration object
 
 1  # f_diff == 1 ==> all non-provided parameters are not changed
 
@@ -47,7 +47,9 @@ ComputeConfig  # exact type of the Configuration object
 # pointer to the "extra" Configuration: the BlockSolverConfig of the inner
 # Block of the InvestmentFunction
 SimpleConfiguration<std::map<std::string,Configuration*>>
-1                  # the number of elements in the map
+
+1  # the number of elements in the map
+
 BlockSolverConfig  *BSCfg.txt
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
