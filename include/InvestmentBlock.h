@@ -202,9 +202,7 @@ public:
   *   Integer[i] is nonzero, the i-th ColVariable of this InvestmentBlock is
   *   integer, e.g., the number of modules of a modular asset. This variable
   *   is optional. If it is not provided, then we assume that every
-  *   ColVariable is continuous. The lower bound of an integer ColVariable has
-  *   to be integer if the bounds are reformulated [see
-  *   generate_abstract_constraints()].
+  *   ColVariable is continuous.
   *
   * - The dimension "ObjectiveSense", which indicates the sense of the
   *   Objective of this InvestmentBlock. If it is zero, then the Objective is
@@ -346,7 +344,6 @@ public:
  void set_function( InvestmentFunction * function ,
 		    c_ModParam issueMod = eModBlck ,
                     bool deleteold = true ) {
-  function->reformulated_bounds( f_reformulate_bounds );
   objective.set_function( function , issueMod , deleteold );
   }
 
@@ -383,22 +380,8 @@ public:
   * refuses a split inner Block whose pieces something ties [see
   * check_parked()].
   *
-  * The given Configuration \p stcc or the Configuration for the static
-  * constraints present in the BlockConfig of this InvestmentBlock can be used
-  * to indicate that the bound constraints must be reformulated as
-  * follows: for each i, if \f$ l_i \f$ is finite, the above constraint is
-  * replaced by \f$ 0 \le x_i \le u_i - l_i \f$, i.e., \f$ x_i \f$ becomes
-  * the investment minus its lower bound [see
-  * InvestmentFunction::reformulated_bounds()].
-  *
-  * If \p stcc is not nullptr and it is a SimpleConfiguration< int >, or if
-  * f_BlockConfig->f_static_constraints_Configuration is not nullptr and it is
-  * a SimpleConfiguration< int >, then the f_value (an int) indicates whether
-  * the bounds must be reformulated. If the f_value is nonzero, then the
-  * bounds are reformulated as above.
-  *
-  * @param stcc A pointer to a Configuration determining whether the bounds
-  *        must be reformulated. */
+  * @param stcc not used: the bounds are given as they are, which
+  *        BundleSolver takes [see BundleSolver::effective_bounds()]. */
 
  void generate_abstract_constraints( Configuration *stcc = nullptr ) override;
 
@@ -557,11 +540,6 @@ public:
  const std::vector< BoxConstraint > & get_constraints() const {
   return v_constraints;
   }
-
-/*--------------------------------------------------------------------------*/
- /// returns true if the Variable are shifted by their lower bound
-
- bool get_reformulate_bounds() const { return( f_reformulate_bounds ); }
 
 /** @} ---------------------------------------------------------------------*/
 /*----------- METHODS DESCRIBING THE BEHAVIOR OF A InvestmentBlock ---------*/
@@ -759,8 +737,6 @@ protected:
  /// split_inner()]
  bool f_scenario_decomposition = true;
 
- /// indicates whether the bound constraints must be reformulated
- int f_reformulate_bounds = 0;
 
  FRealObjective objective;  ///< the Objective of this InvestmentBlock
 
@@ -817,30 +793,21 @@ protected:
 
 /*--------------------------------------------------------------------------*/
  /// adds the bounds of the design Variable to the static Constraint
- /** Makes v_constraints out of LowerBound and UpperBound, reformulated as
-  * the BlockConfig, or \p stcc, asks [see generate_abstract_constraints()],
-  * and adds them to the static Constraint; does nothing without bounds. */
+ /** Makes v_constraints out of LowerBound and UpperBound and adds them to
+  * the static Constraint; does nothing without bounds. */
 
- void add_bound_constraints( Configuration * stcc );
+ void add_bound_constraints( void );
 
 /*--------------------------------------------------------------------------*/
  /// adds the limits of the components on the change of the design Variable
  /** Makes v_variation_constraints out of the MaxInvestment and
   * MaxDisinvestment of the components, one row for each pair of design
-  * Variable and baseline, with the sides shifted where the bounds are
-  * reformulated, and adds them to the static Constraint. Called by
+  * Variable and baseline, and adds them to the static Constraint. Called by
   * generate_abstract_constraints(): BundleSolver hands these rows to its
   * master problem when it is attached, and does not follow a change of them
   * afterwards. */
 
  void add_variation_constraints( void );
-
-/*--------------------------------------------------------------------------*/
- /// the shift of the design Variable x: its lower bound if the bounds are
- /// reformulated and it is finite, the value of x being then the one of its
- /// asset minus it [see add_bound_constraints()]; 0 otherwise, and for no x
-
- double design_shift( const ColVariable * x ) const;
 
 /*--------------------------------------------------------------------------*/
 

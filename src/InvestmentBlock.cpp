@@ -702,7 +702,7 @@ void InvestmentBlock::generate_objective( Configuration * objc )
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
+void InvestmentBlock::generate_abstract_constraints( Configuration * )
 {
  check_parked();  // [see split_inner()]
 
@@ -721,7 +721,7 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
           " active Variable, and no AssetVarIndex: the asset i invests in "
           "the active Variable i" ) );
 
- add_bound_constraints( stcc );  // the bounds of the design Variable
+ add_bound_constraints();  // the bounds of the design Variable
  add_variation_constraints();    // the limits on their change
 
  // marked only if there is a row: until then the bounds can still be set and
@@ -733,39 +733,10 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
 
 /*--------------------------------------------------------------------------*/
 
-void InvestmentBlock::add_bound_constraints( Configuration * stcc )
+void InvestmentBlock::add_bound_constraints( void )
 {
  if( v_lower_bound.empty() && v_upper_bound.empty() )
   return; // there is no bound constraint
-
- f_reformulate_bounds = 0;
- auto config = dynamic_cast< SimpleConfiguration< int > * >( stcc );
- if( ( ! config ) && f_BlockConfig )
-  config = dynamic_cast< SimpleConfiguration< int > * >(
-			f_BlockConfig->f_static_constraints_Configuration );
- if( config )
-  f_reformulate_bounds = config->f_value;
-
- // each InvestmentFunction computes at the shifted Variable plus its own
- // lower bounds, which are those of this InvestmentBlock if it is the only
- // one; a component reads them out of its own group, so they must be those of
- // the design Variable it is active in, or it would compute at a wrong point
- for( auto function : get_investment_functions() ) {
-  function->reformulated_bounds( f_reformulate_bounds );
-  if( f_reformulate_bounds && is_disaggregated() )
-   for( Index i = 0 ; i < function->get_num_active_var() ; ++i ) {
-    const auto g = Index( static_cast< const ColVariable * >(
-                        function->get_active_var( i ) ) - v_variables.data() );
-    if( function->get_var_lower_bound( i ) !=
-        ( v_lower_bound.empty() ? - Inf< double >() : v_lower_bound[ g ] ) )
-     throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
-                              " the bounds cannot be reformulated, the lower "
-                              "bound of the active Variable " +
-                              std::to_string( i ) + " of a component differs "
-                              "from that of the design Variable " +
-                              std::to_string( g ) ) );
-    }
-  }
 
  // Initialize the constraints
  v_constraints.resize( v_variables.size() );
@@ -778,35 +749,15 @@ void InvestmentBlock::add_bound_constraints( Configuration * stcc )
  // Lower bound constraints
  if( ! v_lower_bound.empty() ) {
   assert( v_lower_bound.size() == v_constraints.size() );
-  for( Index i = 0 ; i < v_constraints.size() ; ++i ) {
-   // shifting an integer Variable by its lower bound keeps it integer only
-   // if the bound is
-   if( f_reformulate_bounds && ( i < v_integer.size() ) && v_integer[ i ] &&
-       std::isfinite( v_lower_bound[ i ] ) &&
-       ( v_lower_bound[ i ] != std::floor( v_lower_bound[ i ] ) ) )
-    throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
-			     " the lower bound of an integer Variable must be"
-			     " integer for the bounds to be reformulated" ) );
-
-   if( f_reformulate_bounds && ( v_lower_bound[ i ] > -Inf< double >() ) ) {
-    assert( v_lower_bound[ i ] != Inf< double >() );
-    v_constraints[ i ].set_lhs( 0.0 );
-    }
-   else
-    v_constraints[ i ].set_lhs( v_lower_bound[ i ] );
-   }
+  for( Index i = 0 ; i < v_constraints.size() ; ++i )
+   v_constraints[ i ].set_lhs( v_lower_bound[ i ] );
   }
 
  // Upper bound constraints
  if( ! v_upper_bound.empty() ) {
   assert( v_upper_bound.size() == v_constraints.size() );
-  for( Index i = 0 ; i < v_constraints.size() ; ++i ) {
-   if( f_reformulate_bounds && ( i < v_lower_bound.size() ) &&
-       ( v_lower_bound[ i ] > -Inf< double >() ) )
-    v_constraints[ i ].set_rhs( v_upper_bound[ i ] - v_lower_bound[ i ] );
-   else
-    v_constraints[ i ].set_rhs( v_upper_bound[ i ] );
-   }
+  for( Index i = 0 ; i < v_constraints.size() ; ++i )
+   v_constraints[ i ].set_rhs( v_upper_bound[ i ] );
   }
 
  add_static_constraint( v_constraints , "var_bounds" );
@@ -823,9 +774,8 @@ void InvestmentBlock::add_variation_constraints( void )
   LinearFunction::v_coeff_pair vars = { std::make_pair( l.x , 1.0 ) };
   if( l.b )
    vars.push_back( std::make_pair( l.b , -1.0 ) );
-  const double s = l.q - design_shift( l.x ) + design_shift( l.b );
-  row->set_lhs( l.lo + s );
-  row->set_rhs( l.hi + s );
+  row->set_lhs( l.lo + l.q );
+  row->set_rhs( l.hi + l.q );
   ( row++ )->set_function( new LinearFunction( std::move( vars ) ) );
   }
 
@@ -835,15 +785,6 @@ void InvestmentBlock::add_variation_constraints( void )
 
 /*--------------------------------------------------------------------------*/
 
-double InvestmentBlock::design_shift( const ColVariable * x ) const
-{
- if( ( ! x ) || ( ! f_reformulate_bounds ) || v_lower_bound.empty() )
-  return( 0.0 );
- const auto lb = v_lower_bound[ x - v_variables.data() ];
- return( lb > - Inf< double >() ? lb : 0.0 );
- }
-
-/*--------------------------------------------------------------------------*/
 /*----------------------- Methods for handling Solution --------------------*/
 /*--------------------------------------------------------------------------*/
 
@@ -1023,24 +964,20 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
                                       false ) );
   }
 
- // Check the "physical representation", on the value of each asset: the
- // one of its ColVariable plus its shift [see design_shift()]
- const auto asset = [ this ]( const ColVariable * x ) {
-  return( x->get_value() + design_shift( x ) );
-  };
+ // Check the "physical representation"
 
  for( Index i = 0 ; i < v_lower_bound.size() ; ++i )
   if( v_lower_bound[ i ] > -Inf< double >() )
-   if( asset( & v_variables[ i ] ) < v_lower_bound[ i ] - tolerance )
+   if( v_variables[ i ].get_value() < v_lower_bound[ i ] - tolerance )
     return( false );
 
  for( Index i = 0 ; i < v_upper_bound.size() ; ++i )
   if( v_upper_bound[ i ] < Inf< double >() )
-   if( asset( & v_variables[ i ] ) > v_upper_bound[ i ] + tolerance )
+   if( v_variables[ i ].get_value() > v_upper_bound[ i ] + tolerance )
     return( false );
 
  for( const auto & [ pair , l ] : variation_limits( this ) ) {
-  const double d = asset( l.x ) - ( l.b ? asset( l.b ) : 0 ) - l.q;
+  const double d = l.x->get_value() - ( l.b ? l.b->get_value() : 0 ) - l.q;
   if( ( d < l.lo - tolerance ) || ( d > l.hi + tolerance ) )
    return( false );
   }
@@ -1099,25 +1036,6 @@ void InvestmentBlockSolution::deserialize( const netCDF::NcGroup & group )
 
 /*--------------------------------------------------------------------------*/
 
-// the values x of the design Variable of IB shifted by sign times their
-// finite lower bounds if the bounds are reformulated [see
-// InvestmentBlock::generate_abstract_constraints()]: + 1 from the values of
-// the ColVariable to the investment, - 1 back
-
-static std::vector< double > shift_by_lower_bound( const InvestmentBlock * IB ,
-                                                   std::vector< double > x ,
-                                                   double sign )
-{
- const auto & lb = IB->get_variable_lower_bound();
- if( ( ! lb.empty() ) && IB->get_reformulate_bounds() )
-  for( Block::Index i = 0 ; i < x.size() ; ++i )
-   if( lb[ i ] > -Inf< double >() )
-    x[ i ] += sign * lb[ i ];
- return( x );
- }
-
-/*--------------------------------------------------------------------------*/
-
 // the inner Block of the InvestmentFunction f, whose :Solution an
 // InvestmentBlockSolution holds; who names the method asking for it
 
@@ -1138,7 +1056,7 @@ void InvestmentBlockSolution::read( const Block * block )
   throw( std::invalid_argument(
 	"InvestmentBlockSolution::read: block is not a InvestmentBlock" ) );
 
- v_design = shift_by_lower_bound( IB , IB->get_variable_values() , 1 );
+ v_design = IB->get_variable_values();
 
  // collect the inner Block :Solution(s) if requested, one per component
  // [see InvestmentBlock::get_investment_functions()]
@@ -1179,8 +1097,7 @@ void InvestmentBlockSolution::write( Block * block )
   throw( std::invalid_argument(
 	    "InvestmentBlockSolution::write: inconsistent variables size" ) );
 
- IB->set_variable_values< double >( shift_by_lower_bound( IB , v_design ,
-                                                          -1 ) );
+ IB->set_variable_values< double >( v_design );
 
  if( v_inner_Solutions.empty() )
   return;

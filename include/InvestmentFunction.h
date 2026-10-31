@@ -83,9 +83,7 @@ namespace SMSpp_di_unipi_it
  *   has been written into it.
  *
  * Formally, let \f$ x \in \mathbb{R}^m \f$ be the vector of the investments,
- * one per asset (if the bounds of the active ColVariable have been
- * reformulated, \f$ x_i \f$ is the value of the i-th of them plus its lower
- * bound, cf. reformulated_bounds()). Let also \f$ \bar x_i \f$ be the
+ * one per asset. Let also \f$ \bar x_i \f$ be the
  * quantity of the i-th asset that is already installed, and \f$ c_i \f$ and
  * \f$ d_i \f$ the costs of investing and of disinvesting one unit of it
  * ("InstalledQuantity", "Cost" and "DisinvestmentCost" in serialize()). With
@@ -1374,35 +1372,6 @@ class InvestmentFunction : public C05Function , public Block {
                         ModParam issueMod = eModBlck ) override final;
 
 /*--------------------------------------------------------------------------*/
- /// informs the InvestmentFunction whether the bounds were reformulated
- /** This functions informs the InvestmentFunction whether the bounds on the
-  * active variables have been reformulated.
-  *
-  * The active variables of this InvestmentFunction may have "natural" lower
-  * and upper bounds in the model in which they are defined. That is, for each
-  * active variable \f$ x \f$, there may be \f$ l \f$ and \f$ u \f$ such
-  * that \f$ l \le x \le u \f$. These natural bounds, however, may have been
-  * reformulated such that \f$ x \f$ becomes a nonnegative variable
-  * satisfying \f$ 0 \le x \le u - l \f$, if the lower bound \f$ l \f$ is
-  * finite. This function informs the
-  * InvestmentFunction whether the natural bounds on the active variables have
-  * been reformulated.
-  *
-  * @param reformulated If true, this means that the bounds on the active
-  *        variables have been reformulated. Otherwise, the bounds are the
-  *        "natural" ones. */
-
- void reformulated_bounds( bool reformulated ) {
-  if( reformulated && ( ( ! v_asset_var_index.empty() ) ||
-                        ( ! v_asset_baseline_var_index.empty() ) ) )
-   throw( std::logic_error( "InvestmentFunction::reformulated_bounds: bound "
-                            "reformulation is not supported together with a "
-                            "non-identity asset-to-variable mapping or a "
-                            "variable baseline" ) );
-  f_reformulated_bounds = reformulated;
-  }
-
-/*--------------------------------------------------------------------------*/
  /// returns the lower bound for the given active variable
  /** This function returns the lower bound for the value of the i-th active
   * variable of this InvestmentFunction.
@@ -1448,10 +1417,6 @@ class InvestmentFunction : public C05Function , public Block {
                              " assets" ) );
    check_indices( avi , v_x.size() , "InvestmentFunction::"
                   "set_asset_variable_indices: variable index" );
-   if( f_reformulated_bounds )
-    throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
-                             "a non-identity mapping is not supported when "
-                             "the bounds have been reformulated" ) );
    }
   v_asset_var_index = std::move( avi );
   }
@@ -1469,9 +1434,7 @@ class InvestmentFunction : public C05Function , public Block {
   * InstalledQuantity datum, as in the single-period case.
   *
   * A variable baseline cannot be combined with the InstalledQuantity datum in
-  * the same InvestmentFunction (ambiguous: which "before"?), nor with
-  * reformulated bounds (get_var_value() would silently shift the read value
-  * by a per-asset datum indexed by variable); both combinations throw.
+  * the same InvestmentFunction (ambiguous: which "before"?): it throws.
   *
   * @param bvi one entry per asset, each the index of its baseline variable
   *        among the active ones. */
@@ -1489,10 +1452,6 @@ class InvestmentFunction : public C05Function , public Block {
     throw( std::logic_error(
      "InvestmentFunction::set_asset_baseline_variable_indices: a variable "
      "baseline cannot be combined with InstalledQuantity" ) );
-   if( f_reformulated_bounds )
-    throw( std::logic_error(
-     "InvestmentFunction::set_asset_baseline_variable_indices: a variable "
-     "baseline is not supported when the bounds have been reformulated" ) );
    }
   v_asset_baseline_var_index = std::move( bvi );
   }
@@ -1710,8 +1669,7 @@ class InvestmentFunction : public C05Function , public Block {
   *   i in {0, ..., NumAssets - 1}.
   *
   * Let \f$ x_i \f$ be the value of the i-th active Variable of this
-  * InvestmentFunction (plus its lower bound, if the bounds are reformulated
-  * [see reformulated_bounds()]) and \f$ \bar x_i \f$ =
+  * InvestmentFunction and \f$ \bar x_i \f$ =
   * InstalledQuantity[i]. If \f$ x_i > \bar x_i \f$, then the i-th asset is
   * subject to investment, and if \f$ x_i < \bar x_i \f$, to disinvestment.
   * Because the cost of investment is typically different from the cost of
@@ -2113,17 +2071,6 @@ class InvestmentFunction : public C05Function , public Block {
  ///< maximum absolute error in the multipliers of a linear combination
 
  bool f_ignore_modifications = false; ///< ignore any Modification
-
- bool f_reformulated_bounds = false;
- ///< indicates whether the bounds on the active variables were reformulated
- /**< The active variables of this InvestmentFunction may have natural lower
-  * and upper bounds in the model in which they are defined. That is, for each
-  * active variable \f$ x \f$, there may be \f$ l \f$ and \f$ u \f$ such
-  * that \f$ l \le x \le u \f$. These natural bounds, however, may have been
-  * reformulated such that \f$ x \f$ becomes a nonnegative variable
-  * satisfying \f$ 0 \le x \le u - l \f$, if the lower bound \f$ l \f$ is
-  * finite. This bool variable thus indicates whether
-  * the natural bounds on the active variables have been reformulated. */
 
  bool f_has_value = false;
  ///< the value of the Function was successfully computed
@@ -2885,31 +2832,8 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// returns the value of the i-th active variable
- /** This function returns the value of the i-th active variable, possibly
-  * taking into account its lower bound. If \p actual is \c true, then this
-  * function returns the variable of the i-th active variable. Otherwise, if
-  * the lower bound for this variable is finite, then this function returns
-  * the value of this active variable plus its lower bound.
-  *
-  * This function is useful because the model to which this variable belongs
-  * may have been reformulated as follows. This active variable, let us call
-  * it \f$ x \f$, may be subject to lower and upper bounds, so that it must
-  * satisfy \f$ l \le x \le u \f$ in the model in which it is defined.
-  * However, this model may have been reformulated in such a way that, if the
-  * lower bound \f$ l \f$ is finite, this variable becomes a nonnegative
-  * variable which must then satisfy \f$ 0 \le x \le u - l \f$. Thus, if the
-  * model has been reformulated in this way, \f$ l \f$ is finite (actually,
-  * not minus infinity), and \p actual is false, then this function returns
-  * \f$ x + l \f$; otherwise, it returns the value of \f$ x \f$. */
 
- double get_var_value( Index i , bool actual = true ) const
- {
-  if( f_reformulated_bounds && ( ! actual ) && ( i < v_lower_bound.size() )
-      && ( v_lower_bound[ i ] > -Inf< double >() ) )
-   return( v_x[ i ]->get_value() + v_lower_bound[ i ] );
-
-  return( v_x[ i ]->get_value() );
-  }
+ double get_var_value( Index i ) const { return( v_x[ i ]->get_value() ); }
 
 /*--------------------------------------------------------------------------*/
  /// returns the investment cost of the i-th asset
@@ -3005,9 +2929,9 @@ class InvestmentFunction : public C05Function , public Block {
   for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
 
    const auto var_index = asset_var( i );
-   const auto x = get_var_value( var_index , false );
+   const auto x = get_var_value( var_index );
    const auto baseline = var_baseline ?
-    get_var_value( v_asset_baseline_var_index[ i ] , false ) :
+    get_var_value( v_asset_baseline_var_index[ i ] ) :
     get_installed_quantity( i );
 
    if( x > baseline ) {

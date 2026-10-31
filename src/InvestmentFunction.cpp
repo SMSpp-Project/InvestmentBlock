@@ -1656,9 +1656,7 @@ InvestmentFunction::get_linearization_constant( Index name ) {
   // Diagonal linearization, or vertical one out of the infeasibility
   // certificate. F is affine in the design and the cut is F <= 0, so the
   // constant of the latter follows from the value of F exactly as that of
-  // the former follows from the value of the Function; the values read here
-  // are the ones the coefficients are relative to, so a reformulated bound
-  // needs no undoing
+  // the former follows from the value of the Function
   auto alpha = f_diagonal_linearization_required ? f_value : f_farkas_value;
   for( Index i = 0 ; i < v_linearization.size() ; ++i )
    alpha -= v_linearization[ i ] * get_var_value( i );
@@ -1669,20 +1667,8 @@ InvestmentFunction::get_linearization_constant( Index name ) {
  // Vertical linearization out of a violated implicit constraint
  assert( f_violated_constraint.first < v_A.size() );
  const auto i = f_violated_constraint.first;
- double alpha = 0;
- if( f_reformulated_bounds ) {
-  for( Index j = 0 ; j < v_A[ i ].size() ; ++j )
-   if( ( j < v_lower_bound.size() )
-       && ( v_lower_bound[ j ] > -Inf< double >() ) )
-    alpha += v_A[ i ][ j ] * v_lower_bound[ j ];
-  }
-
- if( f_violated_constraint.second == eLHS )
-  alpha = v_constraints_lower_bound[ i ] - alpha;
- else
-  alpha = alpha - v_constraints_upper_bound[ i ];
-
- return( alpha );
+ return( f_violated_constraint.second == eLHS ?
+         v_constraints_lower_bound[ i ] : - v_constraints_upper_bound[ i ] );
 }  // end( InvestmentFunction::get_linearization_constant )
 
 /*--------------------------------------------------------------------------*/
@@ -1702,7 +1688,7 @@ double InvestmentFunction::compute_linear_constraint_value( Index i ) const {
  // per-asset semantics: column j multiplies the variable of ASSET j
  double value = 0;
  for( Index j = 0 ; j < v_A[ i ].size() ; ++j )
-  value += v_A[ i ][ j ] * get_var_value( asset_var( j ) , false );
+  value += v_A[ i ][ j ] * get_var_value( asset_var( j ) );
  return( value );
 }
 
@@ -2322,10 +2308,9 @@ void InvestmentFunction::update_blocks() {
  for( Index g = 0 ; g < v_asset_groups.size() ; ++g ) {
   investment[ g ].reserve( v_asset_groups[ g ].assets.size() );
   for( const auto asset : v_asset_groups[ g ].assets )
-   investment[ g ].push_back( get_var_value( asset_var( asset ) , false ) );
+   investment[ g ].push_back( get_var_value( asset_var( asset ) ) );
   for( const auto asset : v_asset_groups[ g ].second_assets )
-   second_investment[ g ].push_back( get_var_value( asset_var( asset ) ,
-                                                    false ) );
+   second_investment[ g ].push_back( get_var_value( asset_var( asset ) ) );
   }
 
  for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i ) {
@@ -2403,7 +2388,7 @@ void InvestmentFunction::output_variable_values() const {
  file << "Variables: " << v_x.size() << std::endl;
  file << std::setprecision( 20 );
  for( Index i = 0 ; i < v_x.size() ; ++i )
-  file << get_var_value( i , false ) << std::endl;
+  file << get_var_value( i ) << std::endl;
 }
 
 /*--------------------------------------------------------------------------*/

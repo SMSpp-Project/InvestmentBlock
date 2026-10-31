@@ -32,11 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_investment_functions()`; each is weighted by the weight of the
   Objective of its inner Block [see `Block::get_objective_weight()`], with
   a warning when they are all 1. With components the InvestmentBlock is a
-  minimization, and a maximization asked at its root is refused; the
-  `f_reformulate_bounds` option requires that each component have the lower
-  bounds of the design Variable it is active in, and a component with more
-  assets than active Variable and no `AssetVarIndex` is refused when the
-  Constraint are generated
+  minimization, and a maximization asked at its root is refused; a
+  component with more assets than active Variable and no `AssetVarIndex` is
+  refused when the Constraint are generated
 
 - `AssetVarIndex` and `AssetBaselineVarIndex` (netCDF), with
   `set_asset_variable_indices()` and
@@ -211,13 +209,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   iterator, which nothing called: `set_variable_values()` takes a
   `std::vector`
 
-### Fixed
+- the reformulation of the bounds l <= x <= u of the design Variable as
+  0 <= x - l <= u - l, asked by a `SimpleConfiguration<int>` as the
+  Configuration of the static constraints, with
+  `InvestmentBlock::get_reformulate_bounds()`,
+  `InvestmentFunction::reformulated_bounds()` and the second parameter of
+  `InvestmentFunction::get_var_value()`: BundleSolver 1.x needed it, while
+  BundleSolver 2.0 takes any box [see `BundleSolver::effective_bounds()`].
+  The bounds are `BoxConstraint` l <= x <= u, such a Configuration is
+  ignored, and the Variable is the investment; with the reformulation
+  `InvestmentBlock::is_feasible()` on the physical representation compared
+  the investment minus its lower bound with the bounds
 
-- `InvestmentBlock::is_feasible()` on the physical representation reads
-  the value of each asset, its ColVariable plus its lower bound when the
-  bounds are reformulated: it compared the ColVariable, then the asset
-  minus its lower bound, with the bounds, so that a finite lower bound
-  other than 0 gave a wrong answer
+### Fixed
 
 - `InvestmentFunction::set_par()` that shrinks the global pool
   (`intGPMaxSz`) tells removed the linearizations past its new size: the
