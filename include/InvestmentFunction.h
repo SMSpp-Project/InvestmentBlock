@@ -100,33 +100,17 @@ namespace SMSpp_di_unipi_it
  * with respect to it [see "AssetSetter" in serialize()], both called on the
  * UCBlock at the root of each UCBlock of the inner Block, which hands the
  * value on to the unit or to the lines [see UCBlock::resize_unit()]. The
- * methods that UCBlock registers write \f$ x_i \f$ in one of two ways:
- *
- * - as the number of copies of the UnitBlock [see UnitBlock::replicate()],
- *   i.e., \f$ x_i \f$ is the number of identical copies of the unit, which
- *   share its Variable, the weights of its Block. The contributions of the
- *   unit to the linking constraints of the UCBlock and to the Objective are
- *   then those of one copy times \f$ x_i \f$. This is UCBlock::replicate,
- *   which an instance that does not name the methods gets for a unit whose
- *   class does not register "<class>::resize", as a ThermalUnitBlock or a
- *   NuclearUnitBlock;
- *
- * - as the kappa constant of the asset, i.e., \f$ x_i \f$ multiplies its
- *   capacity data. This is UCBlock::resize_unit for a unit and
- *   UCBlock::resize_line for a line, which an instance that does not name
- *   the methods gets for every other unit and for every line. The capacity
- *   data are the minimum and maximum power of an IntermittentUnitBlock,
- *   and therefore the reserve it can give [see
- *   IntermittentUnitBlock::set_kappa()], the power, storage, converter and
- *   reserve limits of a BatteryUnitBlock [see BatteryUnitBlock::set_kappa()],
- *   and the two flow limits
- *   \f$ \kappa_l C^v P^{mn}_l \le F_l \le \kappa_l C^v P^{mx}_l \f$ of a line
- *   \f$ l \f$ in the NetworkBlock of each time instant [see
- *   DCNetworkBlock::set_kappa()]. A line can be an asset of a NetworkBlock
- *   whose class registers "<class>::resize" (DCNetworkBlock, ACNetworkBlock
- *   and OTSNetworkBlock): with any other NetworkBlock, writing the investment
- *   fails, and compute() returns kError with the value \f$ +\infty \f$
- *   (\f$ -\infty \f$ for a maximization).
+ * methods that UCBlock registers write \f$ x_i \f$ either as the number of
+ * copies of a UnitBlock [see UnitBlock::replicate() and UCBlock::replicate()]
+ * or as the kappa constant of a unit or of a line, which multiplies its
+ * capacity data [see UCBlock::resize_unit() and UCBlock::resize_line()]. An
+ * instance that does not name the methods gets UCBlock::replicate for a unit
+ * whose class does not register "<class>::resize", as a ThermalUnitBlock or
+ * a NuclearUnitBlock, UCBlock::resize_unit for every other unit and
+ * UCBlock::resize_line for every line. A line can be an asset only of a
+ * NetworkBlock whose class registers "<class>::resize": with any other
+ * NetworkBlock, writing the investment fails, and compute() returns kError
+ * with the value \f$ +\infty \f$ (\f$ -\infty \f$ for a maximization).
  *
  * In both cases \f$ x_i \f$ multiplies the capacity of the asset as a whole,
  * the installed one included. The capacity data of the UnitBlock or of the
@@ -182,127 +166,36 @@ namespace SMSpp_di_unipi_it
  * at the kink if \f$ c_i + d_i \ge 0 \f$) plus a linearization of \f$ Q \f$.
  * The latter is what the getters named by the assets give [see
  * "AssetLinearization" in serialize()]. Those that UCBlock registers read it
- * from the dual values of the inner Block, i.e., from the multipliers
- * \f$ y \f$ of its constraints that its Solver writes there [see
- * RowConstraint::get_dual()], according to how the investment is written:
+ * from the dual values that the Solver writes in the inner Block [see
+ * RowConstraint::get_dual()]: for the number of copies of a unit as
+ * UCBlock::get_replicate_linearization() says, for the kappa constant of a
+ * line as DCNetworkBlock::get_resize_linearization() and
+ * OTSNetworkBlock::get_resize_linearization() say, and for that of a unit as
+ * BatteryUnitBlock::get_kappa_linearization() and
+ * IntermittentUnitBlock::get_kappa_linearization() say. A getter that has no
+ * derivative to give, as for an asset that has a design variable of its own,
+ * throws, and compute() then returns kError, with no linearization. With a
+ * TwoStageStochasticBlock these coefficients are summed over the UCBlock of
+ * its scenarios (since the probabilities are in their dual values), and with
+ * a Solver giving several solutions they are averaged over them as the
+ * value is.
  *
- * - for an asset represented by a scale factor, the coefficient, given by
- *   UCBlock::get_replicate_linearization(), is
- *   \f[
- *     f^1_i( \bar z_i ) + \bar y^\top g^1_i( \bar z_i ) \; , \tag{2}
- *   \f]
- *   where \f$ f^1_i \f$ is the Objective of one copy of the UnitBlock and
- *   \f$ \bar z_i \f$ is its current solution if it has copies, and else a
- *   minimizer of (2) over the feasible set of one copy (see (4) below).
- *   The vector \f$ g^1_i \f$ holds the contributions of one copy to the
- *   linking constraints of the UCBlock (the active and reactive node
- *   injection constraints, the primary and secondary reserve, inertia and
- *   pollutant budget ones, cf. UCBlock::generate_abstract_constraints()),
- *   whose dual values are \f$ \bar y \f$; the fixed consumption of a unit
- *   that is off is among the contributions to the active ones;
- *
- * - for a line \f$ l \f$, the coefficient, given by
- *   UCBlock::get_resize_line_linearization() out of
- *   DCNetworkBlock::get_resize_linearization(), is
- *   \f[
- *     \sum_t C^v \bigl( \, P^{mn}_l \mu^{mn}_{t,l} - P^{mx}_l
- *     \mu^{mx}_{t,l} \, \bigr) \; , \tag{3}
- *   \f]
- *   where \f$ \mu^{mn}_{t,l} , \mu^{mx}_{t,l} \ge 0 \f$ are the multipliers
- *   of the two sides of the flow limits of the line in the DCNetworkBlock
- *   of instant \f$ t \f$ (at most one of the two is nonzero, and which one
- *   is given by the sign of the dual value); a switchable line of an
- *   OTSNetworkBlock adds the dual of the limit \f$ \min( 1 , \kappa_l ) \f$
- *   of its switching while \f$ \kappa_l < 1 \f$ [see
- *   OTSNetworkBlock::set_kappa()]. Formula (3) holds whatever the formulation
- *   of the network and the susceptances of the lines, since the flow limits
- *   bound the flow Variable of each line [see
- *   DCNetworkBlock::generate_abstract_constraints()]. A line that has a
- *   design variable \f$ x_l \f$ in the DCNetworkBlock has instead the flow
- *   limits \f$ F_l - \kappa_l C^v P^{mx}_l x_l \le 0 \f$ (and the lower
- *   one), in which \f$ \kappa_l \f$ multiplies a Variable: the optimal
- *   value is then not a convex function of \f$ \kappa_l \f$, and
- *   DCNetworkBlock::get_resize_linearization() refuses the line (as
- *   IntermittentUnitBlock::get_kappa_linearization() and
- *   BatteryUnitBlock::get_kappa_linearization() refuse a unit with a design
- *   variable): compute() then returns kError, with no linearization;
- *
- * - for a BatteryUnitBlock or an IntermittentUnitBlock represented by its
- *   kappa constant, the coefficient, given by
- *   UCBlock::get_resize_unit_linearization(), is the one of
- *   BatteryUnitBlock::get_kappa_linearization() and
- *   IntermittentUnitBlock::get_kappa_linearization(), i.e., the sum of the
- *   multipliers of the constraints of the unit whose right-hand sides kappa
- *   multiplies, each times the datum it multiplies there.
- *
- * With a TwoStageStochasticBlock these coefficients are summed over the
- * UCBlock of its scenarios (since the probabilities are in their dual
- * values), and with a Solver giving several solutions they are averaged
- * over them as the value is. By the envelope theorem, (2) and (3) are
- * subgradients of
- * \f$ Q \f$ if \f$ Q \f$ is the optimal value of a convex problem and the
- * dual values are optimal ones. Indeed, a kappa constant of an intermittent
- * unit or of a line only enters right-hand sides of linear constraints, and
- * the optimal value of a convex problem is a convex function of its
- * right-hand sides. A BatteryUnitBlock with the binary variables
- * \f$ u^{ch}_t \f$ has instead the rows
- * \f$ p^-_t \le - \kappa P^{mn}_t u^{ch}_t \f$ and \f$ p^+_t \le \kappa
- * P^{mx}_t ( 1 - u^{ch}_t ) \f$, in which \f$ \kappa \f$ multiplies a
- * Variable; in their continuous relaxation, however, the change of variable
- * \f$ w_t = \kappa u^{ch}_t \f$ turns them into
- * \f$ p^-_t \le - P^{mn}_t w_t \f$,
- * \f$ p^+_t \le P^{mx}_t ( \kappa - w_t ) \f$ and
- * \f$ 0 \le w_t \le \kappa \f$, which are linear in
- * \f$ ( p , w , \kappa ) \f$ jointly, and therefore the optimal value is
- * again convex in \f$ \kappa \f$ (see
- * BatteryUnitBlock::get_kappa_linearization() for the terms of these rows).
- * A scale factor,
- * instead, multiplies all the contributions of a unit, and the convexity of
- * \f$ Q \f$ in \f$ x_i \f$ is that of a perspective: with \f$ Z_i \f$ the
- * feasible set of one copy, convex if the unit is relaxed, \f$ x_i \f$
- * copies contribute \f$ x_i f^1_i( z_i ) \f$ and \f$ x_i g^1_i( z_i ) \f$
- * for some \f$ z_i \in Z_i \f$, i.e., with \f$ w_i = x_i z_i \f$, the
- * perspective \f$ x_i f^1_i( w_i / x_i ) \f$ over the cone
- * \f$ \{ ( w_i , x_i ) : x_i > 0 , \, w_i \in x_i Z_i \} \f$ (closed by
- * \f$ w_i = 0 \f$ at \f$ x_i = 0 \f$ if \f$ Z_i \f$ is bounded), which is
- * jointly convex in \f$ ( w_i , x_i ) \f$, while \f$ g^1_i \f$ is linear,
- * as it is in the rows of the UCBlock. The optimal value of the inner Block
- * is therefore the minimum over \f$ w \f$ of a function jointly convex in
- * \f$ ( w , x ) \f$, a convex function of \f$ x \f$. In the Lagrangian Dual of
- * the linking constraints, the contribution of the unit is
- * \f[
- *   x_i \, \varphi_i( y ) \; , \quad \varphi_i( y ) = \min \{ \,
- *   f^1_i( z_i ) + y^\top g^1_i( z_i ) \; : \; z_i \in Z_i \, \} \; ,
- *   \tag{4}
- * \f]
- * which is affine in \f$ x_i \f$ for each \f$ y \f$, and the rest of the dual
- * function does not depend on \f$ x_i \f$. Hence, if the inner Block is
- * solved as a convex problem (its continuous relaxation, or its Lagrangian
- * Dual by a LagrangianDualSolver), then \f$ Q \f$ is the supremum over
- * \f$ y \f$ of functions affine in \f$ x \f$, the one of an optimal
- * \f$ \bar y \f$ at \f$ \bar x \f$ is below \f$ Q \f$ everywhere and equal to
- * it at \f$ \bar x \f$, and \f$ \varphi_i( \bar y ) \f$ is the coefficient of
- * \f$ x_i \f$ in a subgradient. If \f$ \bar x_i > 0 \f$, the solution
- * \f$ \bar z_i \f$ of the unit is a minimizer in (4) (otherwise the copies
- * could do better against \f$ \bar y \f$, and neither the primal nor the
- * dual solution would be optimal), and (4) is (2). If \f$ \bar x_i = 0 \f$,
- * instead, the unit weighs nothing in the inner Block, and its solution is
- * arbitrary (typically the unit is off, and (2) is 0 even where building
- * the unit pays, which stops a method that starts at 0 there): then
- * the getter has to give \f$ \varphi_i( \bar y ) \f$, minimizing the
- * Objective of (4) over a copy of the unit relaxed as in the inner Block
- * [see UCBlock::get_replicate_linearization()]. Since
- * \f$ x_i \ge 0 \f$, a lower estimate of \f$ \varphi_i( \bar y ) \f$ at
- * \f$ \bar x_i = 0 \f$ (e.g., from a relaxation of the copy) still gives a
- * linearization below \f$ Q \f$ over the domain, if a less tight one. The
- * copies of a scaled unit are then exact for the convexified problem, while
- * for the unit commitment problem they are a restriction, since all the
- * copies of a unit take the same decisions. If the inner Block is solved
- * as a mixed-integer problem, \f$ Q \f$ is typically not convex and the
- * linearization may not be a subgradient. With a Solver that simulates a
- * policy the linearization is the mean of those of the simulations, a
- * subgradient of the mean of their values for the current policy rather
- * than of the expected cost. The cost of the investment in (1)
+ * If the inner Block is solved as a convex problem (its continuous
+ * relaxation, or its Lagrangian Dual by a LagrangianDualSolver), \f$ Q \f$
+ * is convex in each asset and these coefficients are subgradients of it: in
+ * a kappa constant because it enters right-hand sides only (for a battery
+ * with binary variables, in its continuous relaxation after a change of
+ * variable [see BatteryUnitBlock::get_kappa_linearization()]), and in a
+ * number of copies as in a perspective [see UnitBlock::replicate()], also
+ * where the unit has no copies and the getter solves a copy of it against
+ * the dual values. The copies of a scaled unit are exact for the convexified
+ * problem, while for the unit commitment problem they are a restriction,
+ * since all the copies of a unit take the same decisions. If the inner Block
+ * is solved as a mixed-integer problem, \f$ Q \f$ is typically not convex
+ * and the linearization may not be a subgradient. With a Solver that
+ * simulates a policy the linearization is the mean of those of the
+ * simulations, a subgradient of the mean of their values for the current
+ * policy rather than of the expected cost. The cost of the investment in (1)
  * is convex if and only if \f$ c_i + d_i \ge 0 \f$ for all \f$ i \f$. Thus,
  * \f$ \mathcal{F} \f$ is convex if this holds and \f$ Q \f$ is convex;
  * is_convex() checks the former, while the latter depends on the Solver of
@@ -317,8 +210,8 @@ namespace SMSpp_di_unipi_it
  * declared to read one ("AssetFeasibilityCut" in serialize()), which is
  * right for kappa constants, whose certificate is valid away from the
  * current investment when they enter right-hand sides only (intermittent
- * units and lines; for a battery with binary variables, the continuous
- * relaxation after the change of variable above): for a scale factor, which
+ * units and lines, and a battery with binary variables in its continuous
+ * relaxation): for a scale factor, which
  * multiplies the columns of a unit, it may not be, and an instance that
  * does not name the methods declares it for kappa constants only. With the
  * integrality of the active

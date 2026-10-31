@@ -114,6 +114,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- the class comment of `InvestmentFunction` says what InvestmentFunction
+  does, and leaves how the methods of UCBlock write the investment and give
+  its derivatives, with their convexity, to the comments of those methods
+  (`UnitBlock::replicate()`, `UCBlock::get_replicate_linearization()`,
+  `DCNetworkBlock::get_resize_linearization()`, the `get_kappa_linearization()`
+  of the units), to which it points
+
 - the README leaves the channels that distribute SMS++ to the
   installation guide of the wiki (Installing-SMS++), keeping the names
   of the packages of the module
