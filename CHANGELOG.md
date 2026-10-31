@@ -103,6 +103,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- the README leaves the channels that distribute SMS++ to the
+  installation guide of the wiki (Installing-SMS++), keeping the names
+  of the packages of the module
+
 - the InvestmentFunction treats every inner Block alike: the investment is
   written into its pieces, found also through the Function of the Objective
   of its Blocks when it is a Block (the UCBlock of each stage of an
