@@ -72,10 +72,9 @@ the following:
   is split when the `InvestmentBlock` is read into one component for each of
   them, weighted by its probability; if the inner `Block` ties them with
   `Variable` or `Constraint` of its own, `ScenarioDecomposition` 0 keeps it
-  whole. Over an `SDDPBlock` the OPEX is the expected cost of its
-  sub-`Block`, some of which (the ones where the investments take place)
-  must themselves be `UCBlock`, and the same amount of investment in the
-  assets is made for all its stages.
+  whole. Over an `SDDPBlock` the OPEX is the mean cost of the simulations of
+  the policy that its `SDDPSimulationSolver` trains, the investment being
+  written into the `UCBlock` of each stage and the same for all of them.
 
 An inner Block in *design mode*, i.e., one whose units and lines carry the
 design Variable of their investment, as a `TwoStageStochasticBlock` written
@@ -117,11 +116,11 @@ the whole framework. What follows is about building it yourself.
 - The [SMS++ core library](https://gitlab.com/smspp/smspp) and its
   requirements.
 
-- [SMS++ SDDPBlock](https://gitlab.com/smspp/sddpblock)
-
-- [SMS++ UCBlock](https://gitlab.com/smspp/ucblock)
-
-- [SMS++ TwoStageStochasticBlock](https://gitlab.com/smspp/twostagestochasticblock)
+The classes of the inner Block, e.g.,
+[UCBlock](https://gitlab.com/smspp/ucblock),
+[TwoStageStochasticBlock](https://gitlab.com/smspp/twostagestochasticblock)
+or [SDDPBlock](https://gitlab.com/smspp/sddpblock), are not needed to build
+the module: whoever reads an inner Block of one of them links it.
 
 ### Build and install with CMake
 

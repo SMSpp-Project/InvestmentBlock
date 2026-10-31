@@ -407,31 +407,6 @@ public:
  void generate_objective( Configuration *objc = nullptr ) override;
 
 /*--------------------------------------------------------------------------*/
-
- /// set the number of sub-Blocks per stage of the InvestmentFunction
- /** As set_number_sub_blocks(), propagated at deserialize() time, and only
-  * in the format with the inner Block at the root and a single
-  * InvestmentFunction. */
-
- void set_num_sub_blocks_per_stage( Index n ) {
-  f_num_sub_blocks_per_stage = n;
-  }
-
-/*--------------------------------------------------------------------------*/
- /// set the number of (replica) sub-Blocks of the InvestmentFunction
- /** This value is propagated to the underlying InvestmentFunction at
-  * deserialize() time, and only in the format with the inner Block at the
-  * root and a single InvestmentFunction: the components [see
-  * add_component()] do not get it. It is the number of identical inner
-  * Block replicas to construct when the inner Block is an SDDPBlock and the
-  * multi-replica parallel execution path is desired. See
-  * InvestmentFunction::set_number_sub_blocks() for the precise meaning. */
-
- void set_number_sub_blocks( Index n ) {
-  f_num_sub_blocks = n;
-  }
-
-/*--------------------------------------------------------------------------*/
 /*----------------------- Methods for handling Solution --------------------*/
 /*--------------------------------------------------------------------------*/
  /// returns a InvestmentBlockSolution with the current solution
@@ -787,11 +762,6 @@ protected:
  /// indicates whether the bound constraints must be reformulated
  int f_reformulate_bounds = 0;
 
- Index f_num_sub_blocks_per_stage = 1;
-
- Index f_num_sub_blocks = 1;
- ///< number of replica sub-Blocks for the multi-replica SDDPBlock path
-
  FRealObjective objective;  ///< the Objective of this InvestmentBlock
 
  /// the active Variable in the InvestmentFunction
@@ -879,10 +849,11 @@ protected:
   * something ties is refused then [see check_parked()]. The inner Block is
   * kept, believing it still has its pieces, until ~InvestmentBlock() gives
   * them back to it to delete them, and serialize() writes it in place of its
-  * components. An inner Block of that class, an SDDPBlock, or one that is
-  * not made of such Blocks is not split, and false is returned, adding
-  * nothing; so it is if the file asks so, with a ScenarioDecomposition of
-  * zero [see deserialize()].
+  * components. An inner Block of that class, or one whose sub-Blocks are
+  * not made of such Blocks (the pieces behind a Function, as the stages of
+  * a multi-stage problem, do not count), is not split, and false is
+  * returned, adding nothing; so it is if the file asks so, with a
+  * ScenarioDecomposition of zero [see deserialize()].
   *
   * @param grp the component (or root) group that may hold it;
   *

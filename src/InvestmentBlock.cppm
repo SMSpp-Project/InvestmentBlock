@@ -39,9 +39,7 @@ module;
 
 export module smspp.investmentblock;
 
-export import smspp.sddpblock;
-export import smspp.twostagestochasticblock;
-export import smspp.ucblock;
+export import smspp;
 
 export namespace SMSpp_di_unipi_it {
 

@@ -265,19 +265,20 @@ bool InvestmentBlock::split_inner( const netCDF::NcGroup & grp , Index k )
   return( false );   // left whole, as the file asks
 
  // an inner Block of the class of the methods of the assets is its own
- // piece, and an SDDPBlock has none [see InvestmentFunction::set_pieces()]:
- // neither is built here, so that it is built once
+ // piece: it is not built here, so that it is built once
  const auto inner_grp = grp.getGroup( "InnerBlock" );
  if( inner_grp.isNull() )
   return( false );
  const auto cls = InvestmentFunction::asset_class( grp );
- const auto type = type_of( inner_grp );
- if( ( type == cls ) || ( type == "SDDPBlock" ) )
+ if( type_of( inner_grp ) == cls )
   return( false );
 
- // any other is built, and split if it is made of the Blocks of that class,
- // each a copy of the assets [see InvestmentFunction::find_pieces()]: one
- // component per piece, as nothing is generated yet. What ties the pieces is
+ // any other is built, and split if its sub-Blocks are made of the Blocks
+ // of that class, each a copy of the assets [see
+ // InvestmentFunction::find_pieces()]: one component per piece, as nothing
+ // is generated yet. Pieces behind a Function (the stages of a multi-stage
+ // problem, inside the BendersBFunction of each) are not separate problems,
+ // and the inner Block is not split. What ties the pieces is
  // seen only once they are generated, after their BlockConfig, and a split
  // inner Block whose pieces something ties is refused then [see
  // check_parked()]
@@ -653,10 +654,6 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
  auto investment_function = std::make_unique< InvestmentFunction >();
 
  investment_function->set_variables( design_vars() );
-
- investment_function->set_num_sub_blocks_per_stage(
-					       f_num_sub_blocks_per_stage );
- investment_function->set_number_sub_blocks( f_num_sub_blocks );
  investment_function->deserialize( group );
  const auto function = investment_function.release();
  set_function( function );

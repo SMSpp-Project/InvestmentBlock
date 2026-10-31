@@ -105,6 +105,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- the InvestmentFunction treats every inner Block alike: the investment is
+  written into its pieces, found also through the Function of the Objective
+  of its Blocks when it is a Block (the UCBlock of each stage of an
+  SDDPBlock, inside a BendersBFunction), and the value and the linearization
+  are read off its Solver; a Solver whose result is the mean of several
+  solutions (the simulations of the scenarios of a policy, as the
+  `SDDPSimulationSolver` of SDDPBlock) calls the event `eEverySolution`
+  after each of them, and the linearization is read out of each, in the
+  Block holding it, and averaged. The SDDPBlock wants the
+  `SDDPSimulationSolver` as its first Solver [see the BlockSolverConfig of
+  the tests and of investmentblock_solver]
+
+- InvestmentBlock depends on the core alone: UCBlock, SDDPBlock and
+  TwoStageStochasticBlock are no longer needed to build it (CMake, the
+  makefiles, the C++20 module), and whoever reads an inner Block of their
+  classes links them
+
 - the pipeline builds the module also with its makefiles, after CMake, and
   runs on a change of the makefiles too [see `ci/makefile` of the umbrella]
 
@@ -167,6 +184,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `InvestmentFunction::get_var_lower_bound()` is public
 
 ### Removed
+
+- what the InvestmentFunction did by itself with an SDDPBlock (the training
+  by its SDDPSolver and the simulation of each scenario on a copy by its
+  SDDPGreedySolver, with OpenMP and MPI), now the `SDDPSimulationSolver` of
+  SDDPBlock, and with it the inner Block made of several identical
+  SDDPBlock (`InvestmentFunction::set_inner_blocks()`,
+  `set_number_sub_blocks()` and `set_num_sub_blocks_per_stage()` of both
+  classes), which nothing set, and the parameters `intOutputSolution` and
+  `strOutputSolutionDirectory`, which only that path read
+
+- an SDDPBlock is no longer kept whole by its class when the inner Block is
+  split: what is behind a Function is not split, whatever the class
 
 - the attributes `ReplicateBatteryUnits` and `ReplicateIntermittentUnits`
   of InvestmentFunction, which `AssetSetter` replaces: a group carrying

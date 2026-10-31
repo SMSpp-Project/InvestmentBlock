@@ -54,9 +54,7 @@ include(BuildType)
 # If it's not being called by the umbrella, we need to
 # look for the system-installed libraries.
 if (NOT hasParent)
-    find_package(SDDPBlock REQUIRED)
-    find_package(TwoStageStochasticBlock REQUIRED)
-    find_package(UCBlock REQUIRED)
+    find_package(SMS++ REQUIRED)
 endif ()
 
 # ----- Configuration header ------------------------------------------------ #
@@ -150,10 +148,7 @@ target_include_directories(
 # PUBLIC means they will be linked also to the targets that depend on this
 # library, INTERFACE means they will be linked only to the targets that depend
 # on this library.
-target_link_libraries(${modName} PUBLIC
-        ${modNamespace}::SDDPBlock
-        ${modNamespace}::TwoStageStochasticBlock
-        ${modNamespace}::UCBlock)
+target_link_libraries(${modName} PUBLIC ${modNamespace}::SMS++)
 
 # This alias is defined so that executables in this same project can use
 # the library with this notation.
@@ -161,16 +156,13 @@ add_library(${modNamespace}::${modName} ALIAS ${modName})
 
 # ----- C++20 module -------------------------------------------------------- #
 # The module smspp.investmentblock (src/InvestmentBlock.cppm) exports the names
-# of the headers and re-exports smspp.sddpblock, smspp.twostagestochasticblock,
-# smspp.ucblock; like the module smspp of the core, it is built when
-# SMSpp_BUILD_MODULE is ON, which needs CMake 3.28 or later, the Ninja or
-# Visual Studio generator and a compiler that scans the dependencies of the
-# modules.
+# of the headers and re-exports smspp; like the module smspp of the core, it
+# is built when SMSpp_BUILD_MODULE is ON, which needs CMake 3.28 or later, the
+# Ninja or Visual Studio generator and a compiler that scans the dependencies
+# of the modules.
 # Where these are missing, or a module it imports is not there, the option
 # is turned off with a warning [see CheckModule.cmake of SMS++].
-smspp_check_module(${modNamespace}::SDDPBlock_module
-                   ${modNamespace}::TwoStageStochasticBlock_module
-                   ${modNamespace}::UCBlock_module)
+smspp_check_module(${modNamespace}::SMS++_module)
 if (SMSpp_BUILD_MODULE)
     # the scan of the module dependencies, and $<LINK_ONLY> honoured also for
     # the target itself, which cmake_policy(VERSION 3.15) above leaves off
@@ -191,9 +183,7 @@ if (SMSpp_BUILD_MODULE)
     target_compile_definitions(${modName}_module PRIVATE
             $<TARGET_PROPERTY:${modName},INTERFACE_COMPILE_DEFINITIONS>)
     target_link_libraries(${modName}_module PUBLIC $<LINK_ONLY:${modName}>
-            ${modNamespace}::SDDPBlock_module
-            ${modNamespace}::TwoStageStochasticBlock_module
-            ${modNamespace}::UCBlock_module)
+            ${modNamespace}::SMS++_module)
     add_library(${modNamespace}::${modName}_module ALIAS ${modName}_module)
 endif ()
 

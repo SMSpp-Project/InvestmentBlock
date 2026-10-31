@@ -41,13 +41,7 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
- class BendersBFunction;       // forward declaration of BendersBFunction
-
  class BlockSolverConfig;      // forward declaration of BlockSolverConfig
-
- class SDDPBlock;              // forward declaration of SDDPBlock
-
- class SDDPSolver;             // forward declaration of SDDPSolver
 
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
@@ -77,11 +71,11 @@ namespace SMSpp_di_unipi_it
  * - The inner Block is the operational problem. It is either a UCBlock, or
  *   a Block made of UCBlock, such as a TwoStageStochasticBlock whose
  *   scenarios (more precisely, the leaves of its tree of scenarios) are
- *   UCBlock [see find_pieces()], or an SDDPBlock whose stages are
- *   UCBlock inside a BendersBFunction; several identical SDDPBlock can also
- *   be given, in which case the scenarios are divided among them. The same
- *   investment is written into each of these UCBlock, hence it is the same
- *   for all the scenarios and all the stages.
+ *   UCBlock [see find_pieces()], or a multi-stage Block (say, an
+ *   SDDPBlock) whose stages are UCBlock inside the Function of the
+ *   Objective of a Block of each stage. The same investment is written into
+ *   each of these UCBlock, hence it is the same for all the scenarios and
+ *   all the stages.
  *
  * - Its value is the sum of the cost of the investment, a piecewise-linear
  *   function of the active ColVariable, and of the value of the operational
@@ -173,16 +167,14 @@ namespace SMSpp_di_unipi_it
  *   its scenarios (whose probabilities are the weights of the Objective of
  *   their UCBlock [see Block::get_objective_weight()]);
  *
- * - with an SDDPBlock, the cuts of the future cost functions are first
- *   computed by the SDDPSolver registered to the SDDPBlock, if any (after
- *   removing the existing ones, if the investment has changed). Then the
- *   policy they define is simulated over each of the \f$ N \f$ scenarios of
- *   the SDDPBlock by an SDDPGreedySolver, and \f$ Q( x ) \f$ is the mean
- *   \f$ \frac{1}{N} \sum_{ k = 1 }^N Q^k( x ) \f$ of the costs
- *   \f$ Q^k( x ) \f$ of the simulations. This is an unbiased statistical
- *   estimate of the expected operational cost of that policy, which for a
- *   minimization is not below the optimal one, and it differs from the
- *   lower bound given by the cuts.
+ * - with a Solver whose result is the mean of the solutions of \f$ N \f$
+ *   problems [see ThinComputeInterface::eEverySolution], as the
+ *   SDDPSimulationSolver of an SDDPBlock, which trains a policy and
+ *   simulates it on each of the \f$ N \f$ scenarios, \f$ Q( x ) \f$ is that
+ *   mean \f$ \frac{1}{N} \sum_{ k = 1 }^N Q^k( x ) \f$; for a policy, it is
+ *   an unbiased statistical estimate of its expected operational cost,
+ *   which for a minimization is not below the optimal one, and it differs
+ *   from the lower bound given by the cuts.
  *
  * If intComputeLinearization is nonzero (the default), compute() also gives a
  * linearization of \f$ \mathcal{F} \f$ at \f$ x \f$. Its coefficients are the
@@ -246,8 +238,9 @@ namespace SMSpp_di_unipi_it
  *
  * With a TwoStageStochasticBlock these coefficients are summed over the
  * UCBlock of its scenarios (since the probabilities are in their dual
- * values), and with an SDDPBlock they are averaged over the simulations as
- * the value is. By the envelope theorem, (2) and (3) are subgradients of
+ * values), and with a Solver giving several solutions they are averaged
+ * over them as the value is. By the envelope theorem, (2) and (3) are
+ * subgradients of
  * \f$ Q \f$ if \f$ Q \f$ is the optimal value of a convex problem and the
  * dual values are optimal ones. Indeed, a kappa constant of an intermittent
  * unit or of a line only enters right-hand sides of linear constraints, and
@@ -307,10 +300,10 @@ namespace SMSpp_di_unipi_it
  * for the unit commitment problem they are a restriction, since all the
  * copies of a unit take the same decisions. If the inner Block is solved
  * as a mixed-integer problem, \f$ Q \f$ is typically not convex and the
- * linearization may not be a subgradient. With an SDDPBlock the
- * linearization is the mean of those of the simulations, a subgradient of
- * the mean of their values for the current policy rather than of the
- * expected cost. The cost of the investment in (1)
+ * linearization may not be a subgradient. With a Solver that simulates a
+ * policy the linearization is the mean of those of the simulations, a
+ * subgradient of the mean of their values for the current policy rather
+ * than of the expected cost. The cost of the investment in (1)
  * is convex if and only if \f$ c_i + d_i \ge 0 \f$ for all \f$ i \f$. Thus,
  * \f$ \mathcal{F} \f$ is convex if this holds and \f$ Q \f$ is convex;
  * is_convex() checks the former, while the latter depends on the Solver of
@@ -496,13 +489,6 @@ class InvestmentFunction : public C05Function , public Block {
   intComputeLinearization = intLastParC05F ,
   ///< determines whether linearizations must be computed
 
-  intOutputSolution ,
-  ///< indicates whether the solution should be output
-  /**< If the value for this parameter is nonzero, then part of the primal and
-   * dual solutions obtained for each UCBlock for each scenario is output
-   * while this InvestmentFunction is being compute()-ed. The default value of
-   * this parameter is 0, which means that no solution is output. */
-
   intLastParInvestmentF
   ///< first allowed new int parameter for derived classes
   /**< Convenience value for easily allow derived classes to extend the set of
@@ -543,14 +529,6 @@ class InvestmentFunction : public C05Function , public Block {
    * values are output (appended) every time this InvestmentFunction is
    * compute()-ed. If it is empty, then the variable and function values are
    * not output. The default value for this parameter is the empty string. */
-
-  strOutputSolutionDirectory ,
-  ///< path to the directory where the solution should be output
-  /**< If the solution must be output (see #intOutputSolution) then this is
-   * the path to the directory where the solution will be output. If it is
-   * empty, then the solution is output to the working directory. The default
-   * value of this parameter is empty. This parameter is only used by the
-   * multi-replica SDDPBlock path. */
 
   strLastParInvestmentF
   ///< first allowed new string parameter for derived classes
@@ -798,9 +776,7 @@ class InvestmentFunction : public C05Function , public Block {
   *    that is what the inner Block is solved for). If it is not given, the
   *    "BlockSolverConfig" given with it, if any, is given in its place, i.e.,
   *    the unit is solved by the same Solver, with the same parameters, that
-  *    solves the inner Block; this needs the pieces of the inner Block [see
-  *    set_pieces()], so with an SDDPBlock it has to be given, if a scaled
-  *    UnitBlock can have no copies.
+  *    solves the inner Block.
   *
   * If a key that is not any of the above is provided, an exception is
   * thrown. No pointer is kept by the InvestmentFunction, which keeps a clone
@@ -914,57 +890,6 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
- /// set the sub-Blocks of the InvestmentFunction
- /** This method sets the sub-Blocks of the InvestmentFunction as a vector of
-  * (identical) Blocks. This enables the multi-replica execution path: each
-  * Block is a self-contained replica of the inner problem, and scenarios
-  * are distributed across replicas using OpenMP (and, if compiled with
-  * USE_MPI, across MPI processes).
-  *
-  * @param blocks the pointers to the (identical) Blocks satisfying the
-  *        conditions stated in the definition of this InvestmentFunction.
-  *
-  * @param destroy_previous_blocks indicates whether the previous inner
-  *        Blocks must be destroyed. The default value of this parameter is
-  *        \c true, which means that the previous inner Blocks (if any) are
-  *        destroyed and their allocated memory is released. */
-
- void set_inner_blocks( std::vector< Block * > & blocks ,
-                        bool destroy_previous_blocks = true ) {
-  if( ( ! v_Block.empty() ) && ( blocks.size() == v_Block.size() ) &&
-      ( ! destroy_previous_blocks ) ) {
-
-   bool blocks_are_here = true;
-   for( Index i = 0 ; i < blocks.size() ; ++i )
-    if( blocks[ i ] != v_Block[ i ] ) {
-     blocks_are_here = false;
-     break;
-     }
-
-   if( blocks_are_here )
-    return; // the given Blocks are already here; silently return
-   }
-
-  // un-do the BlockSolverConfig-uration of the outgoing inner Blocks, i.e.,
-  // remove the Solver that this InvestmentFunction has registered there
-  unconfigure_inner_Block_Solver();
-
-  if( destroy_previous_blocks )
-   for( auto block : v_Block )
-    delete block;
-
-  v_Block.clear();
-  v_Block = blocks;
-
-  for( auto block : v_Block )
-   if( block )
-    block->set_f_Block( this );
-
-  send_nuclear_modification();
-  set_pieces();
-  }
-
-/*--------------------------------------------------------------------------*/
  /// set a given integer (int) numerical parameter
  /** Set a given integer (int) numerical parameter. InvestmentFunction takes
   * care of the following parameters:
@@ -978,15 +903,6 @@ class InvestmentFunction : public C05Function , public Block {
   *                             linearizations must be computed. The default
   *                             value is 1, which means that linearizations
   *                             are computed.
-  *
-  * - #intOutputSolution: This parameter indicates whether the solution of
-  *                       each UCBlock must be output. If the value for this
-  *                       parameter is nonzero, then part of the primal and
-  *                       dual solutions obtained for each UCBlock for each
-  *                       scenario is output while this InvestmentFunction is
-  *                       being compute()-ed. The default value of this
-  *                       parameter is 0, which means that no solution is
-  *                       output.
   *
   * Any other parameter is handled by the C05Function.
   *
@@ -1025,8 +941,6 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * - #strOutputFilename
   *
-  * - #strOutputSolutionDirectory
-  *
   * @param par The parameter to be set.
   *
   * @param value The value of the parameter. */
@@ -1036,9 +950,6 @@ class InvestmentFunction : public C05Function , public Block {
   switch( par ) {
    case( strOutputFilename ):
     f_output_filename = std::move( value );
-    return;
-   case( strOutputSolutionDirectory ):
-    f_output_solution_directory = std::move( value );
     return;
    }
 
@@ -1081,8 +992,6 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * - #intComputeLinearization
   *
-  * - #intOutputSolution
-  *
   * Any other parameter is handled by the C05Function.
   *
   * @param par The parameter whose value is desired.
@@ -1093,7 +1002,6 @@ class InvestmentFunction : public C05Function , public Block {
   switch( par ) {
    case( intGPMaxSz ):              return( global_pool.size() );
    case( intComputeLinearization ): return( f_compute_linearization );
-   case( intOutputSolution ):       return( f_output_solution );
    }
 
   return( C05Function::get_int_par( par ) );
@@ -1133,8 +1041,7 @@ class InvestmentFunction : public C05Function , public Block {
  const std::string & get_str_par( const idx_type par ) const override
  {
   switch( par ) {
-   case( strOutputFilename ):          return( f_output_filename );
-   case( strOutputSolutionDirectory ): return( f_output_solution_directory );
+   case( strOutputFilename ): return( f_output_filename );
    }
 
   return( C05Function::get_str_par( par ) );
@@ -1146,9 +1053,6 @@ class InvestmentFunction : public C05Function , public Block {
  {
   if( par == intComputeLinearization )
    return( 1 );
-
-  if( par == intOutputSolution )
-   return( 0 );
 
   return( C05Function::get_dflt_int_par( par ) );
   }
@@ -1166,7 +1070,7 @@ class InvestmentFunction : public C05Function , public Block {
  [[nodiscard]] const std::string & get_dflt_str_par( const idx_type par )
   const override
  {
-  static const std::vector< std::string > default_values = { "" , "" };
+  static const std::vector< std::string > default_values = { "" };
 
   if( par >= str_par_type_C05F::strLastParC05F &&
       par < str_par_type_InvestmentF::strLastParInvestmentF )
@@ -1182,9 +1086,6 @@ class InvestmentFunction : public C05Function , public Block {
  {
   if( name == "intComputeLinearization" )
    return( intComputeLinearization );
-
-  if( name == "intOutputSolution" )
-   return( intOutputSolution );
 
   return( C05Function::int_par_str2idx( name ) );
   }
@@ -1205,9 +1106,6 @@ class InvestmentFunction : public C05Function , public Block {
   if( name == "strOutputFilename" )
    return( strOutputFilename );
 
-  if( name == "strOutputSolutionDirectory" )
-   return( strOutputSolutionDirectory );
-
   return( C05Function::str_par_str2idx( name ) );
   }
 
@@ -1216,8 +1114,8 @@ class InvestmentFunction : public C05Function , public Block {
  [[nodiscard]] const std::string & int_par_idx2str( idx_type idx )
   const override
  {
-  static const std::vector< std::string > pars = { "intComputeLinearization" ,
-                                                   "intOutputSolution" };
+  static const std::vector< std::string > pars = {
+                                                 "intComputeLinearization" };
 
   if( ( idx >= intComputeLinearization ) && ( idx < intLastParInvestmentF ) )
    return( pars[ idx - intComputeLinearization ] );
@@ -1239,8 +1137,7 @@ class InvestmentFunction : public C05Function , public Block {
  const std::string & str_par_idx2str( const idx_type idx ) const override
  {
   static const std::vector< std::string > parameter_names = {
-                                                "strOutputFilename" ,
-                                                "strOutputSolutionDirectory" };
+                                                "strOutputFilename" };
   if( ( idx >= str_par_type_C05F::strLastParC05F ) &&
       ( idx < str_par_type_InvestmentF::strLastParInvestmentF ) )
    return( parameter_names[ idx - str_par_type_C05F::strLastParC05F ] );
@@ -1705,35 +1602,6 @@ class InvestmentFunction : public C05Function , public Block {
   v_max_disinvestment = std::move( max_dis );
   }
 
-/*--------------------------------------------------------------------------*/
-
- void set_num_sub_blocks_per_stage( Index n ) {
-  f_num_sub_blocks_per_stage = n;
-  }
-
-/*--------------------------------------------------------------------------*/
- /// set the number of (replica) sub-Blocks of the InvestmentFunction
- /** Sets the number of identical sub-Blocks that this InvestmentFunction
-  * holds. This is the multi-replica analogue of
-  * #set_num_sub_blocks_per_stage(), and is used by the parallel execution
-  * of the SDDPBlock: the InvestmentFunction holds \p n identical
-  * SDDPBlocks as inner Blocks (one per OpenMP thread / MPI process), and
-  * scenarios are partitioned across replicas. Setting this value when an
-  * inner Block is already present is illegal: if non-null Blocks are
-  * registered, this asserts and the call has no effect.
-  *
-  * Note: #set_num_sub_blocks_per_stage() and #set_number_sub_blocks() are
-  * NOT aliases; they govern two orthogonal parallelism levels (multi
-  * sub-Block per stage within a single inner SDDPBlock vs. multiple
-  * inner SDDPBlock replicas). */
-
- void set_number_sub_blocks( Index n ) {
-  assert( v_Block.empty() ||
-          std::all_of( v_Block.cbegin() , v_Block.cend() ,
-                       []( Block * b ) { return( b == nullptr ); } ) );
-  f_num_sub_blocks = n;
-  }
-
 /** @} ---------------------------------------------------------------------*/
 /*----------- METHODS FOR Saving THE DATA OF THE InvestmentFunction --------*/
 /*--------------------------------------------------------------------------*/
@@ -1790,7 +1658,7 @@ class InvestmentFunction : public C05Function , public Block {
   *   value of the inner Block with respect to it. Both are called on the
   *   UCBlock at the root of the inner Block, or on each of them when there
   *   are several (the pieces of the inner Block [see find_pieces()], the
-  *   stages of an SDDPBlock), with the index of the asset in "Assets": for
+  *   scenarios or the stages), with the index of the asset in "Assets": for
   *   instance
   *   "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization",
   *   "UCBlock::replicate" and "UCBlock::get_replicate_linearization", or
@@ -1922,8 +1790,9 @@ class InvestmentFunction : public C05Function , public Block {
   * computed by the last call to compute(), i.e., the cost of the investment
   * plus the operational cost \f$ Q( x ) \f$, which is the value that the
   * Solver of the inner Block gives for its solution [see
-  * Solver::get_var_value()], or the mean of the values of the simulations with
-  * an SDDPBlock; whether it is an optimal value, a lower bound or an estimate
+  * Solver::get_var_value()], the mean of the values of its solutions for a
+  * Solver giving several; whether it is an optimal value, a lower bound or an
+  * estimate
   * depends on that Solver [see the class comments]. If compute() has not been
   * called yet, or the last call found the investment outside the domain (a
   * linear constraint of the InvestmentBlock violated, or the inner Block
@@ -2128,26 +1997,11 @@ class InvestmentFunction : public C05Function , public Block {
   if( v_Block.empty() )
    return( nullptr );
 
-  if( v_Block.size() == 1 ) {
-   // single-Block mode: get the i-th solver registered on the single
-   // inner Block
-   if( i >= v_Block.front()->get_registered_solvers().size() )
-    return( nullptr );
-   return( dynamic_cast< T * >(
-              * std::next( v_Block.front()->get_registered_solvers().begin() ,
-                           i ) ) );
-   }
-
-  // multi-replica mode: get the first solver registered on the i-th
-  // replica Block
-  if( i >= v_Block.size() )
+  if( i >= v_Block.front()->get_registered_solvers().size() )
    return( nullptr );
-
-  if( v_Block[ i ]->get_registered_solvers().empty() )
-   return( nullptr );
-
   return( dynamic_cast< T * >(
-            v_Block[ i ]->get_registered_solvers().front() ) );
+             * std::next( v_Block.front()->get_registered_solvers().begin() ,
+                          i ) ) );
   }
 
 /**@} ----------------------------------------------------------------------*/
@@ -2187,19 +2041,6 @@ class InvestmentFunction : public C05Function , public Block {
   assert( asset < v_installed_quantity.size() );
   return( v_installed_quantity[ asset ] );
   }
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the i-th SDDPBlock replica (if any)
- /** This function returns a pointer to the i-th SDDPBlock replica of this
-  * InvestmentFunction. If the i-th sub-Block is not an SDDPBlock or \p i is
-  * out of range, this returns nullptr.
-  *
-  * @param i The index of a sub-Block of this InvestmentFunction.
-  *
-  * @return A pointer to the i-th SDDPBlock of this InvestmentFunction, or
-  *         nullptr if not available. */
-
- SDDPBlock * get_sddp_block( Index i ) const;
 
 /** @} ---------------------------------------------------------------------*/
 /*-------------------- Methods for handling Modification -------------------*/
@@ -2245,32 +2086,18 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< BlockSolverConfig * > v_BSC;
  ///< the clear()-ed BlockSolverConfig that configured each inner Block
- /**< For each (replica) inner Block, the clone of the BlockSolverConfig that
-  * has actually been apply()-ed to it, kept clear()-ed: apply()-ing it
-  * removes all and only the Solver that it has registered there [see
+ /**< For the inner Block, the clone of the BlockSolverConfig that has
+  * actually been apply()-ed to it, kept clear()-ed: apply()-ing it removes
+  * all and only the Solver that it has registered there [see
   * BlockSolverConfig::apply()], which is how the configuration is un-done
-  * when the inner Blocks are released, replaced or destroyed. A clone per
-  * Block is necessary because the same BlockSolverConfig is apply()-ed to
-  * every replica, while the record of the registered Solver that its cleared
-  * apply() uses is per-Block. Empty if the inner Blocks have not been
-  * BlockSolverConfig-ured. */
+  * when the inner Block is released, replaced or destroyed. Empty if the
+  * inner Block has not been BlockSolverConfig-ured. */
 
  bool f_unit_BSC_given = false;
  ///< true if a "UnitBlockSolverConfig" was given to the UCBlock
 
  bool f_blocks_are_updated = false;
  ///< indicates whether the sub-Blocks are updated
-
- SDDPBlock * f_simulated_sddp_block = nullptr;
- ///< the copy of the SDDPBlock a scenario has just been simulated on
- /**< Set by compute_SDDPBlock(), while the linearization is read out of the
-  * copy of the SDDPBlock on which a scenario has been simulated, and
-  * nullptr otherwise: get_benders_function() then reads the stages of the
-  * copy in place of those of the inner Block, and update_linearization()
-  * the solution of f_simulated_solver. */
-
- CDASolver * f_simulated_solver = nullptr;
- ///< the Solver that has simulated f_simulated_sddp_block
 
  int f_solver_status = 0;
  ///< the most recent status returned by the Solver of the sub-Block
@@ -2280,9 +2107,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  bool f_compute_linearization = true;
  ///< indicates whether a linearization must be computed
-
- bool f_output_solution = false;
- ///< indicates whether the solution of each UCBlock must be output
 
  FunctionValue AAccMlt;
  ///< maximum absolute error in the multipliers of a linear combination
@@ -2326,16 +2150,6 @@ class InvestmentFunction : public C05Function , public Block {
   * usual as \f$ \alpha + g^\top x \le 0 \f$, with \f$ g \f$ the
   * coefficients and \f$ \alpha = \Phi( x ) - g^\top x \f$. */
 
- Index f_num_sub_blocks_per_stage = 1;
- ///< number of sub-Blocks per stage in SDDPBlock (single-Block mode)
-
- Index f_num_sub_blocks = 1;
- ///< number of (identical) replica sub-Blocks (multi-replica mode)
- /**< Number of identical inner Blocks held by this InvestmentFunction in
-  * the multi-replica execution path. When >1, deserialize() will create
-  * this many copies of the inner Block, and compute() dispatches to the
-  * multi-replica SDDP code path. */
-
  double f_constraints_tolerance = 1.0e-6;
  ///< relative tolerance to declare feasible a linear constraint
  /**< Tolerance used in the relative-violation feasibility check performed
@@ -2373,12 +2187,6 @@ class InvestmentFunction : public C05Function , public Block {
   * creating one out of the "InnerBlock" sub-group. */
 
  Block * f_external_inner_block = nullptr;
-
- std::vector< Index > v_greedy_solvers;
- ///< indices of the SDDPGreedySolver
-
- SDDPSolver * f_sddp_solver = nullptr;
- ///< pointer to the SDDPSolver
 
  std::vector< AssetType > v_asset_type;
  ///< the type of each asset that is subject to investment
@@ -2486,11 +2294,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::string f_output_filename;
  ///< name of the file into which the variable and function values are output
-
- std::string f_output_solution_directory;
- ///< path to the directory where the solution will be output
- /**< Used by the multi-replica SDDPBlock path; see
-  * #strOutputSolutionDirectory. */
 
 /*--------------------------------------------------------------------------*/
 /*--------------------- PRIVATE PART OF THE CLASS --------------------------*/
@@ -2885,33 +2688,22 @@ class InvestmentFunction : public C05Function , public Block {
  CDASolver * get_inner_solver( void ) const;
 
 /*--------------------------------------------------------------------------*/
- /// the Block of the \p i-th piece, in the given \p stage
+ /// the Block of the \p i-th piece
  /** Returns the Block into which the investment is written, and from which
   * its linearization is read, of the \p i-th piece of the inner Block [see
-  * v_pieces], or, for an SDDPBlock, the one of the given \p stage in its
-  * \p i-th sub-Block. */
+  * v_pieces], in \p root, the inner Block or a twin of it [see
+  * Solver::get_solution_Block()], nullptr meaning the inner Block. */
 
- Block * get_piece( Index stage , Index i ) const;
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the SDDPBlock (if any)
- /** If the inner Block of this function is an SDDPBlock, it returns a pointer
-  * to it. Otherwise, it returns nullptr.
-  *
-  * @return A pointer to the SDDPBlock of this InvestmentFunction. If the
-  *         inner Block of this InvestmentFunction is not an SDDPBlock, it
-  *         return nullptr. */
-
- SDDPBlock * get_sddp_block( void ) const;
+ Block * get_piece( Index i , Block * root = nullptr ) const;
 
 /*--------------------------------------------------------------------------*/
  /// sets the pieces of the inner Block, and the names they need
  /** Sets v_pieces as the inner Block is: a path to each Block of the class
   * of the methods of the assets the inner Block is made of [see
-  * find_pieces()], to the inner Block itself if it is not made of them, none
-  * for an SDDPBlock, or more than one inner Block, whose sub-Blocks are
-  * reached by their class. Then it works out the names of the methods of
-  * the assets, if the instance gives none [see set_asset_names()]. */
+  * find_pieces()], through the Function of the Objective of its Blocks that
+  * are Blocks too, or to the inner Block itself if it is not made of them.
+  * Then it works out the names of the methods of the assets, if the
+  * instance gives none [see set_asset_names()]. */
 
  void set_pieces( void );
 
@@ -2940,11 +2732,17 @@ class InvestmentFunction : public C05Function , public Block {
   * turn, in order: those a Block of a different class is made of only if
   * every one of its sub-Blocks is of class \p cls or is made of them. This
   * is how a stochastic Block holds its scenarios, each a copy of the same
-  * Block, whatever its class. Returns false, appending nothing, if \p root
-  * is not made of Blocks of class \p cls only. */
+  * Block, whatever its class. If \p through_functions, the Function of
+  * the Objective of a Block counts as one of its sub-Blocks when it is a
+  * Block too (say, a BendersBFunction, whose inner Block is a stage of a
+  * multi-stage problem): its pieces are those the Function is evaluated on,
+  * into which the investment is written, but which are not separate
+  * problems. Returns false, appending nothing, if \p root is not made of
+  * Blocks of class \p cls only. */
 
  static bool find_pieces( Block * root , const std::string & cls ,
-                          std::vector< Block * > & pieces );
+                          std::vector< Block * > & pieces ,
+                          bool through_functions = false );
 
 /*--------------------------------------------------------------------------*/
  /// the class of the methods of the assets of the function in \p group
@@ -2980,10 +2778,10 @@ class InvestmentFunction : public C05Function , public Block {
  /// the number of sub-Blocks that carry the investment
  /** The investment is here-and-now, hence the same in all the sub-Blocks
   * that carry it: this is how many they are, one for a plain UCBlock, one
-  * per scenario for a TwoStageStochasticBlock, the configured number for an
-  * SDDPBlock. Writing the investment and reading the linearization back have
-  * to run over exactly the same set, or the value and its linearization stop
-  * describing the same function. */
+  * per scenario for a TwoStageStochasticBlock, one per stage for a
+  * multi-stage Block. Writing the investment and reading the linearization
+  * back have to run over exactly the same set, or the value and its
+  * linearization stop describing the same function. */
 
  Index get_number_investment_sub_blocks( void ) const;
 
@@ -3011,11 +2809,11 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
  /// remove the Solver that this InvestmentFunction registered in the Blocks
- /** Applies to each (replica) inner Block the clear()-ed BlockSolverConfig
-  * that configured it [see v_BSC], i.e., un-registers and deletes all and
-  * only the Solver that this InvestmentFunction has registered there,
-  * leaving any other one alone; does nothing if the inner Blocks have not
-  * been BlockSolverConfig-ured. */
+ /** Applies to the inner Block the clear()-ed BlockSolverConfig that
+  * configured it [see v_BSC], i.e., un-registers and deletes all and only
+  * the Solver that this InvestmentFunction has registered there, leaving any
+  * other one alone; does nothing if the inner Block has not been
+  * BlockSolverConfig-ured. */
 
  void unconfigure_inner_Block_Solver();
 
@@ -3063,16 +2861,16 @@ class InvestmentFunction : public C05Function , public Block {
   * it costs a sweep of the model, and is what keeps the cut available on the
   * solvers that do not hand it out. */
 
- FunctionValue compute_farkas_value( Index stage , Index sub_block_index );
+ FunctionValue compute_farkas_value( Index i );
 
 /*--------------------------------------------------------------------------*/
- /// updates the linearization to reflect the most recent scenario considered
- /** This function updates the linearization to reflect the most recent
-  * scenario considered, whose subproblem was solved by the Solver attached to
-  * the sub-Block whose index is \p sub_block_index.
+ /// adds to the linearization what is read on the \p i-th piece
+ /** This function adds to v_linearization the derivatives read on the \p
+  * i-th piece of the inner Block [see get_piece()], whose solution the
+  * Solver of the inner Block has just found: it writes that solution in the
+  * inner Block, with the first piece, then reads it on each.
   *
-  * @param sub_block_index The index of the sub-Block which will be used to
-  *        update the linearization.
+  * @param i The index of the piece.
   *
   * @param direction If true, what the sub-Block holds is an unbounded dual
   *        direction rather than an optimal dual solution: it is already in
@@ -3082,21 +2880,7 @@ class InvestmentFunction : public C05Function , public Block {
   *        getter gives no feasibility cut [see "AssetFeasibilityCut" in
   *        serialize()] makes this throw. */
 
- void update_linearization( Index sub_block_index , bool direction = false );
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the BendersBFunction associated with the given stage
- /** This function returns a pointer to the BendersBFunction associated with
-  * the given \p stage in the \p i-th sub-Block.
-  *
-  * @param stage A stage.
-  *
-  * @param i The index of a sub-Block.
-  *
-  * @return A pointer to the BendersBFunction associated with the given \p
-  *         stage in the \p i-th sub-Block. */
-
- BendersBFunction * get_benders_function( Index stage , Index i ) const;
+ void update_linearization( Index i , bool direction = false );
 
 /*--------------------------------------------------------------------------*/
  /// returns the value of the i-th active variable
@@ -3149,35 +2933,14 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
- /// returns the number of scenarios
-
- Index get_number_scenarios( void ) const;
-
-/*--------------------------------------------------------------------------*/
- /// returns the number of stages
-
- Index get_number_stages( void ) const;
-
-/*--------------------------------------------------------------------------*/
- /// locks a(n unlocked) sub-Block and returns its index
-
- Index lock_sub_block( void );
-
-/*--------------------------------------------------------------------------*/
- /// unlocks the i-th sub-Block
-
- void unlock_sub_block( Index i );
-
-/*--------------------------------------------------------------------------*/
- /// identifies the relevant Solver of the inner Block
-
- void build_solver_map( void );
-
-/*--------------------------------------------------------------------------*/
  /// compute the InvestmentFunction with an inner Block made of pieces
- /** The path of every inner Block with pieces [see set_pieces()], whatever
-  * its class: the investment is written into each piece, the inner Block is
-  * solved by its Solver, and value and linearization are read off it. */
+ /** The investment is written into each piece [see set_pieces()], the
+  * inner Block is solved by its Solver, and value and linearization are
+  * read off it. If the Solver gives its result as the mean of the solutions
+  * of several problems [see ThinComputeInterface::eEverySolution], as the
+  * simulations of the scenarios of a policy, the linearization is read out
+  * of each of them, in the Block holding it [see
+  * Solver::get_solution_Block()], and is the mean of what is read. */
 
  int compute_pieces( bool changedvars );
 
@@ -3192,20 +2955,6 @@ class InvestmentFunction : public C05Function , public Block {
   * certificate can be read, makes this throw. */
 
  void read_farkas_linearization( CDASolver * solver );
-
-/*--------------------------------------------------------------------------*/
-
- int compute_SDDPBlock( bool changedvars );
-
-/*--------------------------------------------------------------------------*/
- /// compute the InvestmentFunction in the multi-replica SDDPBlock path
- /** Executes compute() against multiple identical SDDPBlock replicas held
-  * in v_Block, with scenarios partitioned across OpenMP threads (and MPI
-  * processes if compiled with USE_MPI). Called from compute() when
-  * v_Block.size() > 1 (or when a single replica was explicitly registered
-  * via set_inner_blocks()). */
-
- int compute_SDDPBlock_replicas( bool changedvars );
 
 /*--------------------------------------------------------------------------*/
  /// scales the diagonal value and linearization by the component weight
@@ -3318,29 +3067,19 @@ class InvestmentFunction : public C05Function , public Block {
  void handle_events( int type ) const;
 
 /*--------------------------------------------------------------------------*/
- /// update the linearization, accumulating into the given vector
- /** Multi-replica variant of update_linearization() that accumulates the
-  * linearization terms into the caller-supplied vector \p linearization
-  * rather than into v_linearization. This is required for thread-safe
-  * accumulation across OpenMP-parallel scenario loops. */
-
- void update_linearization( Index sub_block_index ,
-                            std::vector< double > & linearization );
-
-/*--------------------------------------------------------------------------*/
  /// adds the derivatives read on one piece to \p linearization
- /** Calls the getter of each group of assets [see AssetGroup] on the piece
-  * of the given \p stage in the given sub-Block [see get_piece()], and adds
-  * what it answers to the coefficients of the x variables of the assets of
-  * the group.
+ /** Calls the getter of each group of assets [see AssetGroup] on the \p
+  * i-th piece [see get_piece()] in \p root, and adds what it answers to the
+  * coefficients of the x variables of the assets of the group.
   *
   * @param direction Whether the duals are those of an unbounded dual
   *        direction [see update_linearization()]: then a group whose getter
   *        gives no feasibility cut makes this throw. */
 
- void add_asset_linearization( Index stage , Index sub_block_index ,
+ void add_asset_linearization( Index i ,
                                std::vector< double > & linearization ,
-                               bool direction = false );
+                               bool direction = false ,
+                               Block * root = nullptr );
 
 /*--------------------------------------------------------------------------*/
  /// issues a C05FunctionMod about linearizations of the global pool
@@ -3365,12 +3104,6 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 /*---------------------------- PRIVATE FIELDS  -----------------------------*/
 /*--------------------------------------------------------------------------*/
-
- /// indicates whether each sub-Block is locked
- std::vector< bool > is_locked;
-
- /// this is the waiting time before trying to acquire the lock again
- double waiting_time = 1e-4;
 
  /// global pool of linearizations
  GlobalPool global_pool;

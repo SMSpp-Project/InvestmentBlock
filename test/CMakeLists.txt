@@ -30,13 +30,15 @@ endif ()
 add_executable(${modName}_unit_test test.cpp)
 target_link_libraries(${modName}_unit_test PRIVATE SMS++::InvestmentBlock)
 
-# The instances with an inner Block are solved by a :MILPSolver: without one
-# in the build only the rest is tested. The umbrella adds the Solver after
-# the Block, hence whether MILPSolver is there is asked when the build is
-# generated, not now.
+# The inner Blocks of the instances are UCBlock, read through the factory,
+# and solved by a :MILPSolver: without either in the build only the rest is
+# tested. The umbrella may add them after this module, hence whether they
+# are there is asked when the build is generated, not now.
 target_link_libraries(${modName}_unit_test PRIVATE
+        $<TARGET_NAME_IF_EXISTS:SMS++::UCBlock>
         $<TARGET_NAME_IF_EXISTS:SMS++::MILPSolver>)
 target_compile_definitions(${modName}_unit_test PRIVATE
+        $<$<TARGET_EXISTS:SMS++::UCBlock>:HAVE_UCBLOCK>
         $<$<TARGET_EXISTS:SMS++::MILPSolver>:HAVE_MILPSOLVER>)
 
 if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})

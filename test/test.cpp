@@ -734,17 +734,22 @@ int main( void )
 {
  try {
   test_curvature_empty();
-  test_design_mode_refused();
-  #ifdef HAVE_MILPSOLVER
-   test_curvature();
-   test_meshed_line();
-   test_scaled_reactive();
-   test_scaled_zero_copies();
-   test_battery_two_assets();
-   test_scaled_conversion();
+  #ifdef HAVE_UCBLOCK
+   test_design_mode_refused();
+   #ifdef HAVE_MILPSOLVER
+    test_curvature();
+    test_meshed_line();
+    test_scaled_reactive();
+    test_scaled_zero_copies();
+    test_battery_two_assets();
+    test_scaled_conversion();
+   #else
+    std::cout << "no :MILPSolver in the build: the linearizations are not "
+              << "checked" << std::endl;
+   #endif
   #else
-   std::cout << "no :MILPSolver in the build: the linearizations are not "
-             << "checked" << std::endl;
+   std::cout << "no UCBlock in the build: no InvestmentBlock with an inner "
+             << "Block is checked" << std::endl;
   #endif
   }
  catch( const std::exception & e ) {
