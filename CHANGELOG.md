@@ -243,6 +243,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- on Windows, the executables that copy their DLLs next to themselves
+  are linked one at a time (a job pool of Ninja), since two copies of the
+  same DLL into one directory collided (e.g., with the clang++ of MSYS2)
+
 - the unit test links UCBlock and MILPSolver as targets, when the build
   has them, instead of by a generator expression, which left out their link
   options: with the compilers of MinGW the DLL of MILPSolver was not loaded,
