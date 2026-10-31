@@ -223,6 +223,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `InvestmentFunction::get_constant_term()` multiplies the constant term of
+  each Block of the inner Block by the weights of the Objective along the
+  path to it, as `LagBFunction` and `BendersBFunction` do: with a
+  `TwoStageStochasticBlock` solved whole the constants of the scenarios were
+  summed without their probability
+
+- the certificate of infeasibility of an `InvestmentFunction` counts the
+  `ZOConstraint` too, the zero-one bounds that the units of a `UCBlock`
+  generate on request: they were left out of its value without notice
+
 - `InvestmentFunction::compute()` reports an inner Block proved infeasible
   as infeasible also when its Solver leaves a point behind, as HiGHS does
   after its interior point method: the point was read as a solution, its

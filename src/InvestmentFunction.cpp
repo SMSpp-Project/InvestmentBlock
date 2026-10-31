@@ -1406,12 +1406,13 @@ void InvestmentFunction::read_farkas_linearization( CDASolver * solver ) {
 
 /*--------------------------------------------------------------------------*/
 
-static RealObjective::OFValue get_recours_obj( const Block * blck ) {
+static RealObjective::OFValue get_recours_obj( const Block * blck ,
+                                                double w ) {
  RealObjective::OFValue rv = 0;
  if( auto obj = dynamic_cast< RealObjective * >( blck->get_objective() ) )
-  rv = obj->get_constant_term();
+  rv = w * obj->get_constant_term();
  for( const auto bk : blck->get_nested_Blocks() )
-  rv += get_recours_obj( bk );
+  rv += get_recours_obj( bk , w * bk->get_objective_weight() );
 
  return( rv );
 };
@@ -1422,9 +1423,10 @@ Function::FunctionValue InvestmentFunction::get_constant_term( void ) const
 {
  // w * F: the recourse-objective constant is part of the value and scales by
  // the component weight, that of the Objective of the inner Block (it does
- // not flow through f_value)
+ // not flow through f_value), and the constant of each Block inside by the
+ // weights along the path to it, as the Solver of the inner Block counts it
  if( auto bk = get_nested_Block( 0 ) )
-  return( bk->get_objective_weight() * get_recours_obj( bk ) );
+  return( get_recours_obj( bk , bk->get_objective_weight() ) );
  return( 0 );
 }
 
@@ -1970,7 +1972,8 @@ Function::FunctionValue InvestmentFunction::compute_farkas_value( Index i )
   b->for_each_constraint_group( [ & add ]( const BaseGroup & group ) {
     for_each_as_any_of< FRowConstraint , BoxConstraint , LB0Constraint ,
 			UB0Constraint , LBConstraint , UBConstraint ,
-			NNConstraint , NPConstraint >( group , add ); } );
+			NNConstraint , NPConstraint ,
+			ZOConstraint >( group , add ); } );
   }
 
  return( value );
