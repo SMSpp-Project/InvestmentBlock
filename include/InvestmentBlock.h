@@ -836,6 +836,13 @@ protected:
  void add_variation_constraints( void );
 
 /*--------------------------------------------------------------------------*/
+ /// the shift of the design Variable x: its lower bound if the bounds are
+ /// reformulated and it is finite, the value of x being then the one of its
+ /// asset minus it [see add_bound_constraints()]; 0 otherwise, and for no x
+
+ double design_shift( const ColVariable * x ) const;
+
+/*--------------------------------------------------------------------------*/
 
  /// splits an inner Block into components, one per piece
  /** If the "InnerBlock" of \p grp is made of Blocks of the class of the

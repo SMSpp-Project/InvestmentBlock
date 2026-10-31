@@ -709,6 +709,18 @@ void InvestmentBlock::generate_abstract_constraints( Configuration * stcc )
  if( constraints_generated() )
   return; // constraints have already been generated
 
+ // with no AssetVarIndex the asset i of a function invests in its active
+ // Variable i, which has to be there; the mapping can be given after the
+ // Variable [see add_component()], hence the check is made only here
+ for( const auto f : get_investment_functions() )
+  if( f->get_asset_variable_indices().empty() &&
+      ( f->get_asset_indices().size() > f->get_num_active_var() ) )
+   throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
+          " a component has " + std::to_string( f->get_asset_indices().size() )
+          + " assets and " + std::to_string( f->get_num_active_var() ) +
+          " active Variable, and no AssetVarIndex: the asset i invests in "
+          "the active Variable i" ) );
+
  add_bound_constraints( stcc );  // the bounds of the design Variable
  add_variation_constraints();    // the limits on their change
 
@@ -804,15 +816,6 @@ void InvestmentBlock::add_bound_constraints( Configuration * stcc )
 
 void InvestmentBlock::add_variation_constraints( void )
 {
- // the shift of a design Variable whose bounds are reformulated, whose value
- // is then the one of the asset minus its lower bound
- const auto shift = [ this ]( const ColVariable * x ) {
-  if( ( ! x ) || ( ! f_reformulate_bounds ) || v_lower_bound.empty() )
-   return( 0.0 );
-  const auto lb = v_lower_bound[ x - v_variables.data() ];
-  return( lb > - Inf< double >() ? lb : 0.0 );
-  };
-
  const auto limits = variation_limits( this );
  v_variation_constraints.resize( limits.size() );
  auto row = v_variation_constraints.begin();
@@ -820,7 +823,7 @@ void InvestmentBlock::add_variation_constraints( void )
   LinearFunction::v_coeff_pair vars = { std::make_pair( l.x , 1.0 ) };
   if( l.b )
    vars.push_back( std::make_pair( l.b , -1.0 ) );
-  const double s = l.q - shift( l.x ) + shift( l.b );
+  const double s = l.q - design_shift( l.x ) + design_shift( l.b );
   row->set_lhs( l.lo + s );
   row->set_rhs( l.hi + s );
   ( row++ )->set_function( new LinearFunction( std::move( vars ) ) );
@@ -828,6 +831,16 @@ void InvestmentBlock::add_variation_constraints( void )
 
  if( ! v_variation_constraints.empty() )
   add_static_constraint( v_variation_constraints , "variation_bounds" );
+ }
+
+/*--------------------------------------------------------------------------*/
+
+double InvestmentBlock::design_shift( const ColVariable * x ) const
+{
+ if( ( ! x ) || ( ! f_reformulate_bounds ) || v_lower_bound.empty() )
+  return( 0.0 );
+ const auto lb = v_lower_bound[ x - v_variables.data() ];
+ return( lb > - Inf< double >() ? lb : 0.0 );
  }
 
 /*--------------------------------------------------------------------------*/
@@ -1010,20 +1023,24 @@ bool InvestmentBlock::is_feasible( bool useabstract , Configuration * fsbc )
                                       false ) );
   }
 
- // Check the "physical representation"
+ // Check the "physical representation", on the value of each asset: the
+ // one of its ColVariable plus its shift [see design_shift()]
+ const auto asset = [ this ]( const ColVariable * x ) {
+  return( x->get_value() + design_shift( x ) );
+  };
 
  for( Index i = 0 ; i < v_lower_bound.size() ; ++i )
   if( v_lower_bound[ i ] > -Inf< double >() )
-   if( v_variables[ i ].get_value() < v_lower_bound[ i ] - tolerance )
+   if( asset( & v_variables[ i ] ) < v_lower_bound[ i ] - tolerance )
     return( false );
 
  for( Index i = 0 ; i < v_upper_bound.size() ; ++i )
   if( v_upper_bound[ i ] < Inf< double >() )
-   if( v_variables[ i ].get_value() > v_upper_bound[ i ] + tolerance )
+   if( asset( & v_variables[ i ] ) > v_upper_bound[ i ] + tolerance )
     return( false );
 
  for( const auto & [ pair , l ] : variation_limits( this ) ) {
-  const double d = l.x->get_value() - ( l.b ? l.b->get_value() : 0 ) - l.q;
+  const double d = asset( l.x ) - ( l.b ? asset( l.b ) : 0 ) - l.q;
   if( ( d < l.lo - tolerance ) || ( d > l.hi + tolerance ) )
    return( false );
   }

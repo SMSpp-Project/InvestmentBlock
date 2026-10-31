@@ -34,9 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a warning when they are all 1. With components the InvestmentBlock is a
   minimization, and a maximization asked at its root is refused; the
   `f_reformulate_bounds` option requires that each component have the lower
-  bounds of the design Variable it is active in, and
-  `set_number_sub_blocks()` and `set_num_sub_blocks_per_stage()` hold only
-  without components
+  bounds of the design Variable it is active in, and a component with more
+  assets than active Variable and no `AssetVarIndex` is refused when the
+  Constraint are generated
 
 - `AssetVarIndex` and `AssetBaselineVarIndex` (netCDF), with
   `set_asset_variable_indices()` and
@@ -212,6 +212,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `std::vector`
 
 ### Fixed
+
+- `InvestmentBlock::is_feasible()` on the physical representation reads
+  the value of each asset, its ColVariable plus its lower bound when the
+  bounds are reformulated: it compared the ColVariable, then the asset
+  minus its lower bound, with the bounds, so that a finite lower bound
+  other than 0 gave a wrong answer
 
 - `InvestmentFunction::set_par()` that shrinks the global pool
   (`intGPMaxSz`) tells removed the linearizations past its new size: the
