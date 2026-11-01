@@ -211,6 +211,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- the `LowerBound` of an InvestmentFunction and
+  `InvestmentFunction::get_var_lower_bound()`, read and written but used by
+  nothing since the bounds are no longer reformulated: the bounds of the
+  design Variable are the `LowerBound` and `UpperBound` of the root
+
 - `InvestmentFunction::map_active()`, whose ordered form mapped a Variable
   that is not active to the next one, and the `SparseVector` forms of
   `InvestmentFunction::get_linearization_coefficients()`, which wrote into

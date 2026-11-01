@@ -276,10 +276,6 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                              "unit " + std::to_string( v_asset_indices[ j ] ) +
                              ", which has no asset of type 0." ) );
 
-  // Deserialize the lower bound on the active variables
-
-  deserialize_one_each( group , "LowerBound" , num_assets , v_lower_bound );
-
   // Deserialize the costs of investments; absent, all coefficients are zero
 
   if( ! deserialize_one_each( group , "Cost" , num_assets , v_cost ) )
@@ -910,9 +906,8 @@ void InvestmentFunction::remove_actives( const Subset & removed )
  // the data indexed by active Variable
  const auto num_active = v_x.size();
  compact( v_x , removed );
- for( auto v : { & v_lower_bound , & v_linearization } )
-  if( v->size() == num_active )
-   compact( *v , removed );
+ if( v_linearization.size() == num_active )
+  compact( v_linearization , removed );
  global_pool.remove_variables( removed , num_active );
 
  // the groups of assets are indexed by asset, so they no longer are: drop
@@ -1005,10 +1000,6 @@ void InvestmentFunction::serialize( netCDF::NcGroup & group ,
  if( ! v_asset_baseline_var_index.empty() )
   ::serialize( group , "AssetBaselineVarIndex" , netCDF::NcUint() , NumAssets ,
                v_asset_baseline_var_index );
-
- if( group.getVar( "LowerBound" ).isNull() )
-  ::serialize( group , "LowerBound" , netCDF::NcDouble() , NumAssets ,
-               v_lower_bound );
 
  ::serialize( group , "Cost" , netCDF::NcDouble() , NumAssets , v_cost );
 

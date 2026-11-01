@@ -1260,24 +1260,6 @@ class InvestmentFunction : public C05Function , public Block {
                         ModParam issueMod = eModBlck ) override final;
 
 /*--------------------------------------------------------------------------*/
- /// returns the lower bound for the given active variable
- /** This function returns the lower bound for the value of the i-th active
-  * variable of this InvestmentFunction.
-  *
-  * @param i The index of an active variable of this InvestmentFunction.
-  *
-  * @return the lower bound for the value of the i-th active variable of this
-  *         InvestmentFunction. */
-
- double get_var_lower_bound( Index i ) const
- {
-  if( i < v_lower_bound.size() )
-   return( v_lower_bound[ i ] );
-
-  return( -Inf< double >() );
-  }
-
-/*--------------------------------------------------------------------------*/
  /// sets the mapping from assets to active variables
  /** Sets which active variable each asset invests in: \p avi has one entry per
   * asset, and avi[ i ] is the index of asset i's variable among the active
@@ -1539,14 +1521,6 @@ class InvestmentFunction : public C05Function , public Block {
   *   units whose names are worked out as replicated, for which it is 0, and
   *   for the resized units whose class answers 0 to
   *   "<class>::has_resize_feasibility_cut" [see update_linearization()].
-  *
-  * - The variable "LowerBound", of type netCDF::NcDouble(), which is either a
-  *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
-  *   that LowerBound[i] = LowerBound[0] for all i in {0, ..., NumAssets -
-  *   1}. The i-th element of this vector provides the lower bound on the i-th
-  *   active Variable of this InvestmentFunction. This variable is optional.
-  *   If it is not provided, then LowerBound[i] = \f$ -\infty \f$ for all i
-  *   in {0, ..., NumAssets - 1} [see get_var_lower_bound()].
   *
   * - The variable "InstalledQuantity", of type netCDF::NcDouble(), which is
   *   either a scalar or indexed over "NumAssets". If it is a scalar, then we
@@ -2096,9 +2070,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< double > v_installed_quantity;
  ///< amount of each asset currently installed in the system
-
- std::vector< double > v_lower_bound;
- ///< lower bound on the value of the active variables
 
  MultiVector v_A;
  ///< the coefficient matrix of the linear constraints
