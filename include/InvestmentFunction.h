@@ -2479,9 +2479,10 @@ class InvestmentFunction : public C05Function , public Block {
  /// the Block of the \p i-th piece
  /** Returns the Block into which the investment is written, and from which
   * its linearization is read, of the \p i-th piece of the inner Block [see
-  * v_pieces]. */
+  * v_pieces], in \p root, the inner Block or a twin of it [see
+  * Solver::get_solution_Block()], nullptr meaning the inner Block. */
 
- Block * get_piece( Index i ) const;
+ Block * get_piece( Index i , Block * root = nullptr ) const;
 
 /*--------------------------------------------------------------------------*/
  /// sets the pieces of the inner Block, and the names they need
@@ -2703,8 +2704,8 @@ class InvestmentFunction : public C05Function , public Block {
   * read off it. If the Solver gives its result as the mean of the solutions
   * of several problems [see ThinComputeInterface::eEverySolution], as the
   * simulations of the scenarios of a policy, the linearization is read out
-  * of each of them, which the Solver writes in the inner Block, and is the
-  * mean of what is read. */
+  * of each of them, in the Block holding it [see
+  * Solver::get_solution_Block()], and is the mean of what is read. */
 
  int compute_pieces( bool changedvars );
 
@@ -2833,7 +2834,7 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
  /// adds the derivatives read on one piece to \p linearization
  /** Calls the getter of each group of assets [see AssetGroup] on the \p
-  * i-th piece [see get_piece()], and adds what it answers to the
+  * i-th piece [see get_piece()] in \p root, and adds what it answers to the
   * coefficients of the x variables of the assets of the group.
   *
   * @param direction Whether the duals are those of an unbounded dual
@@ -2842,7 +2843,8 @@ class InvestmentFunction : public C05Function , public Block {
 
  void add_asset_linearization( Index i ,
                                std::vector< double > & linearization ,
-                               bool direction = false );
+                               bool direction = false ,
+                               Block * root = nullptr );
 
 /*--------------------------------------------------------------------------*/
  /// issues a C05FunctionMod about linearizations of the global pool

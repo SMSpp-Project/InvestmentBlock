@@ -1166,10 +1166,9 @@ int InvestmentFunction::compute_pieces( bool changedvars ) {
 
  // Optimization phase. A Solver whose result is the mean of the solutions
  // of several problems [see eEverySolution] calls the event after each of
- // them, with its solution written in the inner Block, and the
- // linearization is read out of each while it is there: the Solver calls
- // the events one at a time. A Solver that has no such event gives a single
- // solution
+ // them, and the linearization is read out of each, in the Block that holds
+ // it, while it is there: the Solver calls the events one at a time. A
+ // Solver that has no such event gives a single solution
  Index num_solutions = 0;
  std::vector< double > solution_linearization;
  std::string event_failure;
@@ -1177,10 +1176,11 @@ int InvestmentFunction::compute_pieces( bool changedvars ) {
                          ( solver->max_event_number() > eEverySolution ) ) ?
   solver->set_event_handler( eEverySolution , [ & ]() -> int {
    try {
+    const auto root = solver->get_solution_Block();
     if( solution_linearization.empty() )
      solution_linearization.assign( v_x.size() , 0 );
     for( Index i = 0 ; i < get_number_investment_sub_blocks() ; ++i )
-     add_asset_linearization( i , solution_linearization );
+     add_asset_linearization( i , solution_linearization , false , root );
     ++num_solutions;
     return( eContinue );
     }
@@ -1691,7 +1691,7 @@ void InvestmentFunction::add_Modification( sp_Mod mod ,
 int InvestmentFunction::get_inner_block_objective_sense() const {
  if( v_Block.empty() || ( ! v_Block.front() ) )
   return( Objective::eUndef );
- if( const auto piece = get_piece( 0 ) )
+ if( const auto piece = get_piece( 0 , 0 ) )
   return( piece->get_objective_sense() );
  // an inner Block with no piece is an error that compute() reports at the
  // worst value, whose sign is asked here: the inner Block answers for its
@@ -1701,10 +1701,10 @@ int InvestmentFunction::get_inner_block_objective_sense() const {
 
 /*--------------------------------------------------------------------------*/
 
-Block * InvestmentFunction::get_piece( Index i ) const {
+Block * InvestmentFunction::get_piece( Index i , Block * root ) const {
  if( i >= v_pieces.size() )
   return( nullptr );
- return( v_pieces[ i ].get_element< Block >( v_Block.front() ) );
+ return( v_pieces[ i ].get_element< Block >( root ? root : v_Block.front() ) );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -1802,7 +1802,7 @@ void InvestmentFunction::set_asset_names( void ) {
  if( ( ! num_assets ) || ( ! v_asset_setter_name.empty() ) ||
      v_Block.empty() || ( ! v_Block.front() ) )
   return;
- const auto piece = get_piece( 0 );
+ const auto piece = get_piece( 0 , 0 );
  if( ! piece )
   return;
 
@@ -1920,9 +1920,10 @@ Function::FunctionValue InvestmentFunction::compute_farkas_value( Index i )
 /*--------------------------------------------------------------------------*/
 
 void InvestmentFunction::add_asset_linearization
-( Index i , std::vector< double > & linearization , bool direction ) {
+( Index i , std::vector< double > & linearization , bool direction ,
+  Block * root ) {
 
- const auto piece = get_piece( i );
+ const auto piece = get_piece( i , root );
  if( ! piece )
   throw( std::logic_error( "InvestmentFunction::update_linearization: the "
                            "inner Block has no piece " +
