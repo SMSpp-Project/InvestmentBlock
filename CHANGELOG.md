@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- the data (version 2026-11-01) hold the network of Italy with 5 nodes of
+  pypsa-eur-instances with 5 scenarios of demand, as an `InvestmentBlock`
+  over a `TwoStageStochasticBlock`, once split into a component per
+  scenario and once kept whole (`ScenarioDecomposition` 0)
+
 - the makefiles build the C++20 module `smspp.investmentblock` when
   `SMSppMOD` is not empty (e.g., `make SMSppMOD=1`), with clang++ 16 or
   later [see `lib/makefile-mod` of SMS++]
