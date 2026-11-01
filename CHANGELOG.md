@@ -256,6 +256,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- with no `AssetFeasibilityCut` in the instance, a resized unit whose class
+  answers 0 to `"<class>::has_resize_feasibility_cut"` gives no feasibility
+  cut, which its getter cannot give: a `BatteryUnitBlock` with binary
+  variables of intake and outtake, whose getter read the values that the
+  solve before had left in them; the class comment of `InvestmentFunction`
+  no longer counts that battery among the investments whose certificate is
+  a cut
+
 - `InvestmentFunction::compute_new_linearization( false )` no longer gives
   the certificate of infeasibility again as a new vertical linearization:
   it is the only one, and `has_linearization( false )` has given it (a

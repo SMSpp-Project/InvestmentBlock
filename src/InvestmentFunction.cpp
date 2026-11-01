@@ -1955,14 +1955,31 @@ void InvestmentFunction::add_asset_linearization
   *
   * Which getter gives a cut is not known here, what it reads being unknown:
   * the instance says it [see "AssetFeasibilityCut" in serialize()], and
-  * when it does not, the assets that it says to be replicated give none. */
+  * when it does not, the assets that it says to be replicated give none,
+  * and a resized unit gives one unless its class says otherwise with
+  * "<class>::has_resize_feasibility_cut", which it can tell only once its
+  * Variable are generated, hence here. */
 
  std::vector< double > answer;
  std::vector< double > second_answer;
 
  for( const auto & group : v_asset_groups ) {
 
-  if( direction && ( ! group.feasibility_cut ) )
+  bool cut = group.feasibility_cut;
+  if( direction && cut && f_derived_cuts &&
+      ( group.setter_name == "UCBlock::resize_unit" ) )
+   for( const auto u : group.indices ) {
+    const auto unit = piece->get_nested_Block( u );
+    const auto has_cut = Block::get_query_fs< double & >(
+                        unit->classname() + "::has_resize_feasibility_cut" );
+    double unit_cut = 1;
+    if( has_cut )
+     std::invoke( * has_cut , unit , unit_cut );
+    if( ! unit_cut )
+     cut = false;
+    }
+
+  if( direction && ( ! cut ) )
    throw( std::logic_error( "InvestmentFunction::add_asset_linearization: the "
                             "coefficient of asset " +
                             std::to_string( group.assets.front() ) +

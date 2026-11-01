@@ -210,8 +210,8 @@ namespace SMSpp_di_unipi_it
  * declared to read one ("AssetFeasibilityCut" in serialize()), which is
  * right for kappa constants, whose certificate is valid away from the
  * current investment when they enter right-hand sides only (intermittent
- * units and lines, and a battery with binary variables in its continuous
- * relaxation): for a scale factor, which
+ * units and lines, and a battery without binary variables of intake and
+ * outtake, whose coefficients its kappa multiplies): for a scale factor, which
  * multiplies the columns of a unit, it may not be, and an instance that
  * does not name the methods declares it for kappa constants only. With the
  * integrality of the active
@@ -1536,8 +1536,9 @@ class InvestmentFunction : public C05Function , public Block {
   *   place of the duals; 0 if it does not, and then a point at which the
   *   inner Block is infeasible is reported with no cut. This variable is
   *   optional. If it is not provided, then it is 1 everywhere, save for the
-  *   units whose names are worked out as replicated, for which it is 0 [see
-  *   update_linearization()].
+  *   units whose names are worked out as replicated, for which it is 0, and
+  *   for the resized units whose class answers 0 to
+  *   "<class>::has_resize_feasibility_cut" [see update_linearization()].
   *
   * - The variable "LowerBound", of type netCDF::NcDouble(), which is either a
   *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
