@@ -2411,6 +2411,14 @@ class InvestmentFunction : public C05Function , public Block {
    const;
 
 /*--------------------------------------------------------------------------*/
+  /// takes the removed active Variable out of the stored linearizations
+  /** Takes out of each stored linearization of \p num_active coefficients
+   * those of the active Variable in \p removed, ordered; a deleted one has
+   * none [see InvestmentFunction::remove_variables()]. */
+
+  void remove_variables( const Subset & removed , Index num_active );
+
+/*--------------------------------------------------------------------------*/
 
  private:
 
@@ -2467,11 +2475,6 @@ class InvestmentFunction : public C05Function , public Block {
   * forms of their methods [see "AssetSetter" in serialize()]. */
 
  void resolve_asset_methods( void );
-
-/*--------------------------------------------------------------------------*/
- /// the asset of type 0 on the unit of the asset j, or Inf< Index >()
-
- Index first_size_of( Index j ) const;
 
 /*--------------------------------------------------------------------------*/
  /// writes the current values of the x variables into the inner Block

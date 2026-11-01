@@ -37,6 +37,8 @@
 #include "OneVarConstraint.h"
 #include "Solution.h"
 
+#include <unordered_set>
+
 /*--------------------------------------------------------------------------*/
 /*----------------------------- NAMESPACE ----------------------------------*/
 /*--------------------------------------------------------------------------*/
@@ -865,7 +867,7 @@ protected:
  /// Constraint of its own, nullptr if none
 
  static const Block * first_with_own( const Block * block ,
-                                      const std::vector< Block * > & pieces );
+                          const std::unordered_set< const Block * > & pieces );
 
 /*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE FIELDS --------------------------------*/

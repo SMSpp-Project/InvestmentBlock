@@ -27,9 +27,12 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <fstream>
 #include <queue>
+#include <unordered_map>
+#include <unordered_set>
 
 /*--------------------------------------------------------------------------*/
 /*------------------------- NAMESPACE AND USING ----------------------------*/
@@ -251,19 +254,23 @@ void InvestmentFunction::deserialize( const netCDF::NcGroup & group ,
                              "AssetFeasibilityCut: " + std::to_string( cut ) +
                              "." ) );
 
-  for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
-   for( Index j = i + 1 ; j < v_asset_indices.size() ; ++j )
-    if( ( v_asset_indices[ i ] == v_asset_indices[ j ] ) &&
-        ( v_asset_type[ i ] == v_asset_type[ j ] ) )
-     throw( std::logic_error
-            ( "InvestmentFunction::deserialize: asset with index " +
-              std::to_string( v_asset_indices[ i ] ) + " and type " +
-              std::to_string( v_asset_type[ i ] ) + " is duplicated." ) );
+  // the index and the type of each asset, packed in one number
+  const auto key = [ & ]( Index j , unsigned int type ) {
+   return( ( std::uint64_t( v_asset_indices[ j ] ) << 32 ) | type );
+   };
+
+  std::unordered_set< std::uint64_t > keys;
+  for( Index j = 0 ; j < v_asset_indices.size() ; ++j )
+   if( ! keys.insert( key( j , v_asset_type[ j ] ) ).second )
+    throw( std::logic_error
+           ( "InvestmentFunction::deserialize: asset with index " +
+             std::to_string( v_asset_indices[ j ] ) + " and type " +
+             std::to_string( v_asset_type[ j ] ) + " is duplicated." ) );
 
   // the second size of a unit goes with its first [see AssetType]
   for( Index j = 0 ; j < v_asset_indices.size() ; ++j )
    if( ( v_asset_type[ j ] == eSecondSize ) &&
-       ( first_size_of( j ) == Inf< Index >() ) )
+       ( ! keys.count( key( j , eUnitBlock ) ) ) )
     throw( std::logic_error( "InvestmentFunction::deserialize: asset " +
                              std::to_string( j ) + " is the second size of "
                              "unit " + std::to_string( v_asset_indices[ j ] ) +
@@ -906,6 +913,7 @@ void InvestmentFunction::remove_actives( const Subset & removed )
  for( auto v : { & v_lower_bound , & v_linearization } )
   if( v->size() == num_active )
    compact( *v , removed );
+ global_pool.remove_variables( removed , num_active );
 
  // the groups of assets are indexed by asset, so they no longer are: drop
  // them and let them be resolved again the next time the Blocks are updated
@@ -1079,7 +1087,9 @@ int InvestmentFunction::compute( bool changedvars ) {
   f_has_value = true;
   f_value = worst_value();
   output_function_value();
-  return( kOK );
+  // what a call with nothing changed returns
+  f_solver_status = kOK;
+  return( f_solver_status );
  }
 
  if( v_Block.empty() || ( ! v_Block.front() ) )
@@ -1089,8 +1099,10 @@ int InvestmentFunction::compute( bool changedvars ) {
  // lock the inner Block
 
  bool owned = v_Block.front()->is_owned_by( f_id );
- if( ( ! owned ) && ( ! v_Block.front()->lock( f_id ) ) )
-  return( kError ); // If this does not work, this is clearly an error.
+ if( ( ! owned ) && ( ! v_Block.front()->lock( f_id ) ) ) {
+  f_solver_status = kError; // If this does not work, this is clearly an error.
+  return( f_solver_status );
+  }
 
  // the inner Block is unlocked on every way out of here, a throw of this
  // function or of the Solver it calls included
@@ -1110,7 +1122,10 @@ int InvestmentFunction::compute( bool changedvars ) {
   throw( std::invalid_argument( "InvestmentFunction::compute: the inner "
                                 "Block has no piece." ) );
 
- return( compute_pieces( changedvars ) );
+ // what a call with nothing changed returns, whichever way the computation
+ // ended
+ f_solver_status = compute_pieces( changedvars );
+ return( f_solver_status );
 }
 
 /*--------------------------------------------------------------------------*/
@@ -1468,10 +1483,10 @@ bool InvestmentFunction::has_linearization( bool diagonal )
 
 bool InvestmentFunction::compute_new_linearization( bool diagonal )
 {
- if( diagonal )
+ // the certificate of infeasibility is the one vertical linearization there
+ // is, and has_linearization( false ) has given it already
+ if( diagonal || f_has_farkas_linearization )
   return( false );
- if( f_has_farkas_linearization )
-  return( true );
  return( ! constraints_are_satisfied() );
  }
 
@@ -2043,6 +2058,16 @@ void InvestmentFunction::resolve_asset_methods( void ) {
                             "invalid type of asset " + std::to_string( i ) +
                             ": " + std::to_string( v_asset_type[ i ] ) ) );
 
+ // the asset of type 0 on the unit of the asset j, or Inf< Index >()
+ std::unordered_map< Index , Index > first_size;
+ for( Index i = 0 ; i < num_assets ; ++i )
+  if( v_asset_type[ i ] == eUnitBlock )
+   first_size.emplace( v_asset_indices[ i ] , i );
+ const auto first_size_of = [ & ]( Index j ) {
+  const auto it = first_size.find( v_asset_indices[ j ] );
+  return( it == first_size.end() ? Inf< Index >() : it->second );
+  };
+
  // the pairs: the second size of a unit (type 2) and its first (type 0)
 
  std::vector< Index > second( num_assets , Inf< Index >() );
@@ -2217,16 +2242,6 @@ void InvestmentFunction::resolve_asset_methods( void ) {
  f_methods_resolved = true;
 
 } // end( InvestmentFunction::resolve_asset_methods )
-
-/*--------------------------------------------------------------------------*/
-
-Block::Index InvestmentFunction::first_size_of( Index j ) const {
- for( Index i = 0 ; i < v_asset_indices.size() ; ++i )
-  if( ( v_asset_type[ i ] == eUnitBlock ) &&
-      ( v_asset_indices[ i ] == v_asset_indices[ j ] ) )
-   return( i );
- return( Inf< Index >() );
-} // end( InvestmentFunction::first_size_of )
 
 /*--------------------------------------------------------------------------*/
 
@@ -2472,6 +2487,15 @@ void InvestmentFunction::GlobalPool::delete_linearization( const Index name ) {
  linearization_constants[ name ] = NaN;
  linearization_coefficients[ name ] = {};
 }  // end( InvestmentFunction::GlobalPool::delete_linearization )
+
+/*--------------------------------------------------------------------------*/
+
+void InvestmentFunction::GlobalPool::remove_variables( const Subset & removed ,
+                                                       Index num_active ) {
+ for( auto & coefficients : linearization_coefficients )
+  if( coefficients.size() == num_active )
+   compact( coefficients , removed );
+}  // end( InvestmentFunction::GlobalPool::remove_variables )
 
 /*--------------------------------------------------------------------------*/
 

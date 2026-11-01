@@ -114,6 +114,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- reading the assets takes a time linear in their number, where the check
+  for duplicates and the search of the first size of a unit for each second
+  size took one quadratic (20000 assets were read in 1.9 s), and so does the
+  check that nothing ties the pieces of a split inner Block, in the number
+  of the pieces (`InvestmentBlock::first_with_own()`)
+
 - the class comment of `InvestmentFunction` says what InvestmentFunction
   does, and leaves how the methods of UCBlock write the investment and give
   its derivatives, with their convexity, to the comments of those methods
@@ -249,6 +255,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the investment minus its lower bound with the bounds
 
 ### Fixed
+
+- `InvestmentFunction::compute_new_linearization( false )` no longer gives
+  the certificate of infeasibility again as a new vertical linearization:
+  it is the only one, and `has_linearization( false )` has given it (a
+  BundleSolver fetching more than one linearization per iteration,
+  `intBPar3` > 1, received it again)
+
+- removing active Variable of an InvestmentFunction takes their
+  coefficients out of the linearizations stored in its global pool, which
+  gave those of the removed ones in place of those that stay
+
+- `InvestmentFunction::compute( false )` returns what the previous
+  `compute()` returned, as the point is the same: after violated linear
+  constraints, a failure to lock the inner Block or to write the investment
+  into it, a Solver that gave neither a solution nor a proof of
+  infeasibility, or an event that stopped the computation at its end, it
+  returned the status of the last solve of the inner Block, possibly at
+  another point
 
 - on Windows, the executables that copy their DLLs next to themselves
   are linked one at a time (a job pool of Ninja), since two copies of the

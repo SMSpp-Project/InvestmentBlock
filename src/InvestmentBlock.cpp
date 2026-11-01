@@ -357,7 +357,9 @@ void InvestmentBlock::check_parked( void )
   // their own: what they have ties the pieces, which then are not separable
   parked.root->generate_abstract_variables();
   parked.root->generate_abstract_constraints();
-  if( const auto tie = first_with_own( parked.root , parked.pieces ) )
+  if( const auto tie = first_with_own( parked.root ,
+                                       { parked.pieces.begin() ,
+                                         parked.pieces.end() } ) )
    throw( std::logic_error( "InvestmentBlock::generate_abstract_constraints:"
            " the components " + std::to_string( parked.first ) + " to " +
            std::to_string( parked.first + parked.pieces.size() - 1 ) +
@@ -373,9 +375,9 @@ void InvestmentBlock::check_parked( void )
 /*--------------------------------------------------------------------------*/
 
 const Block * InvestmentBlock::first_with_own( const Block * block ,
-                                        const std::vector< Block * > & pieces )
+                           const std::unordered_set< const Block * > & pieces )
 {
- if( std::find( pieces.begin() , pieces.end() , block ) != pieces.end() )
+ if( pieces.count( block ) )
   return( nullptr );
  if( ( ! block->get_static_variable_groups().empty() ) ||
      ( ! block->get_dynamic_variable_groups().empty() ) ||
