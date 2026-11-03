@@ -13,14 +13,6 @@
 #           $(SW)          = compiler options                                #
 #           $(SMS++INC)    = the -I$( core SMS++ directory )                 #
 #           $(SMS++OBJ)    = the libSMS++ library itself                     #
-#           $(SDDPBkH)     = the .h files to include for SDDPBlock           #
-#           $(SDDPBkINC)   = the -I$( source directory ) for SDDPBlock       #
-#           $(TSSBkH)      = the .h files to include for                     #
-#                            TwoStageStochasticBlock                         #
-#           $(TSSBkINC)    = the -I$( source directory ) for                 #
-#                            TwoStageStochasticBlock                         #
-#           $(UCBckH)      = the .h files to include for UCBlock             #
-#           $(UCBckINC)    = the -I$( source directory ) for UCBlock         #
 #           $(InvsBkSDR)   = the directory where the source is               #
 #                                                                            #
 #   Output: $(InvsBkOBJ)   = the final object(s) / library                   #
@@ -43,6 +35,12 @@ InvsBkINC = -I$(InvsBkSDR)/include
 InvsBkH   = $(InvsBkSDR)/include/InvestmentBlock.h \
 	$(InvsBkSDR)/include/InvestmentFunction.h
 
+# the C++20 module smspp.investmentblock - - - - - - - - - - - - - - - - - -
+# [see makefile-mod of SMS++]
+
+$(eval $(call SMSppMODrule,InvsBk,$(InvsBkSDR),InvestmentBlock,\
+	smspp.investmentblock,))
+
 # clean - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 clean::
@@ -51,16 +49,15 @@ clean::
 # dependencies: every .o from its .cpp + every recursively included .h- - - -
 
 $(InvsBkSDR)/obj/InvestmentBlock.o: $(InvsBkSDR)/src/InvestmentBlock.cpp \
-	$(InvsBkSDR)/include/InvestmentFunction.h $(SDDPBkH) $(TSSBkH) $(UCBckH) \
-	$(SMS++OBJ)
+	$(InvsBkSDR)/include/InvestmentFunction.h $(SMS++OBJ)
 	$(CC) -c $(InvsBkSDR)/src/InvestmentBlock.cpp -o $@ $(InvsBkINC) \
-	$(SDDPBkINC) $(TSSBkINC) $(UCBckINC) $(SMS++INC) $(SW)
+	$(SMS++INC) $(SW)
 
-$(InvsBkSDR)/obj/InvestmentFunction.o: $(InvsBkSDR)/src/InvestmentFunction.cpp \
+$(InvsBkSDR)/obj/InvestmentFunction.o: \
+	$(InvsBkSDR)/src/InvestmentFunction.cpp \
 	$(InvsBkSDR)/include/InvestmentFunction.h \
-	$(InvsBkSDR)/include/InvestmentBlock.h $(SDDPBkH) $(TSSBkH) \
-	$(UCBckH) $(SMS++OBJ)
+	$(InvsBkSDR)/include/InvestmentBlock.h $(SMS++OBJ)
 	$(CC) -c $(InvsBkSDR)/src/InvestmentFunction.cpp -o $@ $(InvsBkINC) \
-	$(SDDPBkINC) $(TSSBkINC) $(UCBckINC) $(SMS++INC) $(SW)
+	$(SMS++INC) $(SW)
 
 ########################## End of makefile ###################################

@@ -10,7 +10,7 @@
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-BlockSolverConfig  # exact type of the Configuration object
+BlockSolverConfig     # exact type of the Configuration object
 
 0  # the BlockSolverConfig is not a "differential" one
 
@@ -26,12 +26,12 @@ HiGHSMILPSolver  # name of 1st Solver
 # now all the ComputeConfig
 # 1st ComputeConfig - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-ComputeConfig  # exact type of the ComputeConfig object
+ComputeConfig # exact type of the ComputeConfig object
 
 0  # f_diff == 0 ==> all non-provided parameters are set to the default value
    # f_diff == 1 ==> all non-provided parameters are not changed
 
-3  # number of integer parameters
+4  # number of integer parameters
 
 # now all the integer parameters
 intLogVerb                    0  # LogVerb, log verbosity of the MILPSolver
@@ -40,6 +40,8 @@ intThrowReducedCostException  0  # the bounds of the relaxed binary
                                  # Variable have no OneVarConstraint to
                                  # take their reduced cost, which the
                                  # linearization does not need
+intHomogeneousDirection       1  # the dual direction is - A' y, the
+                                 # certificate of infeasibility
 
 1  # number of double parameters
 
@@ -68,11 +70,10 @@ solver                  simplex  # a vertex, whose dual values are a
 # [none]
 
 # pointer to the "extra" Configuration
-* # [none]
+*  # [none]
 
-# end of 1st ComputeConfig  - - - - - - - - - - - - - - - - - - - - - - - - -
-
-# end of BlockSolverConfig  - - - - - - - - - - - - - - - - - - - - - - - - -
+# end of 1st ComputeConfig - - - - - - - - - - - - - - - - - - - - - - - - -
+# end of BlockSolverConfig - - - - - - - - - - - - - - - - - - - - - - - - -
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - - END BSCfg.txt - - - - - - - - - - - - - - - -

@@ -26,6 +26,8 @@
 
 #include <functional>
 
+#include "AbstractPath.h"
+
 #include "Block.h"
 
 #include "C05Function.h"
@@ -39,24 +41,7 @@
 /// namespace for the Structured Modeling System++ (SMS++)
 namespace SMSpp_di_unipi_it
 {
- class BatteryUnitBlock;       // forward declaration of BatteryUnitBlock
-
- class BendersBFunction;       // forward declaration of BendersBFunction
-
  class BlockSolverConfig;      // forward declaration of BlockSolverConfig
-
- class IntermittentUnitBlock;  // forward declaration of IntermittentUnitBlock
-
- class SDDPBlock;              // forward declaration of SDDPBlock
-
- class TwoStageStochasticBlock;   // forward declaration of
-                                  // TwoStageStochasticBlock
-
- class SDDPSolver;             // forward declaration of SDDPSolver
-
- class UCBlock;                // forward declaration of UClock
-
- class UnitBlock;              // forward declaration of UnitBlock
 
 /*--------------------------------------------------------------------------*/
 /*------------------------------- CLASSES ----------------------------------*/
@@ -79,19 +64,18 @@ namespace SMSpp_di_unipi_it
  *
  * - Its active ColVariable are the investments that can be made in certain
  *   assets, where the i-th one is the investment in the i-th asset. An asset
- *   is either a UnitBlock of the UCBlock where the investment takes place (a
- *   ThermalUnitBlock, a BatteryUnitBlock or an IntermittentUnitBlock),
- *   identified by its index there, or the converter of a BatteryUnitBlock,
- *   identified by the index of the unit, or a line of its network,
- *   identified by its index in the NetworkData [see serialize()].
+ *   is either a UnitBlock of the UCBlock where the investment takes place,
+ *   identified by its index there, or a line of its network, identified by
+ *   its index in the NetworkData [see serialize()].
  *
  * - The inner Block is the operational problem. It is either a UCBlock, or
- *   a TwoStageStochasticBlock whose scenarios (more precisely, the leaves
- *   of its tree of scenarios) are UCBlock, or an SDDPBlock whose stages are
- *   UCBlock inside a BendersBFunction; several identical SDDPBlock can also
- *   be given, in which case the scenarios are divided among them. The same
- *   investment is written into each of these UCBlock, hence it is the same
- *   for all the scenarios and all the stages.
+ *   a Block made of UCBlock, such as a TwoStageStochasticBlock whose
+ *   scenarios (more precisely, the leaves of its tree of scenarios) are
+ *   UCBlock [see find_pieces()], or a multi-stage Block (say, an
+ *   SDDPBlock) whose stages are UCBlock inside the Function of the
+ *   Objective of a Block of each stage. The same investment is written into
+ *   each of these UCBlock, hence it is the same for all the scenarios and
+ *   all the stages.
  *
  * - Its value is the sum of the cost of the investment, a piecewise-linear
  *   function of the active ColVariable, and of the value of the operational
@@ -99,9 +83,7 @@ namespace SMSpp_di_unipi_it
  *   has been written into it.
  *
  * Formally, let \f$ x \in \mathbb{R}^m \f$ be the vector of the investments,
- * one per asset (if the bounds of the active ColVariable have been
- * reformulated, \f$ x_i \f$ is the value of the i-th of them plus its lower
- * bound, cf. reformulated_bounds()). Let also \f$ \bar x_i \f$ be the
+ * one per asset. Let also \f$ \bar x_i \f$ be the
  * quantity of the i-th asset that is already installed, and \f$ c_i \f$ and
  * \f$ d_i \f$ the costs of investing and of disinvesting one unit of it
  * ("InstalledQuantity", "Cost" and "DisinvestmentCost" in serialize()). With
@@ -112,33 +94,23 @@ namespace SMSpp_di_unipi_it
  * \f]
  * where \f$ ( a )^+ = \max \{ a , 0 \} \f$ and \f$ Q( x ) \f$ is the value of
  * the operational problem with the investment \f$ x \f$, as follows.
- * According to the asset, the investment \f$ x_i \f$ is written into the
- * UCBlock in one of two ways:
- *
- * - as the scale factor of the UnitBlock [see UnitBlock::scale()], i.e.,
- *   \f$ x_i \f$ is the number of identical copies of the unit, which share
- *   its Variable. The contributions of the unit to the linking constraints
- *   of the UCBlock and to the Objective are then those of one copy times
- *   \f$ x_i \f$. This is the case of a ThermalUnitBlock, and of a
- *   BatteryUnitBlock or an IntermittentUnitBlock if the attribute
- *   "ReplicateBatteryUnits" or "ReplicateIntermittentUnits", respectively,
- *   is nonzero;
- *
- * - as the kappa constant of the asset, i.e., \f$ x_i \f$ multiplies its
- *   capacity data. These are the minimum and maximum power of an
- *   IntermittentUnitBlock, and therefore the reserve it can give [see
- *   IntermittentUnitBlock::set_kappa()], the power, storage, converter and
- *   reserve limits of a BatteryUnitBlock [see BatteryUnitBlock::set_kappa()]
- *   (the converter only if it is not an asset of its own), the converter
- *   limits alone if the asset is the converter of a BatteryUnitBlock [see
- *   BatteryUnitBlock::set_converter_kappa()], in which case storage and
- *   converter are two assets of the unit whose sizes are chosen apart,
- *   and the two flow limits \f$ \kappa_l C^v P^{mn}_l \le F_l \le \kappa_l
- *   C^v P^{mx}_l \f$ of a line \f$ l \f$ in the DCNetworkBlock of each time
- *   instant [see DCNetworkBlock::set_kappa()]. A line can only be an asset
- *   of a DCNetworkBlock: with any other NetworkBlock, writing the investment
- *   fails, and compute() returns kError with the value \f$ +\infty \f$
- *   (\f$ -\infty \f$ for a maximization).
+ * What an investment means is not known here: each asset names, in the
+ * instance, the method of the methods factory that writes \f$ x_i \f$ into
+ * the inner Block and the one that reads back the derivative of its value
+ * with respect to it [see "AssetSetter" in serialize()], both called on the
+ * UCBlock at the root of each UCBlock of the inner Block, which hands the
+ * value on to the unit or to the lines [see UCBlock::resize_unit()]. The
+ * methods that UCBlock registers write \f$ x_i \f$ either as the number of
+ * copies of a UnitBlock [see UnitBlock::replicate() and UCBlock::replicate()]
+ * or as the kappa constant of a unit or of a line, which multiplies its
+ * capacity data [see UCBlock::resize_unit() and UCBlock::resize_line()]. An
+ * instance that does not name the methods gets UCBlock::replicate for a unit
+ * whose class does not register "<class>::resize", as a ThermalUnitBlock or
+ * a NuclearUnitBlock, UCBlock::resize_unit for every other unit and
+ * UCBlock::resize_line for every line. A line can be an asset only of a
+ * NetworkBlock whose class registers "<class>::resize": with any other
+ * NetworkBlock, writing the investment fails, and compute() returns kError
+ * with the value \f$ +\infty \f$ (\f$ -\infty \f$ for a maximization).
  *
  * In both cases \f$ x_i \f$ multiplies the capacity of the asset as a whole,
  * the installed one included. The capacity data of the UnitBlock or of the
@@ -175,147 +147,55 @@ namespace SMSpp_di_unipi_it
  *
  * - with a TwoStageStochasticBlock, it is the value given by the Solver of
  *   the TwoStageStochasticBlock, i.e., the expected operational cost over
- *   its scenarios (whose probabilities are in the Objective of their
- *   UCBlock);
+ *   its scenarios (whose probabilities are the weights of the Objective of
+ *   their UCBlock [see Block::get_objective_weight()]);
  *
- * - with an SDDPBlock, the cuts of the future cost functions are first
- *   computed by the SDDPSolver registered to the SDDPBlock, if any (after
- *   removing the existing ones, if the investment has changed). Then the
- *   policy they define is simulated over each of the \f$ N \f$ scenarios of
- *   the SDDPBlock by an SDDPGreedySolver, and \f$ Q( x ) \f$ is the mean
- *   \f$ \frac{1}{N} \sum_{ k = 1 }^N Q^k( x ) \f$ of the costs
- *   \f$ Q^k( x ) \f$ of the simulations. This is an unbiased statistical
- *   estimate of the expected operational cost of that policy, which for a
- *   minimization is not below the optimal one, and it differs from the
- *   lower bound given by the cuts.
+ * - with a Solver whose result is the mean of the solutions of \f$ N \f$
+ *   problems [see ThinComputeInterface::eEverySolution], as the
+ *   SDDPSimulationSolver of an SDDPBlock, which trains a policy and
+ *   simulates it on each of the \f$ N \f$ scenarios, \f$ Q( x ) \f$ is that
+ *   mean \f$ \frac{1}{N} \sum_{ k = 1 }^N Q^k( x ) \f$; for a policy, it is
+ *   an unbiased statistical estimate of its expected operational cost,
+ *   which for a minimization is not below the optimal one, and it differs
+ *   from the lower bound given by the cuts.
  *
  * If intComputeLinearization is nonzero (the default), compute() also gives a
  * linearization of \f$ \mathcal{F} \f$ at \f$ x \f$. Its coefficients are the
  * derivative of the cost of the investment (\f$ c_i \f$ if
  * \f$ x_i > \bar x_i \f$, and \f$ - d_i \f$ otherwise, which is a subgradient
  * at the kink if \f$ c_i + d_i \ge 0 \f$) plus a linearization of \f$ Q \f$.
- * The latter is read from the dual values of the inner Block, i.e., from the
- * multipliers \f$ y \f$ of its constraints that its Solver writes there [see
- * RowConstraint::get_dual()], in a way that again depends on the asset.
+ * The latter is what the getters named by the assets give [see
+ * "AssetLinearization" in serialize()]. Those that UCBlock registers read it
+ * from the dual values that the Solver writes in the inner Block [see
+ * RowConstraint::get_dual()]: for the number of copies of a unit as
+ * UCBlock::get_replicate_linearization() says, for the kappa constant of a
+ * line as DCNetworkBlock::get_resize_linearization() and
+ * OTSNetworkBlock::get_resize_linearization() say, and for that of a unit as
+ * BatteryUnitBlock::get_kappa_linearization() and
+ * IntermittentUnitBlock::get_kappa_linearization() say. A getter that has no
+ * derivative to give, as for an asset that has a design variable of its own,
+ * throws, and compute() then returns kError, with no linearization. With a
+ * TwoStageStochasticBlock these coefficients are summed over the UCBlock of
+ * its scenarios (since the probabilities are in their dual values), and with
+ * a Solver giving several solutions they are averaged over them as the
+ * value is.
  *
- * - for an asset represented by a scale factor, the coefficient is
- *   \f[
- *     f^1_i( \bar z_i ) + \bar y^\top g^1_i( \bar z_i ) \; , \tag{2}
- *   \f]
- *   where \f$ f^1_i \f$ is the Objective of one copy of the UnitBlock and
- *   \f$ \bar z_i \f$ is its current solution if it has copies, and else a
- *   minimizer of (2) over the feasible set of one copy (see (4) below).
- *   The vector \f$ g^1_i \f$ holds the contributions of one copy to the
- *   linking constraints of the UCBlock (the active and reactive node
- *   injection constraints, the primary and secondary reserve, inertia and
- *   pollutant budget ones, cf. UCBlock::generate_abstract_constraints()),
- *   whose dual values are \f$ \bar y \f$; the fixed consumption of a unit
- *   that is off is among the contributions to the active ones;
- *
- * - for a line \f$ l \f$, the coefficient is
- *   \f[
- *     \sum_t C^v \bigl( \, P^{mn}_l \mu^{mn}_{t,l} - P^{mx}_l
- *     \mu^{mx}_{t,l} \, \bigr) \; , \tag{3}
- *   \f]
- *   where \f$ \mu^{mn}_{t,l} , \mu^{mx}_{t,l} \ge 0 \f$ are the multipliers
- *   of the two sides of the flow limits of the line in the DCNetworkBlock
- *   of instant \f$ t \f$ (at most one of the two is nonzero, and which one
- *   is given by the sign of the dual value). Formula (3) holds whatever the
- *   formulation
- *   of the network and the susceptances of the lines, since the flow limits
- *   bound the flow Variable of each line [see
- *   DCNetworkBlock::generate_abstract_constraints()]. A line that has a
- *   design variable \f$ x_l \f$ in the DCNetworkBlock has instead the flow
- *   limits \f$ F_l - \kappa_l C^v P^{mx}_l x_l \le 0 \f$ (and the lower
- *   one), in which \f$ \kappa_l \f$ multiplies a Variable: the optimal
- *   value is then not a convex function of \f$ \kappa_l \f$, and the
- *   linearization is refused (as
- *   IntermittentUnitBlock::get_kappa_linearization() and
- *   BatteryUnitBlock::get_kappa_linearization() refuse it for a unit with a
- *   design variable): compute() then returns the status of the Solver of
- *   the inner Block with neither a value, get_value() giving
- *   \f$ +\infty \f$ (\f$ -\infty \f$ for a maximization), nor a
- *   linearization;
- *
- * - for a BatteryUnitBlock or an IntermittentUnitBlock represented by its
- *   kappa constant, the coefficient is the one given by
- *   BatteryUnitBlock::get_kappa_linearization() and
- *   IntermittentUnitBlock::get_kappa_linearization(), i.e., the sum of the
- *   multipliers of the constraints of the unit whose right-hand sides kappa
- *   multiplies, each times the datum it multiplies there, and for the
- *   converter of a BatteryUnitBlock it is the one given by
- *   BatteryUnitBlock::get_converter_kappa_linearization().
- *
- * With a TwoStageStochasticBlock these coefficients are summed over the
- * UCBlock of its scenarios (since the probabilities are in their dual
- * values), and with an SDDPBlock they are averaged over the simulations as
- * the value is. By the envelope theorem, (2) and (3) are subgradients of
- * \f$ Q \f$ if \f$ Q \f$ is the optimal value of a convex problem and the
- * dual values are optimal ones. Indeed, a kappa constant of an intermittent
- * unit or of a line only enters right-hand sides of linear constraints, and
- * the optimal value of a convex problem is a convex function of its
- * right-hand sides. A BatteryUnitBlock with the binary variables
- * \f$ u^{ch}_t \f$ has instead the rows
- * \f$ p^-_t \le - \kappa P^{mn}_t u^{ch}_t \f$ and \f$ p^+_t \le \kappa
- * P^{mx}_t ( 1 - u^{ch}_t ) \f$, in which \f$ \kappa \f$ multiplies a
- * Variable; in their continuous relaxation, however, the change of variable
- * \f$ w_t = \kappa u^{ch}_t \f$ turns them into
- * \f$ p^-_t \le - P^{mn}_t w_t \f$,
- * \f$ p^+_t \le P^{mx}_t ( \kappa - w_t ) \f$ and
- * \f$ 0 \le w_t \le \kappa \f$, which are linear in
- * \f$ ( p , w , \kappa ) \f$ jointly, and therefore the optimal value is
- * again convex in \f$ \kappa \f$ (see
- * BatteryUnitBlock::get_kappa_linearization() for the terms of these rows).
- * The kappa of a converter that is an asset of its own enters the
- * right-hand sides of the converter rows alone, and its coefficient is
- * BatteryUnitBlock::get_converter_kappa_linearization(). A scale factor,
- * instead, multiplies all the contributions of a unit, and the convexity of
- * \f$ Q \f$ in \f$ x_i \f$ is that of a perspective: with \f$ Z_i \f$ the
- * feasible set of one copy, convex if the unit is relaxed, \f$ x_i \f$
- * copies contribute \f$ x_i f^1_i( z_i ) \f$ and \f$ x_i g^1_i( z_i ) \f$
- * for some \f$ z_i \in Z_i \f$, i.e., with \f$ w_i = x_i z_i \f$, the
- * perspective \f$ x_i f^1_i( w_i / x_i ) \f$ over the cone
- * \f$ \{ ( w_i , x_i ) : x_i > 0 , \, w_i \in x_i Z_i \} \f$ (closed by
- * \f$ w_i = 0 \f$ at \f$ x_i = 0 \f$ if \f$ Z_i \f$ is bounded), which is
- * jointly convex in \f$ ( w_i , x_i ) \f$, while \f$ g^1_i \f$ is linear,
- * as it is in the rows of the UCBlock. The optimal value of the inner Block
- * is therefore the minimum over \f$ w \f$ of a function jointly convex in
- * \f$ ( w , x ) \f$, a convex function of \f$ x \f$. In the Lagrangian Dual of
- * the linking constraints, the contribution of the unit is
- * \f[
- *   x_i \, \varphi_i( y ) \; , \quad \varphi_i( y ) = \min \{ \,
- *   f^1_i( z_i ) + y^\top g^1_i( z_i ) \; : \; z_i \in Z_i \, \} \; ,
- *   \tag{4}
- * \f]
- * which is affine in \f$ x_i \f$ for each \f$ y \f$, and the rest of the dual
- * function does not depend on \f$ x_i \f$. Hence, if the inner Block is
- * solved as a convex problem (its continuous relaxation, or its Lagrangian
- * Dual by a LagrangianDualSolver), then \f$ Q \f$ is the supremum over
- * \f$ y \f$ of functions affine in \f$ x \f$, the one of an optimal
- * \f$ \bar y \f$ at \f$ \bar x \f$ is below \f$ Q \f$ everywhere and equal to
- * it at \f$ \bar x \f$, and \f$ \varphi_i( \bar y ) \f$ is the coefficient of
- * \f$ x_i \f$ in a subgradient. If \f$ \bar x_i > 0 \f$, the solution
- * \f$ \bar z_i \f$ of the unit is a minimizer in (4) (otherwise the copies
- * could do better against \f$ \bar y \f$, and neither the primal nor the
- * dual solution would be optimal), and (4) is (2). If \f$ \bar x_i = 0 \f$,
- * instead, the unit weighs nothing in the inner Block, and its solution is
- * arbitrary (typically the unit is off, and (2) is 0 even where building
- * the unit pays, which stops a method that starts at 0 there): then
- * \f$ \varphi_i( \bar y ) \f$ is computed by solving a copy of the unit
- * alone with the Objective of (4) [see compute_zero_copy_linearization()],
- * by the Solver of the BlockSolverConfig of the units, which has to solve
- * \f$ Z_i \f$ as the inner Block does [see set_ComputeConfig()]. Since
- * \f$ x_i \ge 0 \f$, a lower estimate of \f$ \varphi_i( \bar y ) \f$ at
- * \f$ \bar x_i = 0 \f$ (e.g., from a relaxation of the copy) still gives a
- * linearization below \f$ Q \f$ over the domain, if a less tight one. The
- * copies of a scaled unit are then exact for the convexified problem, while
- * for the unit commitment problem they are a restriction, since all the
- * copies of a unit take the same decisions. If the inner Block is solved
- * as a mixed-integer problem, \f$ Q \f$ is typically not convex and the
- * linearization may not be a subgradient. With an SDDPBlock the
- * linearization is the mean of those of the simulations, a subgradient of
- * the mean of their values for the current policy rather than of the
- * expected cost. The cost of the investment in (1)
+ * If the inner Block is solved as a convex problem (its continuous
+ * relaxation, or its Lagrangian Dual by a LagrangianDualSolver), \f$ Q \f$
+ * is convex in each asset and these coefficients are subgradients of it: in
+ * a kappa constant because it enters right-hand sides only (for a battery
+ * with binary variables, in its continuous relaxation after a change of
+ * variable [see BatteryUnitBlock::get_kappa_linearization()]), and in a
+ * number of copies as in a perspective [see UnitBlock::replicate()], also
+ * where the unit has no copies and the getter solves a copy of it against
+ * the dual values. The copies of a scaled unit are exact for the convexified
+ * problem, while for the unit commitment problem they are a restriction,
+ * since all the copies of a unit take the same decisions. If the inner Block
+ * is solved as a mixed-integer problem, \f$ Q \f$ is typically not convex
+ * and the linearization may not be a subgradient. With a Solver that
+ * simulates a policy the linearization is the mean of those of the
+ * simulations, a subgradient of the mean of their values for the current
+ * policy rather than of the expected cost. The cost of the investment in (1)
  * is convex if and only if \f$ c_i + d_i \ge 0 \f$ for all \f$ i \f$. Thus,
  * \f$ \mathcal{F} \f$ is convex if this holds and \f$ Q \f$ is convex;
  * is_convex() checks the former, while the latter depends on the Solver of
@@ -326,12 +206,15 @@ namespace SMSpp_di_unipi_it
  * does if the inner Block is infeasible at \f$ x \f$. In this second case, if
  * the Solver of the inner Block gives a certificate of the infeasibility (an
  * unbounded dual direction), a vertical linearization is read from it as the
- * diagonal ones are. This is only done if all the assets are represented by
- * kappa constants, whose certificate is valid away from the current
- * investment when they enter right-hand sides only (intermittent units and
- * lines; for a battery with binary variables, the continuous relaxation after
- * the change of variable above): for a scale factor, which multiplies the
- * columns of a unit, it may not be. With the integrality of the active
+ * diagonal ones are. This is only done if the getter of every asset is
+ * declared to read one ("AssetFeasibilityCut" in serialize()), which is
+ * right for kappa constants, whose certificate is valid away from the
+ * current investment when they enter right-hand sides only (intermittent
+ * units and lines, and a battery without binary variables of intake and
+ * outtake, whose coefficients its kappa multiplies): for a scale factor, which
+ * multiplies the columns of a unit, it may not be, and an instance that
+ * does not name the methods declares it for kappa constants only. With the
+ * integrality of the active
  * ColVariable relaxed, minimizing \f$ \mathcal{F} \f$ over its domain is
  * therefore a convex nondifferentiable problem, which a Solver for
  * C05Function (e.g., BundleSolver) attached to the InvestmentBlock can solve.
@@ -385,9 +268,12 @@ class InvestmentFunction : public C05Function , public Block {
  *  @{ */
 
  /// public enum representing the types of assets
- /** Public enum representing the types of assets. */
+ /** Public enum representing the types of assets: a UnitBlock, a
+  * transmission line, and the second size of a UnitBlock that has two,
+  * which goes with an asset of type eUnitBlock on the same unit [see
+  * "AssetType" in deserialize()]. */
 
- enum AssetType { eUnitBlock = 0 , eLine = 1 , eConverter = 2 };
+ enum AssetType { eUnitBlock = 0 , eLine = 1 , eSecondSize = 2 };
 
  /// public enum representing the sides of the linear constraints
  /** Public enum representing the sides of the linear constraints. */
@@ -420,112 +306,68 @@ class InvestmentFunction : public C05Function , public Block {
  using ViolatedConstraint = std::pair< Index , ConstraintSide >;
 
 /*--------------------------------------------------------------------------*/
- /// virtualized concrete iterator
- /** A concrete class deriving from ThinVarDepInterface::v_iterator and
-  * implementing the concrete iterator for sifting through the "active"
-  * Variable of an InvestmentFunction. */
+ /// virtualized concrete iterator, templated over const-ness
+ /** A single concrete implementation of both ThinVarDepInterface::v_iterator
+  * and ThinVarDepInterface::v_const_iterator, parameterized over the abstract
+  * base \p Base (the v_iterator / v_const_iterator to derive from) and the
+  * underlying \p UnderIt (VarVector::iterator / ::const_iterator). It sifts
+  * through the "active" Variable of an InvestmentFunction; the two flavours
+  * are the #v_iterator and #v_const_iterator aliases below. */
 
- class v_iterator : public ThinVarDepInterface::v_iterator
+ template< class Base , class UnderIt >
+ class v_iterator_tmpl : public Base
  {
   public:
 
-  explicit v_iterator( VarVector::iterator & itr ) : itr_( itr ) {}
-  explicit v_iterator( VarVector::iterator && itr )
-   : itr_( std::move( itr ) ) {}
+  using reference = typename Base::reference;
+  using pointer   = typename Base::pointer;
 
-  v_iterator * clone( void ) override final {
-   return( new v_iterator( itr_ ) );
-   }
+  explicit v_iterator_tmpl( UnderIt & itr ) : itr_( itr ) {}
+  explicit v_iterator_tmpl( UnderIt && itr ) : itr_( std::move( itr ) ) {}
 
-  void operator++( void ) override final { ++(itr_); }
-
-  reference operator*( void ) const override final {
-   return( *( ( *itr_ ) ) );
-   }
-  pointer operator->( void ) const override final {
-   return( ( *itr_ ) );
-   }
-
-  bool operator==( const ThinVarDepInterface::v_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( itr_ == tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( tmp ? itr_ == tmp->itr_ : false );
-   #endif
-   }
-  bool operator!=( const ThinVarDepInterface::v_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( itr_ != tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_iterator * >( & rhs );
-    return( tmp ? itr_ != tmp->itr_ : true );
-   #endif
-   }
-
-  private:
-
-  VarVector::iterator itr_;
-  };
-
-/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
- /// virtualized concrete const_iterator
- /** A concrete class deriving from ThinVarDepInterface::v_const_iterator and
-  * implementing the concrete iterator for sifting through the "active"
-  * Variable of an InvestmentFunction. */
-
- class v_const_iterator : public ThinVarDepInterface::v_const_iterator
- {
-  public:
-
-  explicit v_const_iterator( VarVector::const_iterator & itr ) : itr_( itr ) {}
-  explicit v_const_iterator( VarVector::const_iterator && itr )
-   : itr_( std::move( itr ) ) {}
-
-  v_const_iterator * clone( void ) override final {
-   return( new v_const_iterator( itr_ ) );
+  Base * clone( void ) override final {
+   return( new v_iterator_tmpl( itr_ ) );
    }
 
   void operator++( void ) override final { ++( itr_ ); }
 
-  reference operator*( void ) const override final {
-   return( *( ( *itr_ ) ) );
-   }
-  pointer operator->( void ) const override final { return( ( *itr_ ) ); }
+  reference operator*( void ) const override final { return( *( *itr_ ) ); }
+  pointer operator->( void ) const override final { return( *itr_ ); }
 
-  bool operator==( const ThinVarDepInterface::v_const_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( itr_ == tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( tmp ? itr_ == tmp->itr_ : false );
-   #endif
+  bool operator==( const Base & rhs ) const override final {
+   auto tmp = cast( rhs );
+   return( tmp ? itr_ == tmp->itr_ : false );
    }
-  bool operator!=( const ThinVarDepInterface::v_const_iterator & rhs )
-   const override final {
-   #ifdef NDEBUG
-    auto tmp = static_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( itr_ != tmp->itr_ );
-   #else
-    auto tmp = dynamic_cast< const InvestmentFunction::v_const_iterator * >(
-								      & rhs );
-    return( tmp ? itr_ != tmp->itr_ : true );
-   #endif
+  bool operator!=( const Base & rhs ) const override final {
+   auto tmp = cast( rhs );
+   return( tmp ? itr_ != tmp->itr_ : true );
    }
 
   private:
 
-  VarVector::const_iterator itr_;
+  // debug builds check the dynamic type; release builds trust the caller
+  static const v_iterator_tmpl * cast( const Base & rhs ) {
+   #ifdef NDEBUG
+    return( static_cast< const v_iterator_tmpl * >( & rhs ) );
+   #else
+    return( dynamic_cast< const v_iterator_tmpl * >( & rhs ) );
+   #endif
+   }
+
+  UnderIt itr_;
   };
+
+/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+ /// concrete iterator over the "active" Variable (non-const flavour)
+
+ using v_iterator =
+  v_iterator_tmpl< ThinVarDepInterface::v_iterator , VarVector::iterator >;
+
+ /// concrete iterator over the "active" Variable (const flavour)
+
+ using v_const_iterator =
+  v_iterator_tmpl< ThinVarDepInterface::v_const_iterator ,
+                   VarVector::const_iterator >;
 
 /*--------------------------------------------------------------------------*/
  /// public enum for the int algorithmic parameters
@@ -538,13 +380,6 @@ class InvestmentFunction : public C05Function , public Block {
 
   intComputeLinearization = intLastParC05F ,
   ///< determines whether linearizations must be computed
-
-  intOutputSolution ,
-  ///< indicates whether the solution should be output
-  /**< If the value for this parameter is nonzero, then part of the primal and
-   * dual solutions obtained for each UCBlock for each scenario is output
-   * while this InvestmentFunction is being compute()-ed. The default value of
-   * this parameter is 0, which means that no solution is output. */
 
   intLastParInvestmentF
   ///< first allowed new int parameter for derived classes
@@ -587,14 +422,6 @@ class InvestmentFunction : public C05Function , public Block {
    * compute()-ed. If it is empty, then the variable and function values are
    * not output. The default value for this parameter is the empty string. */
 
-  strOutputSolutionDirectory ,
-  ///< path to the directory where the solution should be output
-  /**< If the solution must be output (see #intOutputSolution) then this is
-   * the path to the directory where the solution will be output. If it is
-   * empty, then the solution is output to the working directory. The default
-   * value of this parameter is empty. This parameter is only used by the
-   * multi-replica SDDPBlock path. */
-
   strLastParInvestmentF
   ///< first allowed new string parameter for derived classes
   /**< Convenience value for easily allow derived classes to extend the set of
@@ -631,14 +458,17 @@ class InvestmentFunction : public C05Function , public Block {
   *        transmission line. If it is a UnitBlock, then its index is simply
   *        the index that this UnitBlock has within its UCBlock. If it is a
   *        transmission line, then its index is the index that this
-  *        transmission line has within its NetworkBlock. The correspondence
+  *        transmission line has within its NetworkBlock, the lines of the
+  *        carriers of the UCBlock being numbered one carrier after the
+  *        other, those of the carrier 0 first (see
+  *        UCBlock::get_network_blocks( Index )). The correspondence
   *        between \p asset_indices and \p x is positional, i.e., if \p
   *        asset_indices is not empty, \p asset_indices[ i ] is the index of
   *        the asset associated with the i-th active variable of this function
   *        (given by get_active_var( i )).
   *
   * @param asset_type a vector containing the type of each asset.
-
+  *
   * @param cost a vector containing the coefficients of the linear term of
   *        this function associated with investments. The correspondence
   *        between \p cost and \p x is positional, i.e., the coefficient of
@@ -654,10 +484,10 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param observer a pointer to the Observer of this InvestmentFunction.
   *
-  * As the && implies, \p x, \p block_indices, \p line_indices, \p cost, and
+  * As the && implies, \p x, \p asset_indices, \p asset_type, \p cost, and
   * \p disinvestment_cost become property of the InvestmentFunction object.
   *
-  * All inputs have a default (nullptr, {}, {}, {}, {}, and nullptr,
+  * All inputs have a default (nullptr, {}, {}, {}, {}, {}, and nullptr,
   * respectively) so that this can be used as the void constructor. */
 
  InvestmentFunction( Block * inner_block = nullptr , VarVector && x = {} ,
@@ -725,6 +555,65 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
+ /// de-serialize taking the inner Block from outside
+ /** As deserialize( group , issueMod ), except that the inner Block is NOT
+  * created out of the "InnerBlock" sub-group: the given \p inner is used
+  * instead. Ownership of \p inner is taken, exactly as for an inner Block
+  * read from the file, unless this throws: \p inner is then handed back,
+  * still owned by the caller.
+  *
+  * This is what InvestmentBlock uses when it splits an inner Block [see
+  * InvestmentBlock::split_inner()]: each piece is handed to the component
+  * built out of the group of the inner Block. */
+
+ void deserialize( const netCDF::NcGroup & group , Block * inner ,
+                   ModParam issueMod = eNoMod ) {
+  f_external_inner_block = inner;
+  try {
+   deserialize( group , issueMod );
+   }
+  catch( ... ) {
+   f_external_inner_block = nullptr;
+   throw;
+   }
+  f_external_inner_block = nullptr;
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// reads a netCDF variable with one value for each of n items
+ /** Reads into \p data the variable \p name of \p group, which says one
+  * value for each of \p n items, the assets or the linear constraints: a
+  * scalar, or a variable of size 1, holds for all of them, and a variable of
+  * size \p n gives one each. If the variable is not there, or if \p n is 0,
+  * \p data is cleared and false is returned. Any other size is refused,
+  * naming the variable: ::deserialize() reads as many values as it is asked
+  * to, dropping without a word those of a longer variable, and fails on a
+  * shorter one without saying which. Used by deserialize(), and by that of
+  * InvestmentBlock for its own variables. */
+
+ template< class T >
+ static bool deserialize_one_each( const netCDF::NcGroup & group ,
+                                   const std::string & name , Index n ,
+                                   std::vector< T > & data ) {
+  data.clear();
+  const auto var = group.getVar( name );
+  if( var.isNull() || ( ! n ) )
+   return( false );
+
+  const Index size = var.getDimCount() ? var.getDim( 0 ).getSize() : 1;
+  if( ( var.getDimCount() > 1 ) || ( ( size != 1 ) && ( size != n ) ) )
+   throw( std::logic_error( "deserialize: the '" + name + "' netCDF "
+                            "variable of group '" + group.getName() +
+                            "' must be a scalar or have size 1 or " +
+                            std::to_string( n ) + ", and it has size " +
+                            std::to_string( size ) + "." ) );
+
+  SMSpp_di_unipi_it::deserialize( group , name , size , data , true , true );
+  data.resize( n , data.front() );
+  return( true );
+  }
+
+/*--------------------------------------------------------------------------*/
  /// destructor of InvestmentFunction
  /** Destructor of InvestmentFunction. It destroys the inner Block (if any),
   * releasing its memory. If the inner Block should not be destroyed then,
@@ -761,23 +650,25 @@ class InvestmentFunction : public C05Function , public Block {
   * keys, and their corresponding Configuration, are considered:
   *
   * - "BlockConfig": a pointer to a BlockConfig to be applied to the inner
-  *    Block of this BendersBFunction.
+  *    Block of this InvestmentFunction.
   *
   * - "BlockSolverConfig": a pointer to a BlockSolverConfig to be applied to
-  *    the inner Block of this BendersBFunction.
+  *    the inner Block of this InvestmentFunction.
   *
   * - "UnitBlockSolverConfig": a pointer to the BlockSolverConfig of the
-  *    copy of a UnitBlock with no copies, which the linearization solves
-  *    alone [see compute_zero_copy_linearization()]. It is applied to an
-  *    AbstractBlock that holds the copy as its sub-Block, hence its Solver
-  *    has to handle a Block with sub-Block (e.g., a :MILPSolver), and it
-  *    has to solve the copy as the unit is solved in the inner Block (e.g.,
-  *    its continuous relaxation, if that is what the inner Block is solved
-  *    for). If it is not given and the inner Block is a UCBlock, the
-  *    BlockSolverConfig of the inner Block is used, i.e., the unit is solved
-  *    by the same Solver, with the same parameters, that solves it in the
-  *    inner Block; with any other inner Block it has to be given, if a
-  *    scaled UnitBlock can have no copies.
+  *    copy of a unit with no copies, which the derivative with respect to the
+  *    number of copies solves alone [see
+  *    UCBlock::get_replicate_linearization()]. This InvestmentFunction does
+  *    not use it: it gives a clone of it to every UCBlock of the inner
+  *    Block, as the extra Configuration of its BlockConfig, where the
+  *    UCBlock reads it. The Solver is applied to an AbstractBlock that holds
+  *    the copy as its sub-Block, hence it has to handle a Block with
+  *    sub-Block (e.g., a :MILPSolver), and it has to solve the copy as the
+  *    unit is solved in the inner Block (e.g., its continuous relaxation, if
+  *    that is what the inner Block is solved for). If it is not given, the
+  *    "BlockSolverConfig" given with it, if any, is given in its place, i.e.,
+  *    the unit is solved by the same Solver, with the same parameters, that
+  *    solves the inner Block.
   *
   * If a key that is not any of the above is provided, an exception is
   * thrown. No pointer is kept by the InvestmentFunction, which keeps a clone
@@ -801,7 +692,10 @@ class InvestmentFunction : public C05Function , public Block {
   * pointer to the BlockConfig (if provided) in the extra Configuration is
   * nullptr, then (2) above is performed. If the pointer to the
   * BlockSolverConfig (if provided) in the extra Configuration is nullptr,
-  * then (3) above is performed.
+  * then (3) above is performed, and the BlockSolverConfig given with
+  * "UnitBlockSolverConfig" is taken back from the UCBlock as well. If the
+  * pointer to the "UnitBlockSolverConfig" (if provided) is nullptr, only the
+  * latter is done.
   *
   * @param scfg a pointer to a ComputeConfig. */
 
@@ -835,24 +729,12 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * @param x a n-vector of pointers to ColVariable representing the x variable
   *        vector in the definition of the function. Note that the order of
-  *        the variables in x is crucial, since the correspondence with the
-  *        indices of the assets and the linear coefficients (whether already
-  *        provided, or to be provided later, cf. discussion above) is
-  *        positional. The i-th linear coefficient of this InvestmentFunction
-  *        is the coefficient of the i-th active variable in the linear term
-  *        of this function. Moreover, by letting "NumUnitBlocks" and
-  *        "NumLines" the number of UnitBlocks and transmission lines to
-  *        invest:
-  *
-  *          - For each i in {0, ..., NumUnitBlocks-1}, the i-th active
-  *            Variable of this InvestmentFunction represents the investment
-  *            to be made on the i-th UnitBlock (among the UnitBlock that are
-  *            subject to investment).
-  *
-  *          - For each i in {0, ..., NumLines-1}, the (NumUnitBlocks + i)-th
-  *            active Variable of this InvestmentFunction represents the
-  *            investment to be made on the i-th line (among the lines that
-  *            are subject to investment).
+  *        the variables in x is crucial, since the i-th asset (whether
+  *        already provided, or to be provided later, cf. discussion above)
+  *        invests in the i-th active Variable, unless a mapping says
+  *        otherwise [see set_asset_variable_indices()], and its linear
+  *        coefficients are those of that Variable in the linear term of this
+  *        function.
   *
   *        After the call to this method, <tt>x[ 0 ] == get_active_var( 0 ),
   *        x[ 1 ] = get_active_var( 1 )</tt>, ...
@@ -896,56 +778,7 @@ class InvestmentFunction : public C05Function , public Block {
    block->set_f_Block( this );
 
   send_nuclear_modification();
-  }
-
-/*--------------------------------------------------------------------------*/
- /// set the sub-Blocks of the InvestmentFunction
- /** This method sets the sub-Blocks of the InvestmentFunction as a vector of
-  * (identical) Blocks. This enables the multi-replica execution path: each
-  * Block is a self-contained replica of the inner problem, and scenarios
-  * are distributed across replicas using OpenMP (and, if compiled with
-  * USE_MPI, across MPI processes).
-  *
-  * @param blocks the pointers to the (identical) Blocks satisfying the
-  *        conditions stated in the definition of this InvestmentFunction.
-  *
-  * @param destroy_previous_blocks indicates whether the previous inner
-  *        Blocks must be destroyed. The default value of this parameter is
-  *        \c true, which means that the previous inner Blocks (if any) are
-  *        destroyed and their allocated memory is released. */
-
- void set_inner_blocks( std::vector< Block * > & blocks ,
-                        bool destroy_previous_blocks = true ) {
-  if( ( ! v_Block.empty() ) && ( blocks.size() == v_Block.size() ) &&
-      ( ! destroy_previous_blocks ) ) {
-
-   bool blocks_are_here = true;
-   for( Index i = 0 ; i < blocks.size() ; ++i )
-    if( blocks[ i ] != v_Block[ i ] ) {
-     blocks_are_here = false;
-     break;
-     }
-
-   if( blocks_are_here )
-    return; // the given Blocks are already here; silently return
-   }
-
-  // un-do the BlockSolverConfig-uration of the outgoing inner Blocks, i.e.,
-  // remove the Solver that this InvestmentFunction has registered there
-  unconfigure_inner_Block_Solver();
-
-  if( destroy_previous_blocks )
-   for( auto block : v_Block )
-    delete block;
-
-  v_Block.clear();
-  v_Block = blocks;
-
-  for( auto block : v_Block )
-   if( block )
-    block->set_f_Block( this );
-
-  send_nuclear_modification();
+  set_pieces();
   }
 
 /*--------------------------------------------------------------------------*/
@@ -962,15 +795,6 @@ class InvestmentFunction : public C05Function , public Block {
   *                             linearizations must be computed. The default
   *                             value is 1, which means that linearizations
   *                             are computed.
-  *
-  * - #intOutputSolution: This parameter indicates whether the solution of
-  *                       each UCBlock must be output. If the value for this
-  *                       parameter is nonzero, then part of the primal and
-  *                       dual solutions obtained for each UCBlock for each
-  *                       scenario is output while this InvestmentFunction is
-  *                       being compute()-ed. The default value of this
-  *                       parameter is 0, which means that no solution is
-  *                       output.
   *
   * Any other parameter is handled by the C05Function.
   *
@@ -1009,8 +833,6 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * - #strOutputFilename
   *
-  * - #strOutputSolutionDirectory
-  *
   * @param par The parameter to be set.
   *
   * @param value The value of the parameter. */
@@ -1020,9 +842,6 @@ class InvestmentFunction : public C05Function , public Block {
   switch( par ) {
    case( strOutputFilename ):
     f_output_filename = std::move( value );
-    return;
-   case( strOutputSolutionDirectory ):
-    f_output_solution_directory = std::move( value );
     return;
    }
 
@@ -1065,8 +884,6 @@ class InvestmentFunction : public C05Function , public Block {
   *
   * - #intComputeLinearization
   *
-  * - #intOutputSolution
-  *
   * Any other parameter is handled by the C05Function.
   *
   * @param par The parameter whose value is desired.
@@ -1077,7 +894,6 @@ class InvestmentFunction : public C05Function , public Block {
   switch( par ) {
    case( intGPMaxSz ):              return( global_pool.size() );
    case( intComputeLinearization ): return( f_compute_linearization );
-   case( intOutputSolution ):       return( f_output_solution );
    }
 
   return( C05Function::get_int_par( par ) );
@@ -1117,8 +933,7 @@ class InvestmentFunction : public C05Function , public Block {
  const std::string & get_str_par( const idx_type par ) const override
  {
   switch( par ) {
-   case( strOutputFilename ):          return( f_output_filename );
-   case( strOutputSolutionDirectory ): return( f_output_solution_directory );
+   case( strOutputFilename ): return( f_output_filename );
    }
 
   return( C05Function::get_str_par( par ) );
@@ -1130,9 +945,6 @@ class InvestmentFunction : public C05Function , public Block {
  {
   if( par == intComputeLinearization )
    return( 1 );
-
-  if( par == intOutputSolution )
-   return( 0 );
 
   return( C05Function::get_dflt_int_par( par ) );
   }
@@ -1167,9 +979,6 @@ class InvestmentFunction : public C05Function , public Block {
   if( name == "intComputeLinearization" )
    return( intComputeLinearization );
 
-  if( name == "intOutputSolution" )
-   return( intOutputSolution );
-
   return( C05Function::int_par_str2idx( name ) );
   }
 
@@ -1189,9 +998,6 @@ class InvestmentFunction : public C05Function , public Block {
   if( name == "strOutputFilename" )
    return( strOutputFilename );
 
-  if( name == "strOutputSolutionDirectory" )
-   return( strOutputSolutionDirectory );
-
   return( C05Function::str_par_str2idx( name ) );
   }
 
@@ -1200,8 +1006,8 @@ class InvestmentFunction : public C05Function , public Block {
  [[nodiscard]] const std::string & int_par_idx2str( idx_type idx )
   const override
  {
-  static const std::vector< std::string > pars = { "intComputeLinearization" ,
-                                                   "intOutputSolution" };
+  static const std::vector< std::string > pars = {
+                                                 "intComputeLinearization" };
 
   if( ( idx >= intComputeLinearization ) && ( idx < intLastParInvestmentF ) )
    return( pars[ idx - intComputeLinearization ] );
@@ -1223,8 +1029,7 @@ class InvestmentFunction : public C05Function , public Block {
  const std::string & str_par_idx2str( const idx_type idx ) const override
  {
   static const std::vector< std::string > parameter_names = {
-                                                "strOutputFilename" ,
-                                                "strOutputSolutionDirectory" };
+                                                "strOutputFilename" };
   if( ( idx >= str_par_type_C05F::strLastParC05F ) &&
       ( idx < str_par_type_InvestmentF::strLastParInvestmentF ) )
    return( parameter_names[ idx - str_par_type_C05F::strLastParC05F ] );
@@ -1370,11 +1175,6 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
- void map_active( c_Vec_p_Var & vars , Subset & map , bool ordered = false )
-  const override final;
-
-/*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
-
  Variable * get_active_var( Index i ) const override final {
   return( v_x[ i ] );
   }
@@ -1460,55 +1260,176 @@ class InvestmentFunction : public C05Function , public Block {
                         ModParam issueMod = eModBlck ) override final;
 
 /*--------------------------------------------------------------------------*/
- /// informs the InvestmentFunction whether the bounds were reformulated
- /** This functions informs the InvestmentFunction whether the bounds on the
-  * active variables have been reformulated.
+ /// sets the mapping from assets to active variables
+ /** Sets which active variable each asset invests in: \p avi has one entry per
+  * asset, and avi[ i ] is the index of asset i's variable among the active
+  * ones.
   *
-  * The active variables of this InvestmentFunction may have "natural" lower
-  * and upper bounds in the model in which they are defined. That is, for each
-  * active variable \f$ x \f$, there may be \f$ l \f$ and \f$ u \f$ such
-  * that \f$ l \le x \le u \f$. These natural bounds, however, may have been
-  * reformulated such that \f$ x \f$ becomes a nonnegative variable
-  * satisfying \f$ 0 \le x \le u - l \f$, if the lower bound \f$ l \f$ is
-  * finite. This function informs the
-  * InvestmentFunction whether the natural bounds on the active variables have
-  * been reformulated.
+  * This is needed when several InvestmentFunction share the same active
+  * variables (as the components of an InvestmentBlock may do) but each
+  * invests only in some of them, so there are more variables than assets and
+  * the position alone does not say which variable an asset uses.
   *
-  * @param reformulated If true, this means that the bounds on the active
-  *        variables have been reformulated. Otherwise, the bounds are the
-  *        "natural" ones. */
+  * If \p avi is empty (the default) the mapping is the identity: asset i uses
+  * the i-th active variable.
+  *
+  * @param avi one entry per asset, each the index of its variable among the
+  *        active ones. */
 
- void reformulated_bounds( bool reformulated ) {
-  f_reformulated_bounds = reformulated;
+ void set_asset_variable_indices( std::vector< Index > avi ) {
+  if( ! avi.empty() ) {
+   if( avi.size() != v_asset_indices.size() )
+    throw( std::logic_error( "InvestmentFunction::set_asset_variable_indices: "
+                             "the mapping has " +
+                             std::to_string( avi.size() ) +
+                             " entries, but there are " +
+                             std::to_string( v_asset_indices.size() ) +
+                             " assets" ) );
+   check_indices( avi , v_x.size() , "InvestmentFunction::"
+                  "set_asset_variable_indices: variable index" );
+   }
+  v_asset_var_index = std::move( avi );
   }
 
 /*--------------------------------------------------------------------------*/
+ /// sets the per-asset variable baseline (multi-period transition cost)
+ /** Sets, for each asset, which active variable provides its *baseline*, i.e.,
+  * "the amount there was before": the (dis)investment cost of asset i is then
+  * computed on  d = x - baseline  as  max( c+ d , -c- d )  -- a function of
+  * BOTH variables, so the subgradient gets a mirrored entry on the baseline
+  * variable. This realizes the multi-period transition cost: the component of
+  * period t declares the design variable of period t-1 as its baseline.
+  *
+  * If \p bvi is empty (the default) the baseline of each asset is the
+  * InstalledQuantity datum, as in the single-period case.
+  *
+  * A variable baseline cannot be combined with the InstalledQuantity datum in
+  * the same InvestmentFunction (ambiguous: which "before"?): it throws.
+  *
+  * @param bvi one entry per asset, each the index of its baseline variable
+  *        among the active ones. */
 
- void set_num_sub_blocks_per_stage( Index n ) {
-  f_num_sub_blocks_per_stage = n;
+ void set_asset_baseline_variable_indices( std::vector< Index > bvi ) {
+  if( ! bvi.empty() ) {
+   if( bvi.size() != v_asset_indices.size() )
+    throw( std::logic_error(
+     "InvestmentFunction::set_asset_baseline_variable_indices: the baseline "
+     "mapping has " + std::to_string( bvi.size() ) + " entries, but there are "
+     + std::to_string( v_asset_indices.size() ) + " assets" ) );
+   check_indices( bvi , v_x.size() , "InvestmentFunction::"
+                  "set_asset_baseline_variable_indices: variable index" );
+   if( ! v_installed_quantity.empty() )
+    throw( std::logic_error(
+     "InvestmentFunction::set_asset_baseline_variable_indices: a variable "
+     "baseline cannot be combined with InstalledQuantity" ) );
+   }
+  v_asset_baseline_var_index = std::move( bvi );
   }
 
 /*--------------------------------------------------------------------------*/
- /// set the number of (replica) sub-Blocks of the InvestmentFunction
- /** Sets the number of identical sub-Blocks that this InvestmentFunction
-  * holds. This is the multi-replica analogue of
-  * #set_num_sub_blocks_per_stage(), and is used by the parallel execution
-  * of the SDDPBlock: the InvestmentFunction holds \p n identical
-  * SDDPBlocks as inner Blocks (one per OpenMP thread / MPI process), and
-  * scenarios are partitioned across replicas. Setting this value when an
-  * inner Block is already present is illegal: if non-null Blocks are
-  * registered, this asserts and the call has no effect.
-  *
-  * Note: #set_num_sub_blocks_per_stage() and #set_number_sub_blocks() are
-  * NOT aliases; they govern two orthogonal parallelism levels (multi
-  * sub-Block per stage within a single inner SDDPBlock vs. multiple
-  * inner SDDPBlock replicas). */
+ /// returns the per-asset variable-baseline mapping (empty: InstalledQuantity)
 
- void set_number_sub_blocks( Index n ) {
-  assert( v_Block.empty() ||
-          std::all_of( v_Block.cbegin() , v_Block.cend() ,
-                       []( Block * b ) { return( b == nullptr ); } ) );
-  f_num_sub_blocks = n;
+ const std::vector< Index > & get_asset_baseline_variable_indices() const {
+  return( v_asset_baseline_var_index );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the asset -> variable mapping (empty => identity)
+
+ const std::vector< Index > & get_asset_variable_indices() const {
+  return( v_asset_var_index );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the most the i-th asset may grow over its baseline
+
+ double get_max_investment( Index i ) const
+ {
+  if( i < v_max_investment.size() )
+   return( v_max_investment[ i ] );
+
+  return( Inf< double >() );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// returns the most the i-th asset may shrink below its baseline
+
+ double get_max_disinvestment( Index i ) const
+ {
+  if( i < v_max_disinvestment.size() )
+   return( v_max_disinvestment[ i ] );
+
+  return( Inf< double >() );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the implicit linear constraints on the assets
+ /** Sets the linear constraints  lb <= A x <= ub  enforced by the
+  * InvestmentFunction via its vertical linearizations (for instance caps or
+  * budgets over the assets under investment).
+  *
+  * It is the programmatic counterpart of reading the Constraints_A,
+  * Constraints_LowerBound and Constraints_UpperBound netCDF fields: use it
+  * when the function is built in memory rather than read from a file.
+  *
+  * PER-ASSET semantics, as the netCDF format declares
+  * (NumConstraints x NumAssets): each row of \p A has one coefficient per
+  * ASSET, and column j multiplies the variable of asset j (asset_var( j )),
+  * wherever the mapping puts it. \p lb and \p ub have one entry per
+  * constraint (per row of \p A).
+  *
+  * @param A coefficient matrix: one row per constraint, one column per asset.
+  * @param lb lower bounds, one per constraint.
+  * @param ub upper bounds, one per constraint. */
+
+ void set_implicit_constraints( MultiVector A , RealVector lb , RealVector ub )
+ {
+  if( ( lb.size() != A.size() ) || ( ub.size() != A.size() ) )
+   throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
+                            "A, lb and ub need one entry per constraint" ) );
+  for( Index i = 0 ; i < A.size() ; ++i ) {
+   if( A[ i ].size() != v_asset_indices.size() )
+    throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
+                             "each row of A needs one coefficient per "
+                             "asset" ) );
+   if( lb[ i ] > ub[ i ] )
+    throw( std::logic_error( "InvestmentFunction::set_implicit_constraints: "
+                             "lb[ i ] > ub[ i ]" ) );
+   }
+  v_A = std::move( A );
+  v_constraints_lower_bound = std::move( lb );
+  v_constraints_upper_bound = std::move( ub );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// sets the limits on the change of each asset over its baseline
+ /** Sets, for each asset, the most it may grow over its baseline \f$ \bar
+  * x_i \f$ and the most it may shrink below it, i.e., \f$ - \p max_dis[ i ]
+  * \le x_i - \bar x_i \le \p max_inv[ i ] \f$, the baseline being the one of
+  * the costs [see set_asset_baseline_variable_indices()]. This
+  * InvestmentFunction does not impose them: the InvestmentBlock holding it
+  * makes them rows of its own [see
+  * InvestmentBlock::generate_abstract_constraints()].
+  *
+  * It is the programmatic counterpart of reading the MaxInvestment and
+  * MaxDisinvestment netCDF fields. Each vector is either empty, meaning +
+  * INF for every asset, or has one entry per asset, each >= 0.
+  *
+  * @param max_inv the most each asset may grow over its baseline.
+  * @param max_dis the most each asset may shrink below its baseline. */
+
+ void set_variation_limits( RealVector max_inv , RealVector max_dis ) {
+  for( const auto * v : { & max_inv , & max_dis } ) {
+   if( ( ! v->empty() ) && ( v->size() != v_asset_indices.size() ) )
+    throw( std::logic_error( "InvestmentFunction::set_variation_limits: one "
+                             "limit per asset is needed" ) );
+   for( auto l : *v )
+    if( ! ( l >= 0 ) )
+     throw( std::invalid_argument( "InvestmentFunction::set_variation_limits:"
+                                   " a limit must be >= 0" ) );
+   }
+  v_max_investment = std::move( max_inv );
+  v_max_disinvestment = std::move( max_dis );
   }
 
 /** @} ---------------------------------------------------------------------*/
@@ -1522,21 +1443,14 @@ class InvestmentFunction : public C05Function , public Block {
   * InvestmentFunction being both a Function and a Block, the netCDF::NcGroup
   * will have to have the "standard format of a :Block", meaning whatever is
   * managed by the serialize() method of the base Block class, plus the
-  * InvestmentFunction-specific data with the following format:
+  * InvestmentFunction-specific data with the following format. A variable
+  * that is said below to be either a scalar or indexed over "NumAssets" (or
+  * "NumConstraints") can also have size 1: as a scalar, it then holds for
+  * all the assets (or constraints). Any other size is refused.
   *
-  * - The attribute "ReplicateBatteryUnits", of type netCDF::Int(), which
-  *   indicates that investment in a battery unit is made by replicating the
-  *   unit, i.e., by considering multiple identical units of that unit. This
-  *   attribute is optional. If it is not provided or its value is zero, then
-  *   investing in a battery unit means scaling its minimum and maximum power
-  *   and storage levels. Otherwise, the battery units are replicated.
-  *
-  * - The attribute "ReplicateIntermittentUnits", of type netCDF::Int(), which
-  *   indicates that investment in an intermittent unit is made by replicating
-  *   the unit, i.e., by considering multiple identical units of that
-  *   unit. This attribute is optional. If it is not provided or its value is
-  *   zero, then investing in an intermittent unit means scaling its minimum
-  *   and maximum power. Otherwise, the intermittent units are replicated.
+  * - The attributes "ReplicateBatteryUnits" and "ReplicateIntermittentUnits"
+  *   and the variable "AssetMethod" are refused: how each asset is sized is
+  *   said by "AssetSetter".
   *
   * - The dimension "NumAssets" containing the number of assets that are
   *   subject to investment. This dimension is optional. If it is not
@@ -1549,30 +1463,64 @@ class InvestmentFunction : public C05Function , public Block {
   *   converter of a BatteryUnitBlock, then its index is simply the index
   *   that this UnitBlock has within its UCBlock. If it is a transmission
   *   line, then its index is the index that this transmission line has
-  *   within its NetworkBlock.
+  *   within its NetworkBlock, the lines of the carriers of the UCBlock being
+  *   numbered one carrier after the other, those of the carrier 0 first: the
+  *   line l of carrier c has index L_0 + ... + L_{c-1} + l, L_k being the
+  *   number of lines of carrier k.
   *
   * - The one-dimensional variable "AssetType", of type netCDF::Uint(), which
   *   is either a scalar or indexed over "NumAssets", indicating the type of
-  *   the i-th asset. For a UnitBlock, the type is 0, for a transmission
-  *   line, the type is 1, and for the converter of a BatteryUnitBlock, the
-  *   type is 2. A BatteryUnitBlock of type 0 whose converter is not of type
-  *   2 is resized as a whole by its kappa, converter included, while if the
-  *   converter is also an asset (the same index with type 2) the asset of
-  *   type 0 is the storage alone and that of type 2 the converter alone,
-  *   each with its own cost and bounds [see
-  *   BatteryUnitBlock::set_converter_kappa()]; type 2 is refused if
-  *   "ReplicateBatteryUnits" is nonzero. If it is a scalar, then we assume
-  *   that AssetType[i] = AssetType[0] for all i in {0, ..., NumAssets - 1}.
-  *   This variable is optional. If it is not provided, then we assume that
-  *   AssetType[i] = 0 for each i in {0, ..., NumAssets - 1}.
+  *   the i-th asset. For a UnitBlock, the type is 0, and for a transmission
+  *   line, the type is 1. A UnitBlock with two sizes, as a BatteryUnitBlock
+  *   with its storage and its converter, can be two assets: the first size
+  *   is the asset of type 0 and the second one an asset of type 2 with the
+  *   same index; the two are written together, the unit being handed the
+  *   two values, and an asset of type 2 with no asset of type 0 on the same
+  *   unit is refused. If it is a scalar, then we assume that AssetType[i]
+  *   = AssetType[0] for all i in {0, ..., NumAssets - 1}. This variable is
+  *   optional. If it is not provided, then we assume that AssetType[i] = 0
+  *   for each i in {0, ..., NumAssets - 1}.
   *
-  * - The variable "LowerBound", of type netCDF::NcDouble(), which is either a
-  *   scalar or indexed over "NumAssets". If it is a scalar, then we assume
-  *   that LowerBound[i] = LowerBound[0] for all i in {0, ..., NumAssets -
-  *   1}. The i-th element of this vector provides the lower bound on the i-th
-  *   ColVariable of this InvestmentBlock. This variable is optional. If it is
-  *   not provided, then we assume that LowerBound[i] = 0 for all i in {0,
-  *   ..., NumAssets - 1}.
+  * - The one-dimensional variables "AssetSetter" and "AssetLinearization",
+  *   of type netCDF::NcString and indexed over "NumAssets", containing the
+  *   names in the methods factory of the method that writes the investment
+  *   in the i-th asset and of the one that reads back the derivative of the
+  *   value of the inner Block with respect to it. Both are called on the
+  *   UCBlock at the root of the inner Block, or on each of them when there
+  *   are several (the pieces of the inner Block [see find_pieces()], the
+  *   scenarios or the stages), with the index of the asset in "Assets": for
+  *   instance
+  *   "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization",
+  *   "UCBlock::replicate" and "UCBlock::get_replicate_linearization", or
+  *   "UCBlock::resize_line" and "UCBlock::get_resize_line_linearization".
+  *   These Blocks are reached by the paths set with the inner Block [see
+  *   set_pieces()], and a name "<class>::<method>" is called only on a Block
+  *   of that class. This InvestmentFunction does not know what they do. The
+  *   assets with the same setter are written with one call, and read back
+  *   with one call. The two variables are optional, and go together: if they
+  *   are not provided, the names are worked out when the inner Block is set,
+  *   from "AssetType": a line is "UCBlock::resize_line", and a unit
+  *   is "UCBlock::resize_unit" if its class registers "<classname>::resize",
+  *   and "UCBlock::replicate" otherwise; the second size of a unit takes the
+  *   names of its first. The setter of an asset takes ( MF_dbl_sp ,
+  *   Subset && , bool ) and the getter ( MF_dbl_msp , c_Subset & , bool ),
+  *   save for the two assets of a pair (types 0 and 2 on the same unit), for
+  *   which the setter takes ( MF_dbl_sp , MF_dbl_sp , Subset && , bool ) and
+  *   the getter ( MF_dbl_msp , MF_dbl_msp , c_Subset & , bool ), the first
+  *   value of each pair for the asset of type 0 and the second for that of
+  *   type 2. The two assets of a pair have the same setter, getter and
+  *   AssetFeasibilityCut.
+  *
+  * - The variable "AssetFeasibilityCut", of type netCDF::NcUint, which is
+  *   either a scalar or indexed over "NumAssets": 1 if the getter of the
+  *   i-th asset also gives the coefficient of a feasibility cut when the
+  *   inner Block is proved infeasible, reading an unbounded dual direction in
+  *   place of the duals; 0 if it does not, and then a point at which the
+  *   inner Block is infeasible is reported with no cut. This variable is
+  *   optional. If it is not provided, then it is 1 everywhere, save for the
+  *   units whose names are worked out as replicated, for which it is 0, and
+  *   for the resized units whose class answers 0 to
+  *   "<class>::has_resize_feasibility_cut" [see update_linearization()].
   *
   * - The variable "InstalledQuantity", of type netCDF::NcDouble(), which is
   *   either a scalar or indexed over "NumAssets". If it is a scalar, then we
@@ -1584,8 +1532,7 @@ class InvestmentFunction : public C05Function , public Block {
   *   i in {0, ..., NumAssets - 1}.
   *
   * Let \f$ x_i \f$ be the value of the i-th active Variable of this
-  * InvestmentFunction (plus its lower bound, if the bounds are reformulated
-  * [see reformulated_bounds()]) and \f$ \bar x_i \f$ =
+  * InvestmentFunction and \f$ \bar x_i \f$ =
   * InstalledQuantity[i]. If \f$ x_i > \bar x_i \f$, then the i-th asset is
   * subject to investment, and if \f$ x_i < \bar x_i \f$, to disinvestment.
   * Because the cost of investment is typically different from the cost of
@@ -1622,10 +1569,32 @@ class InvestmentFunction : public C05Function , public Block {
   *   InvestmentFunction. This variable is optional. If it is not provided
   *   then all disinvestment costs are considered to be zero.
   *
+  * - The one-dimensional variables "MaxInvestment" and "MaxDisinvestment",
+  *   of type netCDF::NcDouble(), each either a scalar or indexed over
+  *   "NumAssets", containing the most each asset may grow over its baseline
+  *   and the most it may shrink below it, i.e., \f$ -
+  *   \mathrm{MaxDisinvestment}[i] \le x_i - \bar x_i \le
+  *   \mathrm{MaxInvestment}[i] \f$, with the same baseline \f$ \bar x_i \f$
+  *   as the costs; a MaxDisinvestment of 0 forbids disinvesting. Each entry
+  *   is >= 0. They are optional: if one is not provided, its limits are +
+  *   INF. The InvestmentBlock holding this InvestmentFunction makes them
+  *   rows of its own [see set_variation_limits()].
+  *
   * - The group "InnerBlock", containing the description of the inner Block.
  */
 
- void serialize( netCDF::NcGroup & group ) const override;
+ void serialize( netCDF::NcGroup & group ) const override {
+  serialize( group , get_nested_Block( 0 ) );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// serialize this InvestmentFunction with the given inner Block
+ /** As serialize( group ), but writing \p inner, if not nullptr, in the
+  * group "InnerBlock". This is how InvestmentBlock writes the components it
+  * has made out of the pieces of an inner Block: as the inner Block they
+  * were read from. */
+
+ void serialize( netCDF::NcGroup & group , const Block * inner ) const;
 
 /**@} ----------------------------------------------------------------------*/
 /*------- METHODS DESCRIBING THE BEHAVIOR OF THE InvestmentFunction --------*/
@@ -1643,8 +1612,9 @@ class InvestmentFunction : public C05Function , public Block {
   * computed by the last call to compute(), i.e., the cost of the investment
   * plus the operational cost \f$ Q( x ) \f$, which is the value that the
   * Solver of the inner Block gives for its solution [see
-  * Solver::get_var_value()], or the mean of the values of the simulations with
-  * an SDDPBlock; whether it is an optimal value, a lower bound or an estimate
+  * Solver::get_var_value()], the mean of the values of its solutions for a
+  * Solver giving several; whether it is an optimal value, a lower bound or an
+  * estimate
   * depends on that Solver [see the class comments]. If compute() has not been
   * called yet, or the last call found the investment outside the domain (a
   * linear constraint of the InvestmentBlock violated, or the inner Block
@@ -1804,19 +1774,7 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 
- void get_linearization_coefficients( SparseVector & g ,
-		         Range range = std::make_pair( 0 , Inf< Index >() ) ,
-				      Index name = Inf< Index >() ) override;
-
-/*--------------------------------------------------------------------------*/
-
  void get_linearization_coefficients( FunctionValue * g , c_Subset & subset ,
-				      bool ordered = false ,
-				      Index name = Inf< Index >() ) override;
-
-/*--------------------------------------------------------------------------*/
-
- void get_linearization_coefficients( SparseVector & g , c_Subset & subset ,
 				      bool ordered = false ,
 				      Index name = Inf< Index >() ) override;
 
@@ -1849,26 +1807,11 @@ class InvestmentFunction : public C05Function , public Block {
   if( v_Block.empty() )
    return( nullptr );
 
-  if( v_Block.size() == 1 ) {
-   // single-Block mode: get the i-th solver registered on the single
-   // inner Block
-   if( i >= v_Block.front()->get_registered_solvers().size() )
-    return( nullptr );
-   return( dynamic_cast< T * >(
-              * std::next( v_Block.front()->get_registered_solvers().begin() ,
-                           i ) ) );
-   }
-
-  // multi-replica mode: get the first solver registered on the i-th
-  // replica Block
-  if( i >= v_Block.size() )
+  if( i >= v_Block.front()->get_registered_solvers().size() )
    return( nullptr );
-
-  if( v_Block[ i ]->get_registered_solvers().empty() )
-   return( nullptr );
-
   return( dynamic_cast< T * >(
-            v_Block[ i ]->get_registered_solvers().front() ) );
+             * std::next( v_Block.front()->get_registered_solvers().begin() ,
+                          i ) ) );
   }
 
 /**@} ----------------------------------------------------------------------*/
@@ -1908,19 +1851,6 @@ class InvestmentFunction : public C05Function , public Block {
   assert( asset < v_installed_quantity.size() );
   return( v_installed_quantity[ asset ] );
   }
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the i-th SDDPBlock replica (if any)
- /** This function returns a pointer to the i-th SDDPBlock replica of this
-  * InvestmentFunction. If the i-th sub-Block is not an SDDPBlock or \p i is
-  * out of range, this returns nullptr.
-  *
-  * @param i The index of a sub-Block of this InvestmentFunction.
-  *
-  * @return A pointer to the i-th SDDPBlock of this InvestmentFunction, or
-  *         nullptr if not available. */
-
- SDDPBlock * get_sddp_block( Index i ) const;
 
 /** @} ---------------------------------------------------------------------*/
 /*-------------------- Methods for handling Modification -------------------*/
@@ -1966,28 +1896,15 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::vector< BlockSolverConfig * > v_BSC;
  ///< the clear()-ed BlockSolverConfig that configured each inner Block
- /**< For each (replica) inner Block, the clone of the BlockSolverConfig that
-  * has actually been apply()-ed to it, kept clear()-ed: apply()-ing it
-  * removes all and only the Solver that it has registered there [see
+ /**< For the inner Block, the clone of the BlockSolverConfig that has
+  * actually been apply()-ed to it, kept clear()-ed: apply()-ing it removes
+  * all and only the Solver that it has registered there [see
   * BlockSolverConfig::apply()], which is how the configuration is un-done
-  * when the inner Blocks are released, replaced or destroyed. A clone per
-  * Block is necessary because the same BlockSolverConfig is apply()-ed to
-  * every replica, while the record of the registered Solver that its cleared
-  * apply() uses is per-Block. Empty if the inner Blocks have not been
-  * BlockSolverConfig-ured. */
+  * when the inner Block is released, replaced or destroyed. Empty if the
+  * inner Block has not been BlockSolverConfig-ured. */
 
- BlockSolverConfig * f_unit_BSC = nullptr;
- ///< the BlockSolverConfig given with the key "UnitBlockSolverConfig"
- /**< A clone, owned by the InvestmentFunction, of the BlockSolverConfig of
-  * the copy of a UnitBlock with no copies [see set_ComputeConfig()];
-  * nullptr if none has been given. */
-
- BlockSolverConfig * f_inner_BSC = nullptr;
- ///< the BlockSolverConfig given with the key "BlockSolverConfig"
- /**< A clone, owned by the InvestmentFunction and not clear()-ed, of the
-  * BlockSolverConfig of the inner Block, which is that of the copy of a
-  * UnitBlock with no copies if the inner Block is a UCBlock and no
-  * "UnitBlockSolverConfig" is given; nullptr if none has been given. */
+ bool f_unit_BSC_given = false;
+ ///< true if a "UnitBlockSolverConfig" was given to the UCBlock
 
  bool f_blocks_are_updated = false;
  ///< indicates whether the sub-Blocks are updated
@@ -2001,28 +1918,10 @@ class InvestmentFunction : public C05Function , public Block {
  bool f_compute_linearization = true;
  ///< indicates whether a linearization must be computed
 
- bool f_output_solution = false;
- ///< indicates whether the solution of each UCBlock must be output
-
  FunctionValue AAccMlt;
  ///< maximum absolute error in the multipliers of a linear combination
 
  bool f_ignore_modifications = false; ///< ignore any Modification
-
- bool f_reformulated_bounds = false;
- ///< indicates whether the bounds on the active variables were reformulated
- /**< The active variables of this InvestmentFunction may have natural lower
-  * and upper bounds in the model in which they are defined. That is, for each
-  * active variable \f$ x \f$, there may be \f$ l \f$ and \f$ u \f$ such
-  * that \f$ l \le x \le u \f$. These natural bounds, however, may have been
-  * reformulated such that \f$ x \f$ becomes a nonnegative variable
-  * satisfying \f$ 0 \le x \le u - l \f$, if the lower bound \f$ l \f$ is
-  * finite. This bool variable thus indicates whether
-  * the natural bounds on the active variables have been reformulated. */
-
- bool f_replicate_battery = false;       ///< replicate battery units
-
- bool f_replicate_intermittent = false;  ///< replicate intermittent units
 
  bool f_has_value = false;
  ///< the value of the Function was successfully computed
@@ -2050,16 +1949,6 @@ class InvestmentFunction : public C05Function , public Block {
   * usual as \f$ \alpha + g^\top x \le 0 \f$, with \f$ g \f$ the
   * coefficients and \f$ \alpha = \Phi( x ) - g^\top x \f$. */
 
- Index f_num_sub_blocks_per_stage = 1;
- ///< number of sub-Blocks per stage in SDDPBlock (single-Block mode)
-
- Index f_num_sub_blocks = 1;
- ///< number of (identical) replica sub-Blocks (multi-replica mode)
- /**< Number of identical inner Blocks held by this InvestmentFunction in
-  * the multi-replica execution path. When >1, deserialize() will create
-  * this many copies of the inner Block, and compute() dispatches to the
-  * multi-replica SDDP code path. */
-
  double f_constraints_tolerance = 1.0e-6;
  ///< relative tolerance to declare feasible a linear constraint
  /**< Tolerance used in the relative-violation feasibility check performed
@@ -2071,20 +1960,98 @@ class InvestmentFunction : public C05Function , public Block {
  FunctionValue f_value;
  ///< the value of this InvestmentFunction after compute() is called
 
- std::vector< Index > v_block_indices_map;
- ///< map the index of an UnitBlock to the index of the asset under investment
-
  std::vector< Index > v_asset_indices;
  ///< indices of the assets that are subject to investment
 
- std::vector< Index > v_greedy_solvers;
- ///< indices of the SDDPGreedySolver
+ std::vector< Index > v_asset_var_index;
+ ///< maps each asset to its active variable
+ /**< When empty (the default) the mapping is the identity: asset i uses the
+  * i-th active variable. When set, v_asset_var_index[ i ] is the index of
+  * asset i's variable among the active ones, letting several
+  * InvestmentFunction share the same active variables while each invests
+  * only in some of them. */
 
- SDDPSolver * f_sddp_solver = nullptr;
- ///< pointer to the SDDPSolver
+ std::vector< Index > v_asset_baseline_var_index;
+ ///< maps each asset to the active variable providing its baseline
+ /**< When empty (the default) the baseline of each asset is the
+  * InstalledQuantity datum (single-period). When set,
+  * v_asset_baseline_var_index[ i ] is the index (among the active variables)
+  * of the variable whose value is asset i's baseline -- the multi-period
+  * transition: the component of period t reads the design of period t-1.
+  * See set_asset_baseline_variable_indices() and add_linear_term(). */
+
+ /// inner Block provided from outside for the next deserialize(), if any
+ /** Set (and reset) by deserialize( group , inner , issueMod ) only: while
+  * it is non-null, deserialize() takes this as the inner Block instead of
+  * creating one out of the "InnerBlock" sub-group. */
+
+ Block * f_external_inner_block = nullptr;
 
  std::vector< AssetType > v_asset_type;
  ///< the type of each asset that is subject to investment
+
+ std::vector< std::string > v_asset_setter_name;
+ ///< the name of the setter of each asset, empty if the instance has none
+
+ std::vector< std::string > v_asset_linearization_name;
+ ///< the name of the getter of each asset, empty if the instance has none
+
+ std::vector< int > v_asset_feasibility_cut;
+ ///< whether the getter of each asset gives a feasibility cut, empty if
+ ///< the instance does not say
+
+ /// the assets that are written, and read back, by the same pair of methods
+ /** The methods are resolved once out of the methods factory, so that nothing
+  * during a solve depends on what they write into: they are called on the
+  * UCBlock at the root of the inner Block, with the indices of all the
+  * assets of the group at once [see update_blocks()]. */
+
+ struct AssetGroup {
+
+  std::string setter_name;         ///< the name of the setter
+  std::string linearization_name;  ///< the name of the getter
+
+  Block::FunctionType< Block::MF_dbl_sp , Block::Subset && , bool > * setter =
+   nullptr;
+  ///< writes the investment
+
+  Block::QueryType< Block::MF_dbl_msp , Block::c_Subset & , bool > *
+   linearization = nullptr;
+  ///< reads the derivative back
+
+  Block::FunctionType< Block::MF_dbl_sp , Block::MF_dbl_sp , Block::Subset && ,
+                       bool > * pair_setter = nullptr;
+  ///< writes the two sizes of the units of a group of pairs, else nullptr
+
+  Block::QueryType< Block::MF_dbl_msp , Block::MF_dbl_msp ,
+                    Block::c_Subset & , bool > * pair_linearization = nullptr;
+  ///< reads the two derivatives back, for a group of pairs, else nullptr
+
+  bool feasibility_cut;
+  ///< whether the getter gives a feasibility cut [see AssetFeasibilityCut]
+
+  Subset assets;   ///< the assets of the group, among those of this Function
+  Subset second_assets;  ///< in a group of pairs, the second size of each
+  Subset indices;  ///< their indices in "Assets", what the methods are given
+  bool ordered;    ///< whether indices is sorted
+  };
+
+ std::vector< AssetGroup > v_asset_groups;
+ ///< the assets, by the pair of methods that write and read them
+
+ bool f_methods_resolved = false;
+ ///< whether v_asset_groups has been filled
+
+ std::vector< AbstractPath > v_pieces;
+ ///< the paths, relative to the inner Block, to the Blocks the investment is
+ ///< written into and its linearization read from [see set_pieces()]
+
+ bool f_derived_names = false;
+ ///< whether the names of the methods of the assets are worked out of their
+ ///< classes rather than given [see set_asset_names()]
+
+ bool f_derived_cuts = false;
+ ///< whether AssetFeasibilityCut is worked out with the names
 
  std::vector< double > v_linearization;
  ///< linearization associated with the most recent call to compute()
@@ -2095,20 +2062,14 @@ class InvestmentFunction : public C05Function , public Block {
  std::vector< double > v_disinvestment_cost;
  ///< the cost of disinvesting in one unit of each asset
 
+ std::vector< double > v_max_investment;
+ ///< the most each asset may grow over its baseline, + INF if empty
+
+ std::vector< double > v_max_disinvestment;
+ ///< the most each asset may shrink below its baseline, + INF if empty
+
  std::vector< double > v_installed_quantity;
  ///< amount of each asset currently installed in the system
-
- std::vector< std::vector< std::vector< Index > > > generator_node_map;
- ///< maps the index of a generator to the node it belongs to
- /**< This vector maps a generator to the node it belongs to. The generator is
-  * identified by a triplet (stage, unit_block_index, generator_index), where
-  * stage indicates the stage (between 0 and SDDPBlock::get_time_horizon() -
-  * 1), unit_block_index identifies the UnitBlock to which the generator
-  * belongs (and index between 0 and v_block_indices.size() - 1) and
-  * generator_index is the index of the generator within its UnitBlock. */
-
- std::vector< double > v_lower_bound;
- ///< lower bound on the value of the active variables
 
  MultiVector v_A;
  ///< the coefficient matrix of the linear constraints
@@ -2129,11 +2090,6 @@ class InvestmentFunction : public C05Function , public Block {
 
  std::string f_output_filename;
  ///< name of the file into which the variable and function values are output
-
- std::string f_output_solution_directory;
- ///< path to the directory where the solution will be output
- /**< Used by the multi-replica SDDPBlock path; see
-  * #strOutputSolutionDirectory. */
 
 /*--------------------------------------------------------------------------*/
 /*--------------------- PRIVATE PART OF THE CLASS --------------------------*/
@@ -2422,20 +2378,17 @@ class InvestmentFunction : public C05Function , public Block {
 
 /*--------------------------------------------------------------------------*/
 
-  void get_linearization_coefficients( SparseVector & g , Range range ,
-                                       Index name ) const;
-
-/*--------------------------------------------------------------------------*/
-
   void get_linearization_coefficients( FunctionValue * g , c_Subset & subset ,
                                        const bool ordered , Index name )
    const;
 
 /*--------------------------------------------------------------------------*/
+  /// takes the removed active Variable out of the stored linearizations
+  /** Takes out of each stored linearization of \p num_active coefficients
+   * those of the active Variable in \p removed, ordered; a deleted one has
+   * none [see InvestmentFunction::remove_variables()]. */
 
-  void get_linearization_coefficients( SparseVector & g , c_Subset & subset ,
-                                       const bool ordered , Index name )
-   const;
+  void remove_variables( const Subset & removed , Index num_active );
 
 /*--------------------------------------------------------------------------*/
 
@@ -2458,84 +2411,48 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 /*-------------------------- PRIVATE METHODS -------------------------------*/
 /*--------------------------------------------------------------------------*/
- /// Update the given UnitBlock according to the given \p investment
- /** This function updates the given UnitBlock according to the given \p
-  * investment.
-  *
-  * @param block A pointer to a UnitBlock.
-  *
-  * @param investment The investment to be made in the given UnitBlock. */
+ /// returns the active variable that asset \p i invests in
+ /** Index of asset \p i's variable among the active ones. With no mapping set
+  * (the common case) it is the identity: asset i uses the i-th active
+  * variable. See set_asset_variable_indices(). */
 
- void update_unit_block( UnitBlock * block , double investment );
-
-/*--------------------------------------------------------------------------*/
- /// Update a set of UnitBlock according to the given \p investment
- /** This function updates a set of UnitBlock, given by their indices \p
-  * block_indices, according to the given \p investment.
-  *
-  * @param sub_block_index The index of a sub-Block of this
-  *        InvestmentFunction.
-  *
-  * @param block_indices Indices of the UnitBlock which must be updated.
-  *
-  * @param investment The investment to be made in each UnitBlock. */
-
- void update_unit_blocks( Index sub_block_index ,
-                          const std::vector< Index > & block_indices ,
-                          const std::vector< double > & investment );
+ Index asset_var( Index i ) const {
+  return( v_asset_var_index.empty() ? i : v_asset_var_index[ i ] );
+  }
 
 /*--------------------------------------------------------------------------*/
- /// Update a set of line according to the given \p investment
- /** This function updates a set of transmission lines, given by their indices
-  * \p line_indices, according to the given \p investment.
+ /// throws if an index in \p indices is not that of an active Variable
+ /** Throws std::logic_error if an index in \p indices is not smaller than
+  * the number \p n of active Variable; the message is \p what followed by
+  * the index and by why it is out of range. */
+
+ static void check_indices( const std::vector< Index > & indices , Index n ,
+                            const std::string & what );
+
+/*--------------------------------------------------------------------------*/
+ /// resolves, for each asset, the methods that write and read it
+ /** Resolves out of the methods factory the two methods that each asset
+  * names [see "AssetSetter" in serialize()], and puts together the assets
+  * naming the same ones [see AssetGroup], so that nothing during a solve has
+  * to know what they write into. An instance that does not name them has
+  * them worked out here, out of "AssetType" and out of the names that the
+  * class of each unit registers.
   *
-  * @param sub_block_index The index of a sub-Block of this
-  *        InvestmentFunction.
-  *
-  * @param line_indices Indices of the transmission lines which must be
-  *        updated.
-  *
-  * @param investment The investment to be made in each line. */
+  * Called at the end of deserialize(), when the inner Block has pieces, and
+  * else, or after a new inner Block, the first time the Blocks are updated,
+  * before the first solve: a name that the methods factory does not have
+  * makes it throw, naming the asset. The assets of type 0 and 2 on the same
+  * unit form a pair and go in a group of their own, written and read back
+  * with the two-span
+  * forms of their methods [see "AssetSetter" in serialize()]. */
 
- void update_network_blocks( Index sub_block_index ,
-                             const std::vector< Index > & line_indices ,
-                             const std::vector< double > & investment );
+ void resolve_asset_methods( void );
 
 /*--------------------------------------------------------------------------*/
- /// writes the investment in the converters of a set of BatteryUnitBlock
- /** Sets the kappa of the converter [see
-  * BatteryUnitBlock::set_converter_kappa()] of the BatteryUnitBlock with the
-  * given indices \p block_indices to the given \p investment, in every
-  * UCBlock of the \p sub_block_index-th inner Block. */
-
- void update_converters( Index sub_block_index ,
-                         const std::vector< Index > & block_indices ,
-                         const std::vector< double > & investment );
-
-/*--------------------------------------------------------------------------*/
- /// gives a kappa of its own to the converters that are assets
- /** For each asset of type eConverter, gives the converter of the
-  * BatteryUnitBlock in every UCBlock a kappa of its own (its current one) if
-  * it follows the kappa of the battery [see
-  * BatteryUnitBlock::converter_follows_kappa()], so that its rows exist when
-  * the Constraints are generated. Throws std::invalid_argument if the unit
-  * is not a BatteryUnitBlock or the batteries are replicated
-  * ("ReplicateBatteryUnits"), since the converter of a battery represented
-  * by its scale factor is not a separate asset. */
-
- void prepare_converter_assets( void );
-
-/*--------------------------------------------------------------------------*/
- /// adds the coefficients of the converters to \p linearization
-
- void update_linearization_converters( Index stage , Index sub_block_index ,
-	   const std::vector< std::pair< Index , Index > > & conv_indices ,
-	   std::vector< double > & linearization );
-
-/*--------------------------------------------------------------------------*/
- /// update the sub-Block of the UCBlock
- /** This function updates the sub-Block of the UCBlock to reflect the current
-  * values of the x variables. */
+ /// writes the current values of the x variables into the inner Block
+ /** Calls the setter of each group of assets [see AssetGroup] on each piece
+  * of the inner Block [see get_piece()], with the values of the x variables
+  * of its assets. */
 
  void update_blocks( void );
 
@@ -2551,79 +2468,108 @@ class InvestmentFunction : public C05Function , public Block {
  void send_nuclear_modification( const Observer::ChnlName chnl = 0 );
 
 /*--------------------------------------------------------------------------*/
- /// return a pointer to the Solver of the UCBlock associated with \p stage
- /** This function returns a pointer to the Solver of the UCBlock associated
-  * with the given \p stage in the \p i-th sub-Block..
-  *
-  * @param stage A stage.
-  *
-  * @param i The index of a sub-Block.
-  *
-  * @return A pointer to the Solver of the UCBlock associated with the given
-  *         \p stage in the \p i-th sub-Block. */
+ /// the Solver of the inner Block, the first one registered there
+ /** Returns the first Solver registered in the inner Block, which solves it
+  * as a whole (all the scenarios at once, for a TwoStageStochasticBlock), as
+  * a CDASolver, or nullptr if there is none or it is not one. */
 
- CDASolver * get_ucblock_solver( Index stage , Index i ) const;
+ CDASolver * get_inner_solver( void ) const;
 
 /*--------------------------------------------------------------------------*/
- /// returns a pointer to the UCBlock associated with the given \p stage
- /** This function returns a pointer to the UCBlock associated with
-  * the given \p stage in the \p i-th sub-Block.
-  *
-  * @param stage A stage.
-  *
-  * @param i The index of a sub-Block.
-  *
-  * @return A pointer to the UCBlock associated with the given \p stage in the
-  *         \p i-th sub-Block. */
+ /// the Block of the \p i-th piece
+ /** Returns the Block into which the investment is written, and from which
+  * its linearization is read, of the \p i-th piece of the inner Block [see
+  * v_pieces], in \p root, the inner Block or a twin of it [see
+  * Solver::get_solution_Block()], nullptr meaning the inner Block. */
 
- UCBlock * get_ucblock( Index stage , Index i ) const;
+ Block * get_piece( Index i , Block * root = nullptr ) const;
 
 /*--------------------------------------------------------------------------*/
- /// returns a pointer to the UCBlock (if any)
- /** If the inner Block of this function is an UCBlock, it returns a pointer
-  * to it. Otherwise, it returns nullptr.
-  *
-  * @return A pointer to the UCBlock of this InvestmentFunction. If the inner
-  *         Block of this InvestmentFunction is not an UCBlock, it return
-  *         nullptr. */
+ /// sets the pieces of the inner Block, and the names they need
+ /** Sets v_pieces as the inner Block is: a path to each Block of the class
+  * of the methods of the assets the inner Block is made of [see
+  * find_pieces()], through the Function of the Objective of its Blocks that
+  * are Blocks too, or to the inner Block itself if it is not made of them.
+  * Then it works out the names of the methods of the assets, if the
+  * instance gives none [see set_asset_names()]. */
 
- UCBlock * get_ucblock( void ) const;
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the SDDPBlock (if any)
- /** If the inner Block of this function is an SDDPBlock, it returns a pointer
-  * to it. Otherwise, it returns nullptr.
-  *
-  * @return A pointer to the SDDPBlock of this InvestmentFunction. If the
-  *         inner Block of this InvestmentFunction is not an SDDPBlock, it
-  *         return nullptr. */
-
- SDDPBlock * get_sddp_block( void ) const;
+ void set_pieces( void );
 
 /*--------------------------------------------------------------------------*/
- /// the inner Block of this function, if it is a TwoStageStochasticBlock
- /** If the inner Block of this function is a TwoStageStochasticBlock, it
-  * returns a pointer to it. Otherwise, it returns nullptr.
-  *
-  * A TwoStageStochasticBlock as the inner Block is the "Benders form" of a
-  * two-stage stochastic problem: the here-and-now Variable are the ones of
-  * this InvestmentFunction, hence they exist in a single copy and outside
-  * the scenarios, rather than being replicated in each of them and tied by
-  * the non-anticipativity Constraint of the extensive form.
-  *
-  * @return A pointer to the TwoStageStochasticBlock of this
-  *         InvestmentFunction, or nullptr if the inner Block is not one. */
+ /// the class of the methods of the assets
+ /** The part before "::" of the name of the first setter, or "UCBlock",
+  * the class of the names set_asset_names() works out, if the instance
+  * gives none. */
 
- TwoStageStochasticBlock * get_tssb_block( void ) const;
+ std::string asset_class( void ) const {
+  return( class_of( v_asset_setter_name ) );
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// the class of the methods named in \p setters [see asset_class()]
+
+ static std::string class_of( const std::vector< std::string > & setters );
+
+/*--------------------------------------------------------------------------*/
+
+ public:
+
+ /// the Blocks of class \p cls that \p root is made of
+ /** Appends to \p pieces \p root itself, if it is of class \p cls, or else
+  * the Blocks of that class that every sub-Block of \p root is made of in
+  * turn, in order: those a Block of a different class is made of only if
+  * every one of its sub-Blocks is of class \p cls or is made of them. This
+  * is how a stochastic Block holds its scenarios, each a copy of the same
+  * Block, whatever its class. If \p through_functions, the Function of
+  * the Objective of a Block counts as one of its sub-Blocks when it is a
+  * Block too (say, a BendersBFunction, whose inner Block is a stage of a
+  * multi-stage problem): its pieces are those the Function is evaluated on,
+  * into which the investment is written, but which are not separate
+  * problems. Returns false, appending nothing, if \p root is not made of
+  * Blocks of class \p cls only. */
+
+ static bool find_pieces( Block * root , const std::string & cls ,
+                          std::vector< Block * > & pieces ,
+                          bool through_functions = false );
+
+/*--------------------------------------------------------------------------*/
+ /// the class of the methods of the assets of the function in \p group
+ /** As asset_class() would give it once \p group is deserialized. */
+
+ static std::string asset_class( const netCDF::NcGroup & group );
+
+/*--------------------------------------------------------------------------*/
+
+
+ private:
+
+/*--------------------------------------------------------------------------*/
+ /// works out the names of the methods of the assets the instance does not
+ /// name
+ /** If the instance gives no "AssetSetter", the names are worked out of
+  * the class of each asset, and kept in v_asset_setter_name and
+  * v_asset_linearization_name: "UCBlock::resize_line" and
+  * "UCBlock::get_resize_line_linearization" for a line, and for a unit
+  * "UCBlock::resize_unit" and "UCBlock::get_resize_unit_linearization" if
+  * its class registers "<class>::resize", "UCBlock::replicate" and
+  * "UCBlock::get_replicate_linearization" otherwise, with no feasibility
+  * cut if the instance does not say; the second size of a unit takes the
+  * names of its first. The class of unit u is that of the u-th sub-Block of
+  * the first piece, where a UCBlock has its units. Does nothing until both
+  * the assets and the inner Block are there, and works the names out again
+  * whenever the inner Block changes; serialize() writes only the names the
+  * instance gave. */
+
+ void set_asset_names( void );
 
 /*--------------------------------------------------------------------------*/
  /// the number of sub-Blocks that carry the investment
  /** The investment is here-and-now, hence the same in all the sub-Blocks
   * that carry it: this is how many they are, one for a plain UCBlock, one
-  * per scenario for a TwoStageStochasticBlock, the configured number for an
-  * SDDPBlock. Writing the investment and reading the linearization back have
-  * to run over exactly the same set, or the value and its linearization stop
-  * describing the same function. */
+  * per scenario for a TwoStageStochasticBlock, one per stage for a
+  * multi-stage Block. Writing the investment and reading the linearization
+  * back have to run over exactly the same set, or the value and its
+  * linearization stop describing the same function. */
 
  Index get_number_investment_sub_blocks( void ) const;
 
@@ -2638,12 +2584,24 @@ class InvestmentFunction : public C05Function , public Block {
  void set_default_inner_Block_BlockSolverConfig();
 
 /*--------------------------------------------------------------------------*/
+ /// gives \p bsc to every UCBlock of the inner Block, or takes it back
+ /** Gives a clone of \p bsc to every UCBlock of the inner Block as the
+  * extra Configuration of its BlockConfig, which is where
+  * UCBlock::get_replicate_linearization() reads the BlockSolverConfig of the
+  * copy of a unit with no copies. If \p bsc is nullptr, what was given is
+  * taken back by giving each UCBlock an empty BlockSolverConfig, which it
+  * reads as none: nothing is done if nothing was given. A UCBlock that is not
+  * there is an error when something is given, and is skipped otherwise. */
+
+ void set_unit_BlockSolverConfig( const BlockSolverConfig * bsc );
+
+/*--------------------------------------------------------------------------*/
  /// remove the Solver that this InvestmentFunction registered in the Blocks
- /** Applies to each (replica) inner Block the clear()-ed BlockSolverConfig
-  * that configured it [see v_BSC], i.e., un-registers and deletes all and
-  * only the Solver that this InvestmentFunction has registered there,
-  * leaving any other one alone; does nothing if the inner Blocks have not
-  * been BlockSolverConfig-ured. */
+ /** Applies to the inner Block the clear()-ed BlockSolverConfig that
+  * configured it [see v_BSC], i.e., un-registers and deletes all and only
+  * the Solver that this InvestmentFunction has registered there, leaving any
+  * other one alone; does nothing if the inner Block has not been
+  * BlockSolverConfig-ured. */
 
  void unconfigure_inner_Block_Solver();
 
@@ -2660,6 +2618,17 @@ class InvestmentFunction : public C05Function , public Block {
 /*--------------------------------------------------------------------------*/
 
  int get_inner_block_objective_sense() const;
+
+/*--------------------------------------------------------------------------*/
+ /// removes the active Variable in \p removed and the assets sized by them
+ /** \p removed is ordered and holds valid indices of active Variable. An
+  * asset goes with the active Variable that sizes it [see
+  * v_asset_var_index], and all of its data with it, in every vector indexed
+  * by asset; the Variable of the assets that stay, and their baselines, are
+  * moved to their new positions. An asset that stays cannot lose its
+  * baseline: that is refused, before anything is changed. */
+
+ void remove_actives( const Subset & removed );
 
 /*--------------------------------------------------------------------------*/
  /// prepares the linearization for a new simulation
@@ -2680,158 +2649,31 @@ class InvestmentFunction : public C05Function , public Block {
   * it costs a sweep of the model, and is what keeps the cut available on the
   * solvers that do not hand it out. */
 
- FunctionValue compute_farkas_value( Index stage , Index sub_block_index );
+ FunctionValue compute_farkas_value( Index i );
 
 /*--------------------------------------------------------------------------*/
-
- /// the linking terms of one copy of a scaled UnitBlock
- /** Gives term() each ColVariable of the UnitBlock with index \p block_index
-  * in the UCBlock of \p stage and \p sub_block_index that appears in a
-  * linking constraint of the UCBlock, together with its coefficient in the
-  * constraint for one copy of the unit times the dual value of the
-  * constraint (a ColVariable may be given more than once), and writes in
-  * \p constant the terms that multiply no ColVariable, i.e., the sum of
-  * \f$ \bar y^\top g^1_i( z_i ) \f$ in (2) is
-  * \f$ \sum c \, z + \mbox{constant} \f$ over the pairs given. */
-
- void scale_linking_terms( Index block_index , Index stage ,
-                           Index sub_block_index ,
-                           const std::function< void( const ColVariable * ,
-                                                      double ) > & term ,
-                           double & constant );
-
-/*--------------------------------------------------------------------------*/
- /// the coefficient (2) of a scaled UnitBlock with no copies
- /** Solves a copy of the UnitBlock alone, with the Objective
-  * \f$ f^1_i( z_i ) + \bar y^\top g^1_i( z_i ) \f$ at the dual values
-  * \f$ \bar y \f$ of the inner Block, by the Solver of the
-  * BlockSolverConfig of the units [see set_ComputeConfig()], and returns
-  * its optimal value, i.e., the value of (2) at a minimizer [see the class
-  * description]. The copy is the mirror of the abstract representation of
-  * the unit [see AbstractBlock::mirror()]; if the mirror cannot reproduce
-  * something, it is a relaxation of one copy, whose minimum is not larger,
-  * and the linearization is still below the value function, since the
-  * number of copies cannot go below 0. Throws std::logic_error if the
-  * Solver gives no solution. */
-
- double compute_zero_copy_linearization( Index block_index , Index stage ,
-                                         Index sub_block_index );
-
-/*--------------------------------------------------------------------------*/
- /// the BlockSolverConfig of the copy of a UnitBlock with no copies
- /** The one given with the key "UnitBlockSolverConfig", or else, with a
-  * UCBlock as inner Block, the one given with the key "BlockSolverConfig";
-  * throws std::logic_error if there is none [see set_ComputeConfig()]. */
-
- const BlockSolverConfig * get_unit_BlockSolverConfig( void ) const;
-
-/*--------------------------------------------------------------------------*/
-
- double compute_scale_linearization( Index block_index , Index stage ,
-                                     Index sub_block_index );
-
-/*--------------------------------------------------------------------------*/
- /// updates the linearization to reflect the most recent scenario considered
- /** This function updates the linearization to reflect the most recent
-  * scenario considered, whose subproblem was solved by the Solver attached to
-  * the sub-Block whose index is \p sub_block_index.
+ /// adds to the linearization what is read on the \p i-th piece
+ /** This function adds to v_linearization the derivatives read on the \p
+  * i-th piece of the inner Block [see get_piece()], whose solution the
+  * Solver of the inner Block has just found: it writes that solution in the
+  * inner Block, with the first piece, then reads it on each.
   *
-  * @param sub_block_index The index of the sub-Block which will be used to
-  *        update the linearization.
+  * @param i The index of the piece.
   *
   * @param direction If true, what the sub-Block holds is an unbounded dual
   *        direction rather than an optimal dual solution: it is already in
   *        place, so it is not asked for again, and no primal solution is
   *        asked for either, there being none. Only the coefficients that are
   *        read out of the duals alone are then available, so an asset whose
-  *        coefficient needs the primal makes this throw. */
+  *        getter gives no feasibility cut [see "AssetFeasibilityCut" in
+  *        serialize()] makes this throw. */
 
- void update_linearization( Index sub_block_index , bool direction = false );
-
-/*--------------------------------------------------------------------------*/
- /// updates the linearization with respect to the set of UnitBlock
-
- void update_linearization_unit_blocks( Index stage , Index sub_block_index ,
-	   const std::vector< std::pair< Index , Index > > & block_indices ,
-	   bool direction = false );
-
-/*--------------------------------------------------------------------------*/
- /// updates the linearization with respect to the set of NetworkBlock
-
- void update_linearization_network_blocks( Index stage ,
-					   Index sub_block_index ,
-            const std::vector< std::pair< Index , Index > > & line_indices );
-
-/*--------------------------------------------------------------------------*/
- /// returns the node to which the given generator belongs
-
- Index get_node( Index stage , Index unit_block_index , Index generator )
-  const;
-
-/*--------------------------------------------------------------------------*/
- /// builds the mapping between generator and the node it belongs to
-
- void build_generator_node_map();
-
-/*--------------------------------------------------------------------------*/
- /// returns a pointer to the BendersBFunction associated with the given stage
- /** This function returns a pointer to the BendersBFunction associated with
-  * the given \p stage in the \p i-th sub-Block.
-  *
-  * @param stage A stage.
-  *
-  * @param i The index of a sub-Block.
-  *
-  * @return A pointer to the BendersBFunction associated with the given \p
-  *         stage in the \p i-th sub-Block. */
-
- BendersBFunction * get_benders_function( Index stage , Index i ) const;
+ void update_linearization( Index i , bool direction = false );
 
 /*--------------------------------------------------------------------------*/
  /// returns the value of the i-th active variable
- /** This function returns the value of the i-th active variable, possibly
-  * taking into account its lower bound. If \p actual is \c true, then this
-  * function returns the variable of the i-th active variable. Otherwise, if
-  * the lower bound for this variable is finite, then this function returns
-  * the value of this active variable plus its lower bound.
-  *
-  * This function is useful because the model to which this variable belongs
-  * may have been reformulated as follows. This active variable, let us call
-  * it \f$ x \f$, may be subject to lower and upper bounds, so that it must
-  * satisfy \f$ l \le x \le u \f$ in the model in which it is defined.
-  * However, this model may have been reformulated in such a way that, if the
-  * lower bound \f$ l \f$ is finite, this variable becomes a nonnegative
-  * variable which must then satisfy \f$ 0 \le x \le u - l \f$. Thus, if the
-  * model has been reformulated in this way, \f$ l \f$ is finite (actually,
-  * not minus infinity), and \p actual is false, then this function returns
-  * \f$ x + l \f$; otherwise, it returns the value of \f$ x \f$. */
 
- double get_var_value( Index i , bool actual = true ) const
- {
-  if( f_reformulated_bounds && ( ! actual ) && ( i < v_lower_bound.size() )
-      && ( v_lower_bound[ i ] > -Inf< double >() ) )
-   return( v_x[ i ]->get_value() + v_lower_bound[ i ] );
-
-  return( v_x[ i ]->get_value() );
-  }
-
-/*--------------------------------------------------------------------------*/
- /// returns the lower bound for the given active variable
- /** This function returns the lower bound for the value of the i-th active
-  * variable of this InvestmentFunction.
-  *
-  * @param i The index of an active variable of this InvestmentFunction.
-  *
-  * @return the lower bound for the value of the i-th active variable of this
-  *         InvestmentFunction. */
-
- double get_var_lower_bound( Index i ) const
- {
-  if( i < v_lower_bound.size() )
-   return( v_lower_bound[ i ] );
-
-  return( -Inf< double >() );
-  }
+ double get_var_value( Index i ) const { return( v_x[ i ]->get_value() ); }
 
 /*--------------------------------------------------------------------------*/
  /// returns the investment cost of the i-th asset
@@ -2856,47 +2698,133 @@ class InvestmentFunction : public C05Function , public Block {
   }
 
 /*--------------------------------------------------------------------------*/
- /// returns the number of scenarios
+ /// compute the InvestmentFunction with an inner Block made of pieces
+ /** The investment is written into each piece [see set_pieces()], the
+  * inner Block is solved by its Solver, and value and linearization are
+  * read off it. If the Solver gives its result as the mean of the solutions
+  * of several problems [see ThinComputeInterface::eEverySolution], as the
+  * simulations of the scenarios of a policy, the linearization is read out
+  * of each of them, in the Block holding it [see
+  * Solver::get_solution_Block()], and is the mean of what is read. */
 
- Index get_number_scenarios( void ) const;
-
-/*--------------------------------------------------------------------------*/
- /// returns the number of stages
-
- Index get_number_stages( void ) const;
-
-/*--------------------------------------------------------------------------*/
- /// locks a(n unlocked) sub-Block and returns its index
-
- Index lock_sub_block( void );
+ int compute_pieces( bool changedvars );
 
 /*--------------------------------------------------------------------------*/
- /// unlocks the i-th sub-Block
+ /// reads the certificate of infeasibility of the inner Block, if any
+ /** With the inner Block proved infeasible by \p solver, reads the vertical
+  * linearization out of its unbounded dual direction, if it has one and a
+  * linearization is asked for, and sets f_has_farkas_linearization if the
+  * certificate is positive at the current point [see
+  * compute_farkas_value()]. An error while reading is printed, and leaves
+  * no linearization; a direction with the Objective in it, out of which no
+  * certificate can be read, makes this throw. */
 
- void unlock_sub_block( Index i );
-
-/*--------------------------------------------------------------------------*/
- /// identifies the relevant Solver of the inner Block
-
- void build_solver_map( void );
-
-/*--------------------------------------------------------------------------*/
-
- int compute_UCBlock( bool changedvars , bool owned );
+ void read_farkas_linearization( CDASolver * solver );
 
 /*--------------------------------------------------------------------------*/
+ /// scales the diagonal value and linearization by the component weight
+ /** The weight is that of the Objective of the inner Block [see
+  * Block::get_objective_weight()], which the Solver registered on the inner
+  * Block does not apply. Applied at the end of each compute() path, where
+  * f_value and
+  * v_linearization (the diagonal value/subgradient) are finalized. The
+  * vertical (feasibility) linearization built from v_A is weight-invariant
+  * (the domain { x : l <= A x <= u } does not change under a positive scale)
+  * and is deliberately NOT touched here. f_value and
+  * v_linearization must be scaled together to keep the diagonal constant
+  * alpha = f_value - <v_linearization,x> equal to w * alpha. */
 
- int compute_SDDPBlock( bool changedvars , bool owned );
+ void scale_diagonal_by_weight() {
+  const auto w = v_Block.front()->get_objective_weight();
+  if( w == 1.0 )
+   return;
+  f_value *= w;
+  for( auto & c : v_linearization )
+   c *= w;
+  }
 
 /*--------------------------------------------------------------------------*/
- /// compute the InvestmentFunction in the multi-replica SDDPBlock path
- /** Executes compute() against multiple identical SDDPBlock replicas held
-  * in v_Block, with scenarios partitioned across OpenMP threads (and MPI
-  * processes if compiled with USE_MPI). Called from compute() when
-  * v_Block.size() > 1 (or when a single replica was explicitly registered
-  * via set_inner_blocks()). */
+ /// adds the (dis)investment linear term of every asset at the current point
+ /** The single home of the transition-cost math, shared by the three
+  * compute_*() paths (which only differ in the accumulators they pass in):
+  * for each asset i, with  d = x - baseline , adds to \p value the cost
+  * max( c+ d , -c- d )  and writes its subgradient into \p linearization.
+  * The baseline is the value of the baseline variable when one is declared
+  * (multi-period, see set_asset_baseline_variable_indices()), the
+  * InstalledQuantity datum otherwise (single-period).
+  *
+  * With a variable baseline the cost is a function of BOTH variables, so the
+  * subgradient has TWO entries: ( +c+ , -c+ ) for d > 0 and ( -c- , +c- )
+  * for d < 0, on (asset variable, baseline variable) respectively; without
+  * the mirrored entry the cut would look valid without being a subgradient.
+  * At the kink d == 0 the else branch yields ( -c- , +c- ), inside the
+  * subdifferential [ -c- , c+ ], which is not empty when c+ + c- >= 0, the
+  * condition for the cost to be convex [see is_convex()]. */
 
- int compute_SDDPBlock_replicas( bool changedvars );
+ void add_linear_term( double & value ,
+                       std::vector< double > & linearization ) const
+ {
+  const bool var_baseline = ! v_asset_baseline_var_index.empty();
+
+  for( Index i = 0 ; i < v_asset_indices.size() ; ++i ) {
+
+   const auto var_index = asset_var( i );
+   const auto x = get_var_value( var_index );
+   const auto baseline = var_baseline ?
+    get_var_value( v_asset_baseline_var_index[ i ] ) :
+    get_installed_quantity( i );
+
+   if( x > baseline ) {
+    // an investment is being made in asset i
+    const auto cost = get_cost( i );
+    value += cost * ( x - baseline );
+    linearization[ var_index ] += cost;
+    if( var_baseline )
+     linearization[ v_asset_baseline_var_index[ i ] ] -= cost;
+    }
+   else {
+    // a disinvestment is being made in asset i (d == 0 falls here)
+    const auto disinvestment_cost = get_disinvestment_cost( i );
+    value += disinvestment_cost * ( baseline - x );
+    linearization[ var_index ] -= disinvestment_cost;
+    if( var_baseline )
+     linearization[ v_asset_baseline_var_index[ i ] ] += disinvestment_cost;
+    }
+   }
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// dense vertical linearization (gradient of the violated constraint)
+ /** The single home of the vertical (feasibility) cut, shared by
+  * has_linearization() and current_linearization(). Per-asset semantics of
+  * the implicit constraints: column j of v_A belongs to ASSET j (as the
+  * netCDF format declares, NumConstraints x NumAssets) and lands on that
+  * asset's variable asset_var( j ); every other entry is zero. */
+
+ void vertical_linearization( std::vector< double > & vec ) const {
+  assert( f_violated_constraint.first < v_A.size() );
+  const double sign = ( f_violated_constraint.second == eLHS ) ? -1 : 1;
+  const auto & row = v_A[ f_violated_constraint.first ];
+  vec.assign( v_x.size() , 0.0 );
+  for( Index j = 0 ; j < row.size() ; ++j )
+   vec[ asset_var( j ) ] += sign * row[ j ];
+  }
+
+/*--------------------------------------------------------------------------*/
+ /// the coefficients of the linearization just computed
+ /** v_linearization for a diagonal linearization, or for the vertical one
+  * out of the certificate of infeasibility; otherwise the vertical one of
+  * the violated linear constraint, written into \p scratch [see
+  * vertical_linearization()]. Shared by the
+  * get_linearization_coefficients() flavours. */
+
+ const std::vector< double > & current_linearization(
+                                    std::vector< double > & scratch ) const {
+  if( f_diagonal_linearization_required || f_has_farkas_linearization )
+   return( v_linearization );
+  vertical_linearization( scratch );
+  return( scratch );
+  }
 
 /*--------------------------------------------------------------------------*/
  /// fire all event handlers registered for the given event \p type
@@ -2904,28 +2832,35 @@ class InvestmentFunction : public C05Function , public Block {
  void handle_events( int type ) const;
 
 /*--------------------------------------------------------------------------*/
- /// update the linearization, accumulating into the given vector
- /** Multi-replica variant of update_linearization() that accumulates the
-  * linearization terms into the caller-supplied vector \p linearization
-  * rather than into v_linearization. This is required for thread-safe
-  * accumulation across OpenMP-parallel scenario loops. */
+ /// adds the derivatives read on one piece to \p linearization
+ /** Calls the getter of each group of assets [see AssetGroup] on the \p
+  * i-th piece [see get_piece()] in \p root, and adds what it answers to the
+  * coefficients of the x variables of the assets of the group.
+  *
+  * @param direction Whether the duals are those of an unbounded dual
+  *        direction [see update_linearization()]: then a group whose getter
+  *        gives no feasibility cut makes this throw. */
 
- void update_linearization( Index sub_block_index ,
-                            std::vector< double > & linearization );
-
-/*--------------------------------------------------------------------------*/
-
- void update_linearization_unit_blocks(
-   Index stage , Index sub_block_index ,
-   const std::vector< std::pair< Index , Index > > & block_indices ,
-   std::vector< double > & linearization );
+ void add_asset_linearization( Index i ,
+                               std::vector< double > & linearization ,
+                               bool direction = false ,
+                               Block * root = nullptr );
 
 /*--------------------------------------------------------------------------*/
+ /// issues a C05FunctionMod about linearizations of the global pool
+ /** Issues, if and how \p issueMod says [see Observer::make_par()], a
+  * C05FunctionMod of the given \p type about the linearizations of the
+  * global pool whose names are in \p which. */
 
- void update_linearization_network_blocks(
-   Index stage , Index sub_block_index ,
-   const std::vector< std::pair< Index , Index > > & line_indices ,
-   std::vector< double > & linearization );
+ void issue_pool_mod( int type , Subset && which , ModParam issueMod );
+
+/*--------------------------------------------------------------------------*/
+ /// issues the C05FunctionMod of a global pool replaced by put_State()
+ /** Tells the Observer, if any, that the linearizations of the global pool
+  * have all been removed, unless \p was_empty, and that those now in it
+  * have been added. */
+
+ void issue_State_mods( bool was_empty );
 
 /*--------------------------------------------------------------------------*/
 
@@ -2935,16 +2870,10 @@ class InvestmentFunction : public C05Function , public Block {
 /*---------------------------- PRIVATE FIELDS  -----------------------------*/
 /*--------------------------------------------------------------------------*/
 
- /// indicates whether each sub-Block is locked
- std::vector< bool > is_locked;
-
- /// this is the waiting time before trying to acquire the lock again
- double waiting_time = 1e-4;
-
  /// global pool of linearizations
  GlobalPool global_pool;
 
- /// mame of the netCDF sub-group containing the inner Block
+ /// name of the netCDF sub-group containing the inner Block
  inline static const std::string BLOCK_NAME = "InnerBlock";
 
 /*--------------------------------------------------------------------------*/
@@ -3000,15 +2929,15 @@ class InvestmentFunction : public C05Function , public Block {
  /// output the values of the active Variable of this InvestmentFunction
  /** This function appends the current values of the active Variable of this
   * InvestmentFunction into the file whose name is given by the parameter
-  * #strOutputFile (if this name is not empty). */
+  * #strOutputFilename (if this name is not empty). */
 
  void output_variable_values( void ) const;
 
 /*--------------------------------------------------------------------------*/
  /// output the current value of this InvestmentFunction
  /** This function appends the value of this InvestmentFunction into the file
-  * whose name is given by the parameter #strOutputFile (if this name is not
-  * empty). */
+  * whose name is given by the parameter #strOutputFilename (if this name is
+  * not empty). */
 
  void output_function_value( void ) const;
 

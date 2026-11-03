@@ -30,14 +30,19 @@ endif ()
 add_executable(${modName}_unit_test test.cpp)
 target_link_libraries(${modName}_unit_test PRIVATE SMS++::InvestmentBlock)
 
-# The instances with an inner Block are solved by a :MILPSolver: without one
-# in the build only the rest is tested. The umbrella adds the Solver after
-# the Block, hence whether MILPSolver is there is asked when the build is
-# generated, not now.
-target_link_libraries(${modName}_unit_test PRIVATE
-        $<TARGET_NAME_IF_EXISTS:SMS++::MILPSolver>)
-target_compile_definitions(${modName}_unit_test PRIVATE
-        $<$<TARGET_EXISTS:SMS++::MILPSolver>:HAVE_MILPSOLVER>)
+# The inner Blocks of the instances are UCBlock, read through the factory,
+# and solved by a :MILPSolver: without either in the build only the rest is
+# tested. The umbrella adds them after this module, hence they are asked for
+# by their option too; they are linked as targets, so that their link options
+# keep their libraries in the program where the linker would drop them
+if (TARGET SMS++::UCBlock OR BUILD_UCBlock)
+    target_link_libraries(${modName}_unit_test PRIVATE SMS++::UCBlock)
+    target_compile_definitions(${modName}_unit_test PRIVATE HAVE_UCBLOCK)
+endif ()
+if (TARGET SMS++::MILPSolver OR BUILD_MILPSolver)
+    target_link_libraries(${modName}_unit_test PRIVATE SMS++::MILPSolver)
+    target_compile_definitions(${modName}_unit_test PRIVATE HAVE_MILPSOLVER)
+endif ()
 
 if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
     # On Windows with shared libraries enabled copies all runtime DLL
@@ -49,6 +54,14 @@ if (WIN32 AND BUILD_SHARED_LIBS AND NOT DEFINED ENV{CONDA_BUILD})
             $<TARGET_FILE_DIR:${modName}_unit_test>
             COMMAND_EXPAND_LISTS
             COMMENT "Copying runtime DLLs next to ${modName}_unit_test.exe")
+    # one link at a time, since two copies of the same DLL into a
+    # directory collide, and Ninja links in parallel
+    get_property(_pools GLOBAL PROPERTY JOB_POOLS)
+    if (NOT _pools MATCHES "smspp_runtime_dlls=")
+        set_property(GLOBAL APPEND PROPERTY JOB_POOLS smspp_runtime_dlls=1)
+    endif ()
+    set_property(TARGET ${modName}_unit_test
+                 PROPERTY JOB_POOL_LINK smspp_runtime_dlls)
 endif ()
 
 # The tester builds its instances in memory and reads its Configuration
