@@ -199,7 +199,7 @@ static void put_uint( netCDF::NcGroup & g , const std::string & n ,
 static void put_names( netCDF::NcGroup & g , const std::string & n ,
 		       const std::vector< std::string > & v )
 {
- auto var = g.addVar( n , netCDF::ncString , g.getDim( "NumAssets" ) );
+ auto var = g.addVar( n , netCDF::NcString() , g.getDim( "NumAssets" ) );
  for( std::size_t i = 0 ; i < v.size() ; ++i )
   var.putVar( { i } , v[ i ] );
  }

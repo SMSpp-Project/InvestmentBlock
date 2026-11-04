@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- the unit test links on Windows, where the DLL of netCDF-C++ does not
+  export the type objects such as `netCDF::ncString`
+
 ## [0.4.0] - 2026-11-03
 
 ### Added
