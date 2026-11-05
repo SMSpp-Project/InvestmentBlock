@@ -1330,21 +1330,6 @@ void InvestmentFunction::read_farkas_linearization( CDASolver * solver ) {
  if( ( ! f_compute_linearization ) || ( ! solver->has_dual_direction() ) )
   return;
 
- /* The multipliers are of use only if they are homogeneous, - A'y and not
-  * c - A'y: with the Objective in them the coefficients of the vertical
-  * linearization all come out zero, the master is handed the empty row
-  * 0 <= - alpha and a problem that has an optimum is reported infeasible.
-  * The constant comes out right either way, which is what makes the mistake
-  * silent. */
-
- if( const auto hd = solver->int_par_str2idx( "intHomogeneousDirection" ) ;
-     ( hd < Inf< Solver::idx_type >() ) && ( ! solver->get_int_par( hd ) ) )
-  throw( std::logic_error(
-   "InvestmentFunction::compute: the Solver of the inner Block returns "
-   "the multipliers of an unbounded dual direction with the Objective "
-   "in them, and no certificate of infeasibility can be read out of "
-   "those: set intHomogeneousDirection to 1 in its configuration" ) );
-
  solver->get_dual_direction();
 
  /* The value of the certificate is one number over the whole inner Block,

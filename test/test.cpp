@@ -71,11 +71,10 @@
  * is said so, with a feasibility cut where the asset can give one, and an
  * unbounded one gives kUnbounded and -Inf. compute() fails rather than give
  * a wrong answer where a unit does not register the setter it is sized by,
- * and throws where the certificate would carry the Objective, leaving the
- * inner Block unlocked, and where the inner Block has no Solver. Removing an
- * active Variable takes its asset and the data of the asset with it; a
- * weight of the inner Block changed after a compute() weights the next; and
- * the global pool, shrunk, says removed only the names past its new size,
+ * and throws where the inner Block has no Solver. Removing an active
+ * Variable takes its asset and the data of the asset with it; a weight of
+ * the inner Block changed after a compute() weights the next; and the
+ * global pool, shrunk, says removed only the names past its new size,
  * while a State of a smaller pool leaves those names empty.
  *
  * The test needs nothing but the module, its dependencies and, for the
@@ -1156,10 +1155,8 @@ static void test_feasibility_cut( void )
 
 /*--------------------------------------------------------------------------*/
 /// compute() fails, rather than giving a wrong answer, where an asset is a
-/// unit whose class does not register the setter it is sized by; it throws
-/// where the certificate of an infeasible inner Block would carry the
-/// Objective, leaving the inner Block unlocked and the Solver with its own
-/// identity, and where the inner Block has no Solver
+/// unit whose class does not register the setter it is sized by, and it
+/// throws where the inner Block has no Solver
 
 static void test_compute_errors( void )
 {
@@ -1179,29 +1176,6 @@ static void test_compute_errors( void )
 	"compute() returns " + std::to_string( status ) );
  delete ib;
 
- ib = load( short_supply( "line" ) , f );
- auto inner = f->get_nested_Block( 0 );
- auto solver = inner->get_registered_solvers().front();
- solver->set_par( solver->int_par_str2idx( "intHomogeneousDirection" ) , 0 );
- void * const id = solver->id();
- static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
- bool threw = false;
- try {
-  f->compute( true );
-  }
- catch( const std::logic_error & ) {
-  threw = true;
-  }
- const bool unlocked = inner->is_owned_by( nullptr );
- check( threw && unlocked && ( solver->id() == id ) ,
-	std::string( "intHomogeneousDirection 0: compute() " ) +
-	( threw ? "throws" : "does not throw" ) +
-	( unlocked ? "" : ", the inner Block left locked" ) +
-	( solver->id() == id ? "" : ", the Solver left with the identity of "
-	  "the function" ) );
- if( unlocked )  // a Block left locked is not destroyed
-  delete ib;
-
  // no IBOCfg.txt, hence no Solver on the inner Block
  ib = dynamic_cast< InvestmentBlock * >(
 		   Block::new_Block( meshed_network( 100 , 0 ) ) );
@@ -1209,7 +1183,7 @@ static void test_compute_errors( void )
  ib->generate_objective();
  f = static_cast< InvestmentFunction * >( ib->get_function() );
  static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
- threw = false;
+ bool threw = false;
  try {
   f->compute( true );
   }

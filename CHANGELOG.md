@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `InvestmentFunction` no longer checks `intHomogeneousDirection` in the
+  `:MILPSolver` of the inner `Block`, which has no effect, the multipliers
+  of the columns of a dual direction being always those of the ray
+
 ### Fixed
 
 - the unit test links on Windows, where the DLL of netCDF-C++ does not
