@@ -538,21 +538,21 @@ public:
  /// returns the lower bound on each Variable
 
  const std::vector< double > & get_variable_lower_bound() const {
-  return v_lower_bound;
+  return( v_lower_bound );
   }
 
 /*--------------------------------------------------------------------------*/
  /// returns the upper bound on each Variable
 
  const std::vector< double > & get_variable_upper_bound() const {
-  return v_upper_bound;
+  return( v_upper_bound );
   }
 
 /*--------------------------------------------------------------------------*/
  /// returns the box constraints on the Variable
 
  const std::vector< BoxConstraint > & get_constraints() const {
-  return v_constraints;
+  return( v_constraints );
   }
 
 /** @} ---------------------------------------------------------------------*/
