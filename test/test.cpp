@@ -614,11 +614,12 @@ static netCDF::NcGroup conversion_nodes( double c )
  }
 
 /*--------------------------------------------------------------------------*/
-/// the InvestmentBlock of the group g, configured by IBOCfg.txt, and its
-/// InvestmentFunction in f
+/// the InvestmentBlock of the group g, configured by the BlockConfig in the
+/// file cfg, and its InvestmentFunction in f
 
 static InvestmentBlock * load( const netCDF::NcGroup & g ,
-			       InvestmentFunction * & f )
+			       InvestmentFunction * & f ,
+			       const std::string & cfg = "IBOCfg.txt" )
 {
  auto ib = dynamic_cast< InvestmentBlock * >( Block::new_Block( g ) );
  if( ! ib )
@@ -627,11 +628,11 @@ static InvestmentBlock * load( const netCDF::NcGroup & g ,
  ib->generate_abstract_variables();
  ib->generate_objective();
 
- auto c = Configuration::deserialize( "IBOCfg.txt" );
+ auto c = Configuration::deserialize( cfg );
  auto bc = dynamic_cast< BlockConfig * >( c );
  if( ! bc ) {
   delete c;
-  throw( std::invalid_argument( "cannot read IBOCfg.txt" ) );
+  throw( std::invalid_argument( "cannot read " + cfg ) );
   }
  bc->apply( ib );
  delete bc;
@@ -1154,6 +1155,33 @@ static void test_feasibility_cut( void )
  }
 
 /*--------------------------------------------------------------------------*/
+/// an InvestmentBlock with no asset over the UCBlock of thermal_bus(),
+/// whose :MILPSolver keeps the integer Variable [see IBOCfg-MIP.txt] and
+/// hence gives no dual solution: the empty linearization needs none, and
+/// the value is that of the UCBlock, the thermal unit at its maximum power
+/// 10 at the price 10 and the slack unit covering the other 40 at 50
+
+static void test_no_asset_milp( void )
+{
+ auto g = new_group( "InvestmentBlock" );
+ g.putAtt( "type" , "InvestmentBlock" );
+ g.addDim( "NumAssets" , 0 );
+ auto u = g.addGroup( "InnerBlock" );
+ u.putAtt( "type" , "UCBlock" );
+ thermal_uc( u );
+
+ InvestmentFunction * f;
+ auto ib = load( g , f , "IBOCfg-MIP.txt" );
+ const auto status = f->compute( true );
+ check( status == Solver::kOK , "no asset and a MILP inner Solver: "
+	"compute() returns " + std::to_string( status ) );
+ check( close( f->get_value() , 10 * 10 + 40 * 50 ) , "no asset and a "
+	"MILP inner Solver: the value is " +
+	std::to_string( f->get_value() ) );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
 /// compute() fails, rather than giving a wrong answer, where an asset is a
 /// unit whose class does not register the setter it is sized by, and it
 /// throws where the inner Block has no Solver
@@ -1593,6 +1621,7 @@ int main( void )
     test_round_trip();
     test_feasibility_cut();
     test_compute_errors();
+    test_no_asset_milp();
     test_unbounded();
     test_remove_variables();
     test_weight_changed();

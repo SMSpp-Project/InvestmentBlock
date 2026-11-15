@@ -1993,7 +1993,12 @@ void InvestmentFunction::update_linearization( Index i , bool direction ) {
  // there is no primal solution to go with it. The Solver is that of the
  // inner Block (of the whole tree, for a TwoStageStochasticBlock), and it
  // writes the solution of all the pieces at once: it is asked for it with
- // the first piece, and the others only read it [see compute_pieces()]
+ // the first piece, and the others only read it [see compute_pieces()].
+ // With no asset the linearization is empty and nothing is read, so the
+ // Solver need not have a dual solution (a MILP has none)
+
+ if( v_asset_type.empty() )
+  return;
 
  const auto solver = get_inner_solver();
 

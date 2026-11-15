@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- an `InvestmentFunction` with no asset no longer fails on an inner
+  `:MILPSolver` that keeps the integer `Variable`, which gives no dual
+  solution: the empty linearization reads nothing out of the `Solver`
+
 - the unit test links on Windows, where the DLL of netCDF-C++ does not
   export the type objects such as `netCDF::ncString`
 
