@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- the installed module `smspp.investmentblock` could not be imported, since
+  its package gave the interface of the module the target of the library by
+  its name in the build tree, which an installed package does not have
+
 - an `InvestmentFunction` with no asset no longer fails on an inner
   `:MILPSolver` that keeps the integer `Variable`, which gives no dual
   solution: the empty linearization reads nothing out of the `Solver`
