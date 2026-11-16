@@ -71,11 +71,10 @@
  * is said so, with a feasibility cut where the asset can give one, and an
  * unbounded one gives kUnbounded and -Inf. compute() fails rather than give
  * a wrong answer where a unit does not register the setter it is sized by,
- * and throws where the certificate would carry the Objective, leaving the
- * inner Block unlocked, and where the inner Block has no Solver. Removing an
- * active Variable takes its asset and the data of the asset with it; a
- * weight of the inner Block changed after a compute() weights the next; and
- * the global pool, shrunk, says removed only the names past its new size,
+ * and throws where the inner Block has no Solver. Removing an active
+ * Variable takes its asset and the data of the asset with it; a weight of
+ * the inner Block changed after a compute() weights the next; and the
+ * global pool, shrunk, says removed only the names past its new size,
  * while a State of a smaller pool leaves those names empty.
  *
  * The test needs nothing but the module, its dependencies and, for the
@@ -199,7 +198,7 @@ static void put_uint( netCDF::NcGroup & g , const std::string & n ,
 static void put_names( netCDF::NcGroup & g , const std::string & n ,
 		       const std::vector< std::string > & v )
 {
- auto var = g.addVar( n , netCDF::ncString , g.getDim( "NumAssets" ) );
+ auto var = g.addVar( n , netCDF::NcString() , g.getDim( "NumAssets" ) );
  for( std::size_t i = 0 ; i < v.size() ; ++i )
   var.putVar( { i } , v[ i ] );
  }
@@ -615,11 +614,12 @@ static netCDF::NcGroup conversion_nodes( double c )
  }
 
 /*--------------------------------------------------------------------------*/
-/// the InvestmentBlock of the group g, configured by IBOCfg.txt, and its
-/// InvestmentFunction in f
+/// the InvestmentBlock of the group g, configured by the BlockConfig in the
+/// file cfg, and its InvestmentFunction in f
 
 static InvestmentBlock * load( const netCDF::NcGroup & g ,
-			       InvestmentFunction * & f )
+			       InvestmentFunction * & f ,
+			       const std::string & cfg = "IBOCfg.txt" )
 {
  auto ib = dynamic_cast< InvestmentBlock * >( Block::new_Block( g ) );
  if( ! ib )
@@ -628,11 +628,11 @@ static InvestmentBlock * load( const netCDF::NcGroup & g ,
  ib->generate_abstract_variables();
  ib->generate_objective();
 
- auto c = Configuration::deserialize( "IBOCfg.txt" );
+ auto c = Configuration::deserialize( cfg );
  auto bc = dynamic_cast< BlockConfig * >( c );
  if( ! bc ) {
   delete c;
-  throw( std::invalid_argument( "cannot read IBOCfg.txt" ) );
+  throw( std::invalid_argument( "cannot read " + cfg ) );
   }
  bc->apply( ib );
  delete bc;
@@ -1155,11 +1155,36 @@ static void test_feasibility_cut( void )
  }
 
 /*--------------------------------------------------------------------------*/
+/// an InvestmentBlock with no asset over the UCBlock of thermal_bus(),
+/// whose :MILPSolver keeps the integer Variable [see IBOCfg-MIP.txt] and
+/// hence gives no dual solution: the empty linearization needs none, and
+/// the value is that of the UCBlock, the thermal unit at its maximum power
+/// 10 at the price 10 and the slack unit covering the other 40 at 50
+
+static void test_no_asset_milp( void )
+{
+ auto g = new_group( "InvestmentBlock" );
+ g.putAtt( "type" , "InvestmentBlock" );
+ g.addDim( "NumAssets" , 0 );
+ auto u = g.addGroup( "InnerBlock" );
+ u.putAtt( "type" , "UCBlock" );
+ thermal_uc( u );
+
+ InvestmentFunction * f;
+ auto ib = load( g , f , "IBOCfg-MIP.txt" );
+ const auto status = f->compute( true );
+ check( status == Solver::kOK , "no asset and a MILP inner Solver: "
+	"compute() returns " + std::to_string( status ) );
+ check( close( f->get_value() , 10 * 10 + 40 * 50 ) , "no asset and a "
+	"MILP inner Solver: the value is " +
+	std::to_string( f->get_value() ) );
+ delete ib;
+ }
+
+/*--------------------------------------------------------------------------*/
 /// compute() fails, rather than giving a wrong answer, where an asset is a
-/// unit whose class does not register the setter it is sized by; it throws
-/// where the certificate of an infeasible inner Block would carry the
-/// Objective, leaving the inner Block unlocked and the Solver with its own
-/// identity, and where the inner Block has no Solver
+/// unit whose class does not register the setter it is sized by, and it
+/// throws where the inner Block has no Solver
 
 static void test_compute_errors( void )
 {
@@ -1179,29 +1204,6 @@ static void test_compute_errors( void )
 	"compute() returns " + std::to_string( status ) );
  delete ib;
 
- ib = load( short_supply( "line" ) , f );
- auto inner = f->get_nested_Block( 0 );
- auto solver = inner->get_registered_solvers().front();
- solver->set_par( solver->int_par_str2idx( "intHomogeneousDirection" ) , 0 );
- void * const id = solver->id();
- static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
- bool threw = false;
- try {
-  f->compute( true );
-  }
- catch( const std::logic_error & ) {
-  threw = true;
-  }
- const bool unlocked = inner->is_owned_by( nullptr );
- check( threw && unlocked && ( solver->id() == id ) ,
-	std::string( "intHomogeneousDirection 0: compute() " ) +
-	( threw ? "throws" : "does not throw" ) +
-	( unlocked ? "" : ", the inner Block left locked" ) +
-	( solver->id() == id ? "" : ", the Solver left with the identity of "
-	  "the function" ) );
- if( unlocked )  // a Block left locked is not destroyed
-  delete ib;
-
  // no IBOCfg.txt, hence no Solver on the inner Block
  ib = dynamic_cast< InvestmentBlock * >(
 		   Block::new_Block( meshed_network( 100 , 0 ) ) );
@@ -1209,7 +1211,7 @@ static void test_compute_errors( void )
  ib->generate_objective();
  f = static_cast< InvestmentFunction * >( ib->get_function() );
  static_cast< ColVariable * >( f->get_active_var( 0 ) )->set_value( 1 );
- threw = false;
+ bool threw = false;
  try {
   f->compute( true );
   }
@@ -1619,6 +1621,7 @@ int main( void )
     test_round_trip();
     test_feasibility_cut();
     test_compute_errors();
+    test_no_asset_milp();
     test_unbounded();
     test_remove_variables();
     test_weight_changed();

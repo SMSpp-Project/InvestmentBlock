@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
+### Changed
+
+- `InvestmentFunction` no longer checks `intHomogeneousDirection` in the
+  `:MILPSolver` of the inner `Block`, which has no effect, the multipliers
+  of the columns of a dual direction being always those of the ray
+
+### Fixed
+
+- the installed module `smspp.investmentblock` could not be imported, since
+  its package gave the interface of the module the target of the library by
+  its name in the build tree, which an installed package does not have
+
+- an `InvestmentFunction` with no asset no longer fails on an inner
+  `:MILPSolver` that keeps the integer `Variable`, which gives no dual
+  solution: the empty linearization reads nothing out of the `Solver`
+
+- the unit test links on Windows, where the DLL of netCDF-C++ does not
+  export the type objects such as `netCDF::ncString`
+
 ## [0.4.0] - 2026-11-03
 
 ### Added
@@ -619,7 +640,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First test release
 
-[Unreleased]: https://gitlab.com/smspp/investmentblock/-/compare/0.4.0...develop
+[Unreleased]: https://gitlab.com/smspp/investmentblock/-/compare/0.5.0...develop
+[0.5.0]: https://gitlab.com/smspp/investmentblock/-/compare/0.4.0...0.5.0
 [0.4.0]: https://gitlab.com/smspp/investmentblock/-/compare/0.3.0...0.4.0
 [0.3.0]: https://gitlab.com/smspp/investmentblock/-/compare/0.2.0...0.3.0
 [0.2.0]: https://gitlab.com/smspp/investmentblock/-/compare/0.1.1...0.2.0
