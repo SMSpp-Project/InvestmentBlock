@@ -213,6 +213,29 @@ static void refuse_component_weight( const netCDF::NcGroup & grp ,
 
 /*--------------------------------------------------------------------------*/
 
+// the box and the integrality of the design Variable, the sense of the
+// objective and the decomposition are read at the root only, for all the
+// components
+
+static void refuse_root_fields( const netCDF::NcGroup & grp ,
+				const std::string & where )
+{
+ for( const char * name : { "LowerBound" , "UpperBound" , "Integer" } )
+  if( ! grp.getVar( name ).isNull() )
+   throw( std::logic_error( "InvestmentBlock::deserialize: " + where +
+			    " has '" + name +
+			    "', which would be ignored: write it at the "
+			    "root" ) );
+ for( const char * name : { "ObjectiveSense" , "ScenarioDecomposition" } )
+  if( ! grp.getDim( name ).isNull() )
+   throw( std::logic_error( "InvestmentBlock::deserialize: " + where +
+			    " has '" + name +
+			    "', which would be ignored: write it at the "
+			    "root" ) );
+ }
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentBlock::wire_component_actives( InvestmentFunction * f ,
                                               Index k )
 {
@@ -636,6 +659,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
 
    refuse_generator( grp_k , "Component_" + std::to_string( k ) );
    refuse_component_weight( grp_k , "Component_" + std::to_string( k ) );
+   refuse_root_fields( grp_k , "Component_" + std::to_string( k ) );
 
    // an inner Block made of Blocks of the class of the methods of the assets
    // is split, one component per such Block [see split_inner()]

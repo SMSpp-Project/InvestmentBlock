@@ -289,7 +289,9 @@ public:
   *   [see add_variation_constraints()].
   *
   * - At the root "NumAssets", "LowerBound", "UpperBound", "Integer" and
-  *   "ScenarioDecomposition", as above. "NumConstraints", the variables
+  *   "ScenarioDecomposition", as above, and only there: a component that
+  *   has any of the last four, or an "ObjectiveSense", is refused.
+  *   "NumConstraints", the variables
   *   "Constraints_*" and an "ObjectiveSense" of size 0 are refused: each
   *   component holds its own linear constraints and is a minimization.
   *
