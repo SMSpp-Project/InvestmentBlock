@@ -197,6 +197,22 @@ static void refuse_generator( const netCDF::NcGroup & grp ,
 
 /*--------------------------------------------------------------------------*/
 
+// the weight of a component is that of the Objective of its inner Block: one
+// in its own group is read as the weight of its function, which add_component()
+// wraps in a Block of weight 1
+
+static void refuse_component_weight( const netCDF::NcGroup & grp ,
+				     const std::string & where )
+{
+ if( ! grp.getAtt( "ObjectiveWeight" ).isNull() )
+  throw( std::logic_error(
+    "InvestmentBlock::deserialize: " + where +
+    " has an 'ObjectiveWeight', which would be ignored: write the "
+    "weight of a component on its 'InnerBlock'" ) );
+ }
+
+/*--------------------------------------------------------------------------*/
+
 void InvestmentBlock::wire_component_actives( InvestmentFunction * f ,
                                               Index k )
 {
@@ -619,6 +635,7 @@ void InvestmentBlock::deserialize( const netCDF::NcGroup & group )
     break;
 
    refuse_generator( grp_k , "Component_" + std::to_string( k ) );
+   refuse_component_weight( grp_k , "Component_" + std::to_string( k ) );
 
    // an inner Block made of Blocks of the class of the methods of the assets
    // is split, one component per such Block [see split_inner()]

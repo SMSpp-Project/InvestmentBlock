@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- the reading of a file refuses an `ObjectiveWeight` in the group of a
+  `Component_<k>`, where it was read as the weight of the function and
+  ignored, the weight of a component being that of its `InnerBlock`
+
 - the makefiles give the shared library of the module by default, a DLL on
   Windows, as CMake does, and its objects with `SMSppSTATIC` [see
   `lib/makefile-shared` of SMS++]

@@ -272,7 +272,8 @@ public:
   *   from 0, each the description of an InvestmentFunction [see
   *   InvestmentFunction::serialize()], which becomes a component weighted by
   *   the weight of the Objective of its inner Block, the attribute
-  *   "ObjectiveWeight" of its group "InnerBlock" [see Block::deserialize()].
+  *   "ObjectiveWeight" of its group "InnerBlock" [see Block::deserialize()];
+  *   one in the group of the component itself is refused.
   *   In each of them the optional variables "AssetVarIndex" and
   *   "AssetBaselineVarIndex", scalar or indexed over its "NumAssets", give
   *   for each asset the index, among the ColVariable of this
